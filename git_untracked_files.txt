@@ -1,0 +1,33 @@
+
+
+
+Initialize Git Repository at: C:\cs\Spectrum_emulator\Jetpac_FreeRange
+Your solution contains files outside the solution folder which will not be managed by Git:
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Jetpac3.Core.fsproj,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Explorer.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\ExecutionTrace.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Hardware.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\DynamicCode.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Reachability.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Checkpoint.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Diagnostics.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Boot.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\LiftedRoutines.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\RoutineAnalyzer.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Profiling.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Differential.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\BeeperWav.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Session.fs,
+C:\cs\Spectrum_emulator\Jetpac4\Jetpac3\src\Jetpac3.Core\Corpus.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Jetpac.Core.fsproj,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Scheduler.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Registers.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Flags.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Memory.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Alu.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Z80.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Z80Ops.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Video.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Keyboard.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Tape.fs,
+C:\cs\Spectrum_emulator\Jetpac4\JetpacFSharp\src\Jetpac.Core\Spectrum.fs

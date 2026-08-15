@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Jetpac2.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Keyboard.fs" />
+    <Compile Include="Timing.fs" />
+    <Compile Include="Screen.fs" />
+    <Compile Include="Machine.fs" />
+    <Compile Include="Beeper.fs" />
+    <Compile Include="Data.fs" />
+    <Compile Include="Generated.fs" />
+    <Compile Include="EmbeddedFixture.fs" />
+    <Compile Include="RomServices.fs" />
+    <Compile Include="Semantic.fs" />
+    <Compile Include="Game.fs" />
+  </ItemGroup>
+
+</Project>

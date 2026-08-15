@@ -1,0 +1,108 @@
+Jetpac Free-Range Reversing Lab (JetpacFR)
+==========================================
+Goal: turn the Jetpac3 decompilation pipeline (trace -> pick routines ->
+prompt a model -> model writes F#) into a visual, interactive WPF workshop.
+All new code lives in this directory (Jetpac_FreeRange). Reuses projects
+one level up: Jetpac3.Core (Session/RoutineAnalyzer/Profiling/Explorer/
+DynamicCode/Checkpoint/Differential/LiftedRoutines), Jetpac2 Jetpac.Core
+(Machine), JetpacFSharp Jetpac.Core (oracle Spectrum48), NAudio 2.2.1.
+
+Assets (48.rom, Jetpac.tzx) already copied to assets/ — the Jetpac3 asset
+resolver only walks up looking for a "Jetpac4" directory, so it cannot see
+them from here; the app passes explicit paths to Session.
+
+Pipeline (5 stages, each with a visualization)
+-----------------------------------------------
+0. Active trace - "Trace Cinema"
+   - Port machine runs lockstep with the oracle every frame (Differential
+     already proves this is fast). TraceRecorder writes compact entries
+     into a preallocated ring buffer: PC, executed bytes, cycle delta,
+     flags, branch taken; side streams: memory writes, port OUTs, periodic
+     register snapshots. Zero per-instruction allocation.
+   - View: disassembly stream w/ live register operands, register board,
+     stack view, scrubber timeline (density heat), step 1/10/100, play/
+     pause/seek. Requires a real Z80 disassembler (none exists anywhere
+     in the tree - new Disasm.fs, table-driven, corpus-tested).
+   - 64K heatmap: address space as 256x256 pixels, log execution count,
+     click hot cell -> jump cinema. Function extents overlay later.
+1. Function mining
+   - Offline from trace: RET back-chaining -> CALL sites -> entries; call
+     depth -> exclusive spans + inclusive/exclusive T-states; backward JR
+     edges -> loop bodies; writes into code ranges -> self-modifying;
+     per-callsite input-state samples.
+   - View: call graph (Canvas, node size = inclusive T-states, color =
+     risk), sortable function table (calls/T-states/span/writes/risk),
+     heatmap overlays.
+2. Selection - "lift queue"
+   - Click functions in graph/table/heatmap -> tray of cards w/ mini-stats.
+     Auto-suggest next by lift score (RoutineProfiler risk model, fed
+     dynamic data).
+3. Contract extraction
+   - Oracle trace-verify per selected function (multi-entry/multi-resume):
+     contract card = disasm w/ per-instruction execution counts, annotated
+     write-range hexdump, register before/after, timing expected vs
+     measured, self-modifying flag, sample input states, auto-detected
+     Machine API usage (which Fetch/ReadImm/Alu.*/Write members used).
+4. Prompt factory
+   - One self-contained markdown prompt per function -> prompts/<name>.md
+     + Copy button. Contents: task, exact disasm, behavioral contract,
+     trace evidence (loop counts, callsites, input samples), Jetpac2.Core
+     Machine API reference, LiftedRoutines.fs conventions (instruction-
+     granular dispatch, R-register fidelity, interrupt safety), style
+     rules (idiomatic F#, no .[ ] array syntax), acceptance criteria
+     (differential 300 frames, 0 diffs). Designed to be pasted into the
+     model chat as a follow-up prompt.
+5. Validation loop - "Differential Theater"
+   - Paste model's F# back -> Lifted/<name>.fs, wire into project, rebuild.
+   - Per-routine differential run; on divergence: side-by-side oracle vs
+     port disassembly of the divergent frame, both register states,
+     event-level diff (TimedEvents.firstDifference), red flash on the
+     exact instruction. Live diff meter (green/red per frame) during any
+     play.
+
+Built-in extras (confirmed)
+   - Differential theater (core of stage 5)
+   - "Ship it": Jetpac ship flies across screen + achievements ("First
+     lift", "Self-modifying spotted", "10K instructions traced")
+   - Time-travel rewind: hold key -> nearest checkpoint + fast replay
+
+Projects (user creates these per standing rule; references added in VS)
+-------------------------------------------------------------------------
+  dotnet new sln -n JetpacFR
+  dotnet new classlib -lang F# -n JetpacFR.Core -o src/JetpacFR.Core --framework netstandard2.0
+  dotnet new wpf -lang F# -n JetpacFR.Desktop -o src/JetpacFR.Desktop --framework net8.0
+  dotnet new console -lang F# -n JetpacFR.Core.Tests -o tests/JetpacFR.Core.Tests
+  dotnet sln add src/JetpacFR.Core src/JetpacFR.Desktop tests/JetpacFR.Core.Tests
+References (in VS):
+  JetpacFR.Core    -> Jetpac3.Core
+  JetpacFR.Desktop -> JetpacFR.Core, Jetpac3.Core, Jetpac2 Jetpac.Core,
+                      JetpacFSharp Jetpac.Core, NuGet NAudio 2.2.1
+  Tests            -> JetpacFR.Core
+
+Core modules (JetpacFR.Core, netstandard2.0)
+  Disasm.fs      full Z80 disassembler (base/CB/ED/DD/FD) -> text+length+cycles
+  Trace.fs       TraceRecorder ring buffer, trace codec (save/load), stats
+  Miner.fs       dynamic function detection, call graph, spans, loops
+  Contract.fs    multi-entry contract extraction + API usage hints
+  Prompt.fs      markdown prompt generator
+  Validation.fs  lockstep runner w/ divergence capture for the theater
+
+Tests (headless console, mirrors Jetpac3.Core.Tests)
+  - disassembler corpus (decode every byte of game code 0x6000-0x7FFF,
+    cross-check lengths against DynamicDecoder, no runaway decodes)
+  - trace codec roundtrip byte-identical
+  - miner on synthetic traces with known call structure
+  - contract extraction on screenClear 0x71B8 (writes/timing/regs)
+  - prompt golden checks (contains disasm, write ranges, API section)
+
+Phasing
+  1. Disasm + TraceRecorder + heatmap + cinema (playback of recorded trace)
+  2. Miner + call graph + function table + selection tray
+  3. Contract cards + prompt generator + prompts/ + copy
+  4. Validation theater + ship-it/achievements + time-travel rewind + polish
+
+Acceptance: app boots to game from assets/, records a playable trace in
+real time, cinema plays it back (step/seek/play), heatmap shows hot code,
+miner finds screenClear + its loop, selecting it produces a contract card
+and a paste-ready F# prompt, and pasting a correct routine back passes
+the per-routine differential with 0 diffs.

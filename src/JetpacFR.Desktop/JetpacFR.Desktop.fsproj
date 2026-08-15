@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="App.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JetpacFR.Core\JetpacFR.Core.fsproj" />
+    <ProjectReference Include="..\..\..\Jetpac4\Jetpac3\src\Jetpac3.Core\Jetpac3.Core.fsproj" />
+    <ProjectReference Include="..\..\..\Jetpac4\Jetpac2\src\Jetpac.Core\Jetpac.Core.fsproj" />
+    <ProjectReference Include="..\..\..\Jetpac4\JetpacFSharp\src\Jetpac.Core\Jetpac.Core.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>

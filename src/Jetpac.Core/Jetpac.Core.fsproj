@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Scheduler.fs" />
+    <Compile Include="Registers.fs" />
+    <Compile Include="Flags.fs" />
+    <Compile Include="Memory.fs" />
+    <Compile Include="Alu.fs" />
+    <Compile Include="Z80.fs" />
+    <Compile Include="Z80Ops.fs" />
+    <Compile Include="Video.fs" />
+    <Compile Include="Keyboard.fs" />
+    <Compile Include="Tape.fs" />
+    <Compile Include="Spectrum.fs" />
+  </ItemGroup>
+
+</Project>

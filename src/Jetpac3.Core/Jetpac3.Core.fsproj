@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Jetpac3.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Explorer.fs" />
+    <Compile Include="ExecutionTrace.fs" />
+    <Compile Include="Hardware.fs" />
+    <Compile Include="DynamicCode.fs" />
+    <Compile Include="Reachability.fs" />
+    <Compile Include="Checkpoint.fs" />
+    <Compile Include="Diagnostics.fs" />
+    <Compile Include="Boot.fs" />
+    <Compile Include="LiftedRoutines.fs" />
+    <Compile Include="RoutineAnalyzer.fs" />
+    <Compile Include="Profiling.fs" />
+    <Compile Include="Differential.fs" />
+    <Compile Include="BeeperWav.fs" />
+    <Compile Include="Session.fs" />
+    <Compile Include="Corpus.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Jetpac.Core/Jetpac.Core.fsproj" />
+    <ProjectReference Include="../Jetpac2.Core/Jetpac2.Core.fsproj" />  //izbrisao
+
+  </ItemGroup>
+
+</Project>
