@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\Jetpac4\Jetpac3\src\Jetpac3.Core\Jetpac3.Core.fsproj" />
+    <ProjectReference Include="..\Jetpac3.Core\Jetpac3.Core.fsproj" />
   </ItemGroup>
 
 </Project>

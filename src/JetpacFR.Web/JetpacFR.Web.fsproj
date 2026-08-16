@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>JetpacFR.Web</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embedded assets + warm-start seed (base64 literals) -->
+    <Compile Include="Embedded.fs" />
+    <!-- Jetpac.Core oracle (same file set JetpacFSharp compiles) -->
+    <Compile Include="../Jetpac.Core/Scheduler.fs" />
+    <Compile Include="../Jetpac.Core/Registers.fs" />
+    <Compile Include="../Jetpac.Core/Flags.fs" />
+    <Compile Include="../Jetpac.Core/Memory.fs" />
+    <Compile Include="../Jetpac.Core/Alu.fs" />
+    <Compile Include="../Jetpac.Core/Z80.fs" />
+    <Compile Include="../Jetpac.Core/Z80Ops.fs" />
+    <Compile Include="../Jetpac.Core/Video.fs" />
+    <Compile Include="../Jetpac.Core/Keyboard.fs" />
+    <Compile Include="../Jetpac.Core/Tape.fs" />
+    <Compile Include="../Jetpac.Core/Spectrum.fs" />
+    <!-- Jetpac2 port machine (Fable-clean subset; Game/Semantic/Data/RomServices/
+         EmbeddedFixture are game-product layers the FR shells do not use) -->
+    <Compile Include="../Jetpac2.Core/Keyboard.fs" />
+    <Compile Include="../Jetpac2.Core/Timing.fs" />
+    <Compile Include="../Jetpac2.Core/Screen.fs" />
+    <Compile Include="../Jetpac2.Core/Machine.fs" />
+    <Compile Include="../Jetpac2.Core/Beeper.fs" />
+    <Compile Include="../Jetpac2.Core/Generated.fs" />
+    <!-- Jetpac3.Core: ExecutionMode + lifted registry verbatim; Boot/Script are
+         web shims (originals are file-IO bound) -->
+    <Compile Include="../Jetpac3.Core/Explorer.fs" />
+    <Compile Include="BootWeb.fs" />
+    <Compile Include="ScriptWeb.fs" />
+    <Compile Include="../Jetpac3.Core/LiftedRoutines.fs" />
+    <!-- JetpacFR.Core: Fable-clean subset verbatim; TraceTypes/Session/TraceCodec
+         are web shims (originals use System.IO/Marshal) -->
+    <Compile Include="TraceTypesWeb.fs" />
+    <Compile Include="../JetpacFR.Core/Disasm.fs" />
+    <Compile Include="SessionWeb.fs" />
+    <Compile Include="../JetpacFR.Core/Miner.fs" />
+    <Compile Include="../JetpacFR.Core/Contract.fs" />
+    <Compile Include="../JetpacFR.Core/Prompt.fs" />
+    <Compile Include="../JetpacFR.Core/Validation.fs" />
+    <Compile Include="TraceCodecWeb.fs" />
+    <!-- The shell UI -->
+    <Compile Include="App.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fable.Core" Version="5.2.0" />
+  </ItemGroup>
+
+</Project>

@@ -253,6 +253,23 @@ module Disasm =
       let len = baseLen op2 + 0
       { Text = renderBase get pc None; Length = len }
 
+  /// Instruction length only — no mnemonic rendering, no closures. The
+  /// recorder's hot path calls this for every executed instruction; the
+  /// rendered text is produced on demand for the cinema and contract views.
+  /// Mirrors `decode`'s prefix logic without any string or lambda work.
+  let disasmLength (memory: byte[]) (address: int) : int =
+    let pc = address &&& 0xFFFF
+    let op = int memory[pc]
+    match op with
+    | 0xDD | 0xFD ->
+      let inner = int memory[(pc + 1) &&& 0xFFFF]
+      if inner = 0xCB then 4
+      elif inner = 0xED then edLen inner + 1
+      else baseLen inner + (if usesHlMem inner then 1 else 0) + 1
+    | 0xCB -> 2
+    | 0xED -> edLen (int memory[(pc + 1) &&& 0xFFFF])
+    | _ -> baseLen op
+
   /// Disassemble one instruction at `address` in a 64K memory image.
   let disasmMemory (memory: byte[]) (address: int) : Insn =
     let get (a: int) = memory[a &&& 0xFFFF]

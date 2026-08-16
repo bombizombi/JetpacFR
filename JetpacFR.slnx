@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Jetpac2.Core/Jetpac2.Core.fsproj" />
     <Project Path="src/Jetpac3.Core/Jetpac3.Core.fsproj" />
     <Project Path="src/Jetpac.Core/Jetpac.Core.fsproj" />
     <Project Path="src/JetpacFR.Core/JetpacFR.Core.fsproj" />
     <Project Path="src/JetpacFR.Desktop/JetpacFR.Desktop.fsproj" />
+    <Project Path="src/JetpacFR.Web/JetpacFR.Web.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/JetpacFR.Core.Tests/JetpacFR.Core.Tests.fsproj" />

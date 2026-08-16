@@ -156,6 +156,8 @@ type MainWindow() as self =
   let theaterText = TextBlock()
   let validateBtn = Button(Content = "Validate selected")
   let stageBtn = Button(Content = "Stage to Lifted/")
+  let queuePromptsBtn = Button(Content = "Prompts for queue")
+  let validateQueueBtn = Button(Content = "Validate queue")
 
   let keyMap (key: Key) : (int * int) list =
     match key with
@@ -310,6 +312,17 @@ type MainWindow() as self =
       | Some s -> s.Recorder.SelfModified
       | None -> Array.zeroCreate<bool> 0x10000
 
+  /// Live per-PC counts: the recorder's window while playing, the loaded
+  /// trace's otherwise. Never triggers a trace build (the heatmap refreshes
+  /// at 10 Hz during recording; rebuilding 68 MB per tick would be ~680 MB/s).
+  let currentCounts () : int[] =
+    match loaded with
+    | Some t -> t.PerPcCount
+    | None ->
+      match session with
+      | Some s -> s.Recorder.PerPcCount
+      | None -> Array.zeroCreate<int> 0x10000
+
   let rowFor (t: Trace) (e: TraceEntry) (idx: int) (isCurrent: bool) : DisasmRow =
     if e.Length = 0uy then
       { Tag = sprintf "%07d  ----  INT -> %04X   (%d tstates)" idx e.Target e.Cycles
@@ -327,12 +340,16 @@ type MainWindow() as self =
         else ""
       let sm =
         if (currentSelfModified ())[int e.Pc] then "   [self-mod]" else ""
+      let lifted =
+        match Jetpac3.Core.LiftedRoutines.registryHook (int e.Pc) with
+        | Some _ -> "   [lift]"
+        | None -> ""
       let brush =
         if isCall e.B0 then cyan
         elif isRet e.B0 then yellow
         elif isBranch e.B0 then green
         else normal
-      { Tag = sprintf "%07d  %04X  %-11s  %s%s%s" idx e.Pc hex insn.Text tail sm
+      { Tag = sprintf "%07d  %04X  %-11s  %s%s%s%s" idx e.Pc hex insn.Text tail sm lifted
         Brush = brush
         IsCurrent = isCurrent }
 
@@ -397,10 +414,7 @@ type MainWindow() as self =
     | _ -> normal
 
   let refreshHeatmap () =
-    let counts =
-      match currentTrace () with
-      | Some t -> t.PerPcCount
-      | None -> Array.zeroCreate<int> 0x10000
+    let counts = currentCounts ()
     let selfMod = currentSelfModified ()
     let maxC = max 1 (Array.max counts)
     let logMax = log10 (float maxC)
@@ -959,10 +973,15 @@ type MainWindow() as self =
 
     let theaterTab = TabItem(Header = "Theater")
     let theaterPanel = DockPanel()
-    let theaterTop = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
-    validateBtn.Margin <- Thickness(0.0, 0.0, 4.0, 0.0)
+    let theaterTop = WrapPanel(Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+    validateBtn.Margin <- Thickness(0.0, 0.0, 4.0, 2.0)
     theaterTop.Children.Add validateBtn |> ignore
+    stageBtn.Margin <- Thickness(0.0, 0.0, 4.0, 2.0)
     theaterTop.Children.Add stageBtn |> ignore
+    queuePromptsBtn.Margin <- Thickness(0.0, 0.0, 4.0, 2.0)
+    theaterTop.Children.Add queuePromptsBtn |> ignore
+    validateQueueBtn.Margin <- Thickness(0.0, 0.0, 4.0, 2.0)
+    theaterTop.Children.Add validateQueueBtn |> ignore
     DockPanel.SetDock(theaterTop, Dock.Top)
     theaterPanel.Children.Add theaterTop |> ignore
     pasteBox.AcceptsReturn <- true
@@ -1095,6 +1114,90 @@ type MainWindow() as self =
           |> ignore
       | None, _ -> theaterText.Text <- "select a mined routine to validate"
       | _ -> theaterText.Text <- "emulator not ready")
+
+    queuePromptsBtn.Click.Add(fun _ ->
+      if Set.isEmpty selectedEntries then
+        theaterText.Text <- "fill the lift queue first (click routines in the Functions tab)"
+      else
+        match session, currentTrace () with
+        | Some s, Some t when t.Entries.Length > 0 ->
+          let dir = Path.Combine(Directory.GetCurrentDirectory(), "prompts")
+          Directory.CreateDirectory dir |> ignore
+          let pcCycles = getPcCycles ()
+          let saved = ResizeArray<string>()
+          for entry in selectedEntries |> Set.toList do
+            match minedRoutines |> List.tryFind (fun r -> r.Entry = entry) with
+            | Some r ->
+              let contract = Contract.extract s.Memory t r pcCycles
+              let prompt = Prompt.generate contract
+              let path = Path.Combine(dir, sprintf "fn%04X.md" entry)
+              File.WriteAllText(path, prompt)
+              saved.Add(sprintf "%04X" entry)
+            | None -> ()
+          statusText.Text <- sprintf "saved %d prompts to %s" saved.Count dir
+          theaterText.Text <-
+            sprintf "saved %d prompts to %s:\n%s"
+              saved.Count dir (String.concat ", " saved)
+        | _ -> theaterText.Text <- "no trace to extract from")
+
+    validateQueueBtn.Click.Add(fun _ ->
+      if Set.isEmpty selectedEntries then
+        theaterText.Text <- "fill the lift queue first (click routines in the Functions tab)"
+      else
+        let queued = selectedEntries |> Set.toList
+        let covered =
+          queued
+          |> List.filter (fun e ->
+            match Jetpac3.Core.LiftedRoutines.registryHook e with
+            | Some _ -> true
+            | None -> false)
+        if List.isEmpty covered then
+          theaterText.Text <-
+            "none of the queued routines are in the lifted registry yet: "
+            + (queued |> List.map (sprintf "%04X") |> String.concat ", ")
+            + "\n\nLift them first (prompt -> stage -> wire into Jetpac3.Core -> rebuild)."
+        else
+          let framesN = 300
+          let script = Jetpac3.Core.Script.defaultSession framesN
+          let rom = LocalAssets.find "48.rom"
+          let tzx = LocalAssets.find "Jetpac.tzx"
+          theaterText.Text <-
+            sprintf "validating queue (%d of %d queued covered by the registry) over %d frames..."
+              covered.Length queued.Length framesN
+          let task =
+            System.Threading.Tasks.Task.Run(fun () ->
+              Validation.run rom tzx framesN script
+                Jetpac3.Core.LiftedRoutines.registryHook
+                System.Threading.CancellationToken.None)
+          task.ContinueWith(fun (t: System.Threading.Tasks.Task<Validation.Report>) ->
+            self.Dispatcher.Invoke(System.Action(fun () ->
+              if t.IsFaulted then
+                theaterText.Text <- "queue validation crashed: " + t.Exception.Message
+              else
+                let rep = t.Result
+                let sb = System.Text.StringBuilder()
+                sb.AppendLine(sprintf "QUEUE VALIDATION: %d frames" rep.Frames) |> ignore
+                for e in queued do
+                  match minedRoutines |> List.tryFind (fun r -> r.Entry = e) with
+                  | None -> sb.AppendLine(sprintf "%04X  skipped (not mined)" e) |> ignore
+                  | Some r ->
+                    let inRegistry =
+                      match Jetpac3.Core.LiftedRoutines.registryHook e with
+                      | Some _ -> true
+                      | None -> false
+                    if not inRegistry then
+                      sb.AppendLine(sprintf "%04X  NOT LIFTED (not in registry)" e) |> ignore
+                    elif rep.Passed then
+                      sb.AppendLine(sprintf "%04X  PASSED" e) |> ignore
+                    else
+                      match rep.FirstDivergence with
+                      | Some d when d.Address >= r.SpanLo && d.Address <= r.SpanHi ->
+                        sb.AppendLine(sprintf "%04X  FAILED: divergence inside its span at frame %d (%s)" e d.Frame d.Kind) |> ignore
+                      | Some d ->
+                        sb.AppendLine(sprintf "%04X  PASSED (divergence is outside its span: %04X %s)" e d.Address d.Kind) |> ignore
+                      | None -> sb.AppendLine(sprintf "%04X  FAILED (no divergence details)" e) |> ignore
+                theaterText.Text <- sb.ToString())))
+          |> ignore)
 
     let sep = Border(Width = 1.0, Height = 24.0, Background = dim, Margin = Thickness(8.0, 0.0, 8.0, 0.0))
 

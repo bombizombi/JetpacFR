@@ -1,71 +1,65 @@
 namespace JetpacFR.Core
 
+/// WEB SHELL SHIM (JetpacFR.Web): browser equivalents of the file-IO parts of
+/// JetpacFR.Core/Session.fs. EntryCache persists the game-entry snapshot in
+/// browser localStorage (the desktop writes entry-cache/ files); TraceSession
+/// is the Core engine verbatim, constructed from byte[] assets instead of paths.
 open System
-open System.IO
+open Fable.Core
+open Fable.Core.JsInterop
 
-/// Locate assets by walking up from the app base directory to the first
-/// directory containing an assets folder with the requested file. The Jetpac3
-/// resolver only searches for a "Jetpac4" ancestor, which this project (in
-/// Jetpac_FreeRange) never has.
-module LocalAssets =
-  let find (name: string) : string =
-    let rec walk (dir: DirectoryInfo) =
-      let candidate = Path.Combine(dir.FullName, "assets", name)
-      if File.Exists candidate then candidate
-      else
-        match dir.Parent with
-        | null -> failwithf "asset %s not found; searched up from %s" name AppContext.BaseDirectory
-        | parent -> walk parent
-    walk (DirectoryInfo AppContext.BaseDirectory)
+/// Stable 32-bit FNV-1a over the asset bytes, hex (marker stability only; the
+/// desktop uses real sha256 but the marker is never cross-checked between the
+/// two shells).
+module private AssetHash =
+  let ofBytes (b: byte[]) : string =
+    let mutable h = 0x811C9DC5
+    for i in 0 .. b.Length - 1 do
+      h <- (h ^^^ int b[i]) * 0x01000193
+      h <- h &&& 0xFFFFFFFF
+    h.ToString("x8")
 
-/// Persistent game-entry state. The first launch boots the oracle to the game
-/// entry (the slow part) and saves memory.bin + state.txt next to the app;
-/// subsequent launches load that state straight into the port machine, which
-/// is exact because the entry state is a full 64K memory + register snapshot.
-/// The cache is keyed by the ROM/TZX hashes so a changed game invalidates it.
 module EntryCache =
 
-  let private dir = Path.Combine(AppContext.BaseDirectory, "entry-cache")
-  let private memoryPath = Path.Combine(dir, "memory.bin")
-  let private statePath = Path.Combine(dir, "state.txt")
-  let private metaPath = Path.Combine(dir, "meta.txt")
-
-  let private sha256 (bytes: byte[]) =
-    use sha = System.Security.Cryptography.SHA256.Create()
-    sha.ComputeHash bytes |> Array.map (fun b -> b.ToString("x2")) |> String.concat ""
+  let private storage: obj = emitJsExpr () "window.localStorage"
+  let private memKey = "jetpacfr.entry.v1.mem"
+  let private stateKey = "jetpacfr.entry.v1.state"
+  let private metaKey = "jetpacfr.entry.v1.meta"
 
   let private marker (romPath: string) (tzxPath: string) =
-    sprintf "rom=%s\ntzx=%s\n" (sha256 (File.ReadAllBytes romPath)) (sha256 (File.ReadAllBytes tzxPath))
+    sprintf "rom=%s\ntzx=%s" (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider romPath))
+      (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider tzxPath))
 
-  /// Some(mem, state) when a cache exists, matches the current assets, and is
-  /// structurally intact; None otherwise (cold boot needed).
+  let private getItem (key: string) : string option =
+    let v: obj = storage?getItem(key)
+    if isNull v then None else Some (unbox<string> v)
+
+  /// Some(mem, state) when localStorage holds a cache matching the current
+  /// assets and it decodes to a full 64K image; None otherwise (cold boot).
   let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
     try
-      if File.Exists memoryPath && File.Exists statePath && File.Exists metaPath then
-        let current = marker romPath tzxPath
-        let stored = File.ReadAllText metaPath
-        if stored = current then
-          let mem = File.ReadAllBytes memoryPath
-          if mem.Length = 0x10000 then Some(mem, File.ReadAllText statePath)
-          else None
-        else None
-      else None
+      match getItem metaKey with
+      | Some m when m = marker romPath tzxPath ->
+        match getItem memKey, getItem stateKey with
+        | Some memB64, Some state ->
+          let mem = System.Convert.FromBase64String memB64
+          if mem.Length = 0x10000 then Some (mem, state) else None
+        | _ -> None
+      | _ -> None
     with _ -> None
 
   let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
     try
-      Directory.CreateDirectory dir |> ignore
-      File.WriteAllBytes(memoryPath, mem)
-      File.WriteAllText(statePath, state)
-      File.WriteAllText(metaPath, marker romPath tzxPath)
-    with _ -> () // the cache is an optimization; a failed write must not break startup
+      storage?setItem(metaKey, marker romPath tzxPath)
+      storage?setItem(memKey, System.Convert.ToBase64String mem)
+      storage?setItem(stateKey, state)
+    with _ -> () // the cache is an optimization; quota failures must not break startup
 
-/// The engine: the Jetpac2 port machine driven instruction-by-instruction,
-/// recording every step into a TraceRecorder. The JetpacFSharp oracle is only
-/// involved on a cold start (boot to the game entry, then cache the state);
-/// after that the port runs alone, so the screen, the sound and the trace all
-/// describe the same execution.
-type TraceSession(romPath: string, tzxPath: string, capacity: int) =
+type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
+  // Web: assets arrive as byte arrays (embedded base64). EntryCache/Boot use the
+  // fixed asset keys "rom"/"tzx", resolved by Boot.AssetProvider.
+  let romPath = "rom"
+  let tzxPath = "tzx"
 
   let port = Jetpac2.Core.Machine()
   let recorder = TraceRecorder(capacity, 512)
@@ -114,10 +108,6 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
 
   do
     Jetpac2.Core.Generated.EnsureInstalled()
-    // Run lifted routines in the live session too: per-address dispatch, so
-    // each Step still executes one logical instruction and the trace records
-    // exactly what ran (same bytes/lengths as the generated layer).
-    port.Override <- Jetpac3.Core.LiftedRoutines.registryHook
     port.AddMemoryWriteHandler(fun e ->
       recorder.RecordWrite
         { Tick = uint32 e.Tick
@@ -191,11 +181,11 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
             FlagsBefore = uint8 flagsBefore
             FlagsAfter = uint8 flagsBefore
             Taken = 1uy }
-        let vinsnLen = Disasm.disasmLength port.Memory vector
+        let vinsn = Disasm.disasmMemory port.Memory vector
         port.Step()
         let after = port.Regs.Pc()
         let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (vector + vinsnLen) &&& 0xFFFF
+        let next = (vector + vinsn.Length) &&& 0xFFFF
         let m = port.Memory
         recorder.Record
           { Pc = uint16 vector
@@ -205,17 +195,17 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
             B3 = m[(vector + 3) &&& 0xFFFF]
             Target = uint16 after
             Tick = uint32 cyclesBefore
-            Length = uint8 vinsnLen
+            Length = uint8 vinsn.Length
             Cycles = uint8 (min 255 cycles)
             FlagsBefore = uint8 flagsBefore
             FlagsAfter = uint8 (port.Flags().ToU8())
             Taken = (if after <> next then 1uy else 0uy) }
       else
-        let insnLen = Disasm.disasmLength port.Memory pc
+        let insn = Disasm.disasmMemory port.Memory pc
         port.Step()
         let after = port.Regs.Pc()
         let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (pc + insnLen) &&& 0xFFFF
+        let next = (pc + insn.Length) &&& 0xFFFF
         let m = port.Memory
         recorder.Record
           { Pc = uint16 pc
@@ -225,7 +215,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
             B3 = m[(pc + 3) &&& 0xFFFF]
             Target = uint16 after
             Tick = uint32 cyclesBefore
-            Length = uint8 insnLen
+            Length = uint8 insn.Length
             Cycles = uint8 (min 255 cycles)
             FlagsBefore = uint8 flagsBefore
             FlagsAfter = uint8 (port.Flags().ToU8())

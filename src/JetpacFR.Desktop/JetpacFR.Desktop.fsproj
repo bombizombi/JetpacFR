@@ -12,9 +12,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\JetpacFR.Core\JetpacFR.Core.fsproj" />
-    <ProjectReference Include="..\..\..\Jetpac4\Jetpac3\src\Jetpac3.Core\Jetpac3.Core.fsproj" />
-    <ProjectReference Include="..\..\..\Jetpac4\Jetpac2\src\Jetpac.Core\Jetpac.Core.fsproj" />
-    <ProjectReference Include="..\..\..\Jetpac4\JetpacFSharp\src\Jetpac.Core\Jetpac.Core.fsproj" />
+    <ProjectReference Include="..\Jetpac3.Core\Jetpac3.Core.fsproj" />
+    <ProjectReference Include="..\Jetpac2.Core\Jetpac2.Core.fsproj" />
+    <ProjectReference Include="..\Jetpac.Core\Jetpac.Core.fsproj" />
   </ItemGroup>
 
   <ItemGroup>

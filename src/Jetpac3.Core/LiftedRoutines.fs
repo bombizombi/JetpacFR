@@ -359,7 +359,155 @@ module LiftedRoutines =
       Execute = screenClear71CF
       ImplementationMode = Lifted }
 
-  let registry = [ screenClearRoutine; screenClear71CFRoutine ]
+  /// 0x72EE-0x7302 — step a screen address in HL up one character row:
+  /// DEC H, and when the low 3 bits wrap (H was a multiple of 8), move L back
+  /// 0x20 and adjust H by 0x08 unless L underflowed. Translated 1:1 from the
+  /// generated table (byte-for-byte fetches, exact PassTime). The hottest
+  /// routine in the game: ~35k calls per trace window, so its timing must be
+  /// exact.
+  let screenStep (m: Machine) =
+    match m.Regs.Pc() with
+    | 0x72EE ->
+      // DEC H
+      m.Fetch()
+      let struct (r, f) = Alu.dec8 (m.Regs.Get R8.H) (m.Flags())
+      m.Regs.Set(R8.H, r)
+      m.SetFlags f
+    | 0x72EF ->
+      // LD A,H
+      m.Fetch()
+      m.Regs.Set(R8.A, m.Regs.Get R8.H)
+    | 0x72F0 ->
+      // AND 0x07
+      m.Fetch()
+      let struct (r, f) = Alu.and8 (m.Regs.Get R8.A) (m.ReadImm())
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x72F2 ->
+      // CP 0x07
+      m.Fetch()
+      let struct (r, f) = Alu.cmp8 (m.Regs.Get R8.A) (m.ReadImm())
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x72F4 ->
+      // RET NZ
+      m.Fetch()
+      m.PassTime 1
+      if not (m.Flags().zero) then
+        m.Regs.SetPc(m.Pop16())
+    | 0x72F5 ->
+      // LD A,L
+      m.Fetch()
+      m.Regs.Set(R8.A, m.Regs.Get R8.L)
+    | 0x72F6 ->
+      // SUB 0x20
+      m.Fetch()
+      let struct (r, f) = Alu.sub8 (m.Regs.Get R8.A) (m.ReadImm()) false
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x72F8 ->
+      // LD L,A
+      m.Fetch()
+      m.Regs.Set(R8.L, m.Regs.Get R8.A)
+    | 0x72F9 ->
+      // AND 0xE0
+      m.Fetch()
+      let struct (r, f) = Alu.and8 (m.Regs.Get R8.A) (m.ReadImm())
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x72FB ->
+      // CP 0xE0
+      m.Fetch()
+      let struct (r, f) = Alu.cmp8 (m.Regs.Get R8.A) (m.ReadImm())
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x72FD ->
+      // RET Z
+      m.Fetch()
+      m.PassTime 1
+      if m.Flags().zero then
+        m.Regs.SetPc(m.Pop16())
+    | 0x72FE ->
+      // LD A,H
+      m.Fetch()
+      m.Regs.Set(R8.A, m.Regs.Get R8.H)
+    | 0x72FF ->
+      // ADD A,0x08
+      m.Fetch()
+      let struct (r, f) = Alu.add8 (m.Regs.Get R8.A) (m.ReadImm()) false
+      m.Regs.Set(R8.A, r)
+      m.SetFlags f
+    | 0x7301 ->
+      // LD H,A
+      m.Fetch()
+      m.Regs.Set(R8.H, m.Regs.Get R8.A)
+    | 0x7302 ->
+      // RET
+      m.Fetch()
+      m.Regs.SetPc(m.Pop16())
+    | _ -> failwithf "ScreenStep: unhandled resume at %04X" (m.Regs.Pc())
+
+  let screenStepRoutine : LiftedRoutine =
+    { Name = "screen-addr-step"
+      EntryAddresses =
+        [ 0x72EE; 0x72EF; 0x72F0; 0x72F2; 0x72F4; 0x72F5; 0x72F6; 0x72F8
+          0x72F9; 0x72FB; 0x72FD; 0x72FE; 0x72FF; 0x7301; 0x7302 ]
+      Execute = screenStep
+      ImplementationMode = Lifted }
+
+  /// 0x64E6-0x64F0 — table lookup: DE = word at (0x67C1 + A*2). Translated
+  /// 1:1 from the generated table (WZ mirroring on the (HL) reads, exact
+  /// PassTime on ADD HL,BC and INC HL).
+  let tableLookup64E6 (m: Machine) =
+    match m.Regs.Pc() with
+    | 0x64E6 ->
+      // LD HL,0x67C1
+      m.Fetch()
+      m.Regs.Set(R8.L, m.ReadImm())
+      m.Regs.Set(R8.H, m.ReadImm())
+    | 0x64E9 ->
+      // LD C,A
+      m.Fetch()
+      m.Regs.Set(R8.C, m.Regs.Get R8.A)
+    | 0x64EA ->
+      // LD B,0x00
+      m.Fetch()
+      m.Regs.Set(R8.B, m.ReadImm())
+    | 0x64EC ->
+      // ADD HL,BC
+      m.Fetch()
+      let struct (r, f) = Alu.add16 (m.Regs.Get R16.HL) (m.Regs.Get R16.BC) (m.Flags())
+      m.Regs.Set(R16.HL, r)
+      m.SetFlags f
+      m.PassTime 7
+    | 0x64ED ->
+      // LD E,(HL)
+      m.Fetch()
+      m.Regs.SetWz(m.Regs.Get R16.HL)
+      m.Regs.Set(R8.E, m.Read(m.Regs.Wz()))
+    | 0x64EE ->
+      // INC HL
+      m.Fetch()
+      m.Regs.Set(R16.HL, (m.Regs.Get R16.HL + 1) &&& 0xFFFF)
+      m.PassTime 2
+    | 0x64EF ->
+      // LD D,(HL)
+      m.Fetch()
+      m.Regs.SetWz(m.Regs.Get R16.HL)
+      m.Regs.Set(R8.D, m.Read(m.Regs.Wz()))
+    | 0x64F0 ->
+      // RET
+      m.Fetch()
+      m.Regs.SetPc(m.Pop16())
+    | _ -> failwithf "TableLookup64E6: unhandled resume at %04X" (m.Regs.Pc())
+
+  let tableLookup64E6Routine : LiftedRoutine =
+    { Name = "table-lookup-64e6"
+      EntryAddresses = [ 0x64E6; 0x64E9; 0x64EA; 0x64EC; 0x64ED; 0x64EE; 0x64EF; 0x64F0 ]
+      Execute = tableLookup64E6
+      ImplementationMode = Lifted }
+
+  let registry = [ screenClearRoutine; screenClear71CFRoutine; screenStepRoutine; tableLookup64E6Routine ]
 
   let registryHook (address: int) : (Machine -> unit) option =
     registry

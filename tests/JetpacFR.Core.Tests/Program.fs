@@ -132,13 +132,17 @@ let runDisasmCorpus () : int =
   let mem, _ = oracle.SaveState()
   let mutable bad = 0
   let mutable dbFalls = 0
+  let mutable lengthMismatch = 0
   for addr in 0 .. 0xFFFF do
     let insn = Disasm.disasmMemory mem addr
+    if Disasm.disasmLength mem addr <> insn.Length then lengthMismatch <- lengthMismatch + 1
     if insn.Length < 1 || insn.Length > 4 then
       bad <- bad + 1
       if bad < 5 then eprintfn "  bad length at %04X: %A" addr insn
     if insn.Text.StartsWith "DB " then dbFalls <- dbFalls + 1
   check "every address decodes to a 1..4 byte instruction" (bad = 0) (sprintf "%d bad" bad)
+  check "length-only path agrees with full disassembly everywhere" (lengthMismatch = 0)
+    (sprintf "%d mismatches" lengthMismatch)
   check "no undefined-opcode fallbacks in ROM+game code region" (dbFalls <= 0x4000) (sprintf "%d DB fallbacks" dbFalls)
   if failures.Count > 0 then 1 else 0
 
@@ -421,6 +425,13 @@ let runContract (romPath: string) (tzxPath: string) : int =
 
 let runValidate (romPath: string) (tzxPath: string) : int =
   printfn "validation theater"
+  let covered (addr: int) =
+    match Jetpac3.Core.LiftedRoutines.registryHook addr with
+    | Some _ -> true
+    | None -> false
+  check "registry covers all lifted routines"
+    (covered 0x71B8 && covered 0x71CF && covered 0x72EE && covered 0x64E6)
+    ""
   // Good path: the current registry (screenClear 0x71B8) never executes in
   // this script, so the lifted port must match the oracle exactly.
   let good =
