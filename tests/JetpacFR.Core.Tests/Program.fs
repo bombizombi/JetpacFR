@@ -495,12 +495,59 @@ let runPrompt (romPath: string) (tzxPath: string) : int =
     printfn "%s" prompt
     0
 
+let runBench (romPath: string) (tzxPath: string) : int =
+  printfn "bench: bare machine vs session (recording off/on), 600 frames"
+  let mem, state =
+    match EntryCache.tryLoad romPath tzxPath with
+    | Some (m, s) -> m, s
+    | None ->
+      printfn "  cold booting to entry (caches for future runs)..."
+      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+      let mem, state = oracle.SaveState()
+      EntryCache.save romPath tzxPath mem state
+      mem, state
+  let framesN = 600
+  let runBare () =
+    let m = Jetpac2.Core.Machine()
+    Jetpac2.Core.Generated.EnsureInstalled()
+    m.LoadState(mem, state)
+    let sw = System.Diagnostics.Stopwatch.StartNew()
+    let mutable steps = 0L
+    for _ in 1 .. framesN do
+      let fe = m.FrameEnd
+      while m.CycleCount() < fe do
+        m.Step()
+        steps <- steps + 1L
+      m.FrameEnd <- fe + 69888L
+    sw.Stop()
+    printfn "  bare machine          : %6.2f ms/frame  %7.0f steps/frame  %8.0f Msteps/s"
+      (float sw.Elapsed.TotalMilliseconds / float framesN)
+      (float steps / float framesN)
+      (float steps / sw.Elapsed.TotalSeconds / 1e6)
+  let runSession (recording: bool) =
+    let s = TraceSession(romPath, tzxPath, 4_000_000)
+    s.Recorder.RecordEnabled <- recording
+    let sw = System.Diagnostics.Stopwatch.StartNew()
+    for _ in 1 .. framesN do
+      s.RunFrame() |> ignore
+    sw.Stop()
+    printfn "  session record=%5b    : %6.2f ms/frame  %7.0f steps/frame  %8.0f Msteps/s"
+      recording
+      (float sw.Elapsed.TotalMilliseconds / float framesN)
+      (float s.Recorder.EntryCount / float framesN)
+      (float s.Recorder.EntryCount / sw.Elapsed.TotalSeconds / 1e6)
+  runBare ()
+  runSession false
+  runSession true
+  if failures.Count > 0 then 1 else 0
+
 [<EntryPoint>]
 let main argv =
   try
     let tests =
       match Array.toList argv with
       | "--test" :: name :: _ -> [ name ]
+      | [ "--bench" ] -> [ "bench" ]
       | _ -> []
     let run (name: string) =
       match name with
@@ -512,6 +559,7 @@ let main argv =
       | "contract" -> runContract rom tzx
       | "validate" -> runValidate rom tzx
       | "prompt" -> runPrompt rom tzx
+      | "bench" -> runBench rom tzx
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx

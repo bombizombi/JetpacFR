@@ -156,82 +156,93 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   /// Execute one frame (69888 T-states plus overshoot) on the port machine,
   /// recording every instruction. Returns (frameStart, frameEnd) for the
   /// audio call.
+  ///
+  /// With recording disabled the per-instruction instrumentation (PC/flags/
+  /// cycles capture, length decode, entry record) is skipped entirely, so the
+  /// game runs at bare machine speed; the toggle previously only gated the
+  /// record store itself, costing ~2x for no data.
   member this.RunFrame() : int64 * int64 =
     let frameStart = port.CycleCount()
     let frameEnd = port.FrameEnd
-    let mutable step = 0
-    while port.CycleCount() < frameEnd do
-      let irq = port.IrqPending && port.Iff1
-      let pc = port.Regs.Pc()
-      let flagsBefore = port.Flags().ToU8()
-      let cyclesBefore = port.CycleCount()
-      if irq then
-        // One Step services the interrupt AND runs the vector instruction.
-        // Record a synthetic marker (Length = 0) plus the vector instruction
-        // under its own pc; the interrupted instruction resumes after the
-        // ISR returns and gets its own entry then.
-        let vector =
-          match port.IrqMode with
-          | 2 ->
-            let addr = 0xFF ||| ((port.Regs.I() <<< 8) &&& 0xFF00)
-            let lo = int port.Memory[addr &&& 0xFFFF]
-            let hi = int port.Memory[(addr + 1) &&& 0xFFFF]
-            (lo ||| (hi <<< 8)) &&& 0xFFFF
-          | _ -> 0x38
-        recorder.Record
-          { Pc = uint16 vector
-            B0 = 0uy
-            B1 = 0uy
-            B2 = 0uy
-            B3 = 0uy
-            Target = uint16 vector
-            Tick = uint32 cyclesBefore
-            Length = 0uy
-            Cycles = 7uy
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 flagsBefore
-            Taken = 1uy }
-        let vinsnLen = Disasm.disasmLength port.Memory vector
+    if recorder.RecordEnabled then
+      let mutable step = 0
+      while port.CycleCount() < frameEnd do
+        let irq = port.IrqPending && port.Iff1
+        let pc = port.Regs.Pc()
+        let flagsBefore = port.Flags().ToU8()
+        let cyclesBefore = port.CycleCount()
+        if irq then
+          // One Step services the interrupt AND runs the vector instruction.
+          // Record a synthetic marker (Length = 0) plus the vector instruction
+          // under its own pc; the interrupted instruction resumes after the
+          // ISR returns and gets its own entry then.
+          let vector =
+            match port.IrqMode with
+            | 2 ->
+              let addr = 0xFF ||| ((port.Regs.I() <<< 8) &&& 0xFF00)
+              let lo = int port.Memory[addr &&& 0xFFFF]
+              let hi = int port.Memory[(addr + 1) &&& 0xFFFF]
+              (lo ||| (hi <<< 8)) &&& 0xFFFF
+            | _ -> 0x38
+          recorder.Record
+            { Pc = uint16 vector
+              B0 = 0uy
+              B1 = 0uy
+              B2 = 0uy
+              B3 = 0uy
+              Target = uint16 vector
+              Tick = uint32 cyclesBefore
+              Length = 0uy
+              Cycles = 7uy
+              FlagsBefore = uint8 flagsBefore
+              FlagsAfter = uint8 flagsBefore
+              Taken = 1uy }
+          let vinsnLen = Disasm.disasmLength port.Memory vector
+          port.Step()
+          let after = port.Regs.Pc()
+          let cycles = int (port.CycleCount() - cyclesBefore)
+          let next = (vector + vinsnLen) &&& 0xFFFF
+          let m = port.Memory
+          recorder.Record
+            { Pc = uint16 vector
+              B0 = m[vector &&& 0xFFFF]
+              B1 = m[(vector + 1) &&& 0xFFFF]
+              B2 = m[(vector + 2) &&& 0xFFFF]
+              B3 = m[(vector + 3) &&& 0xFFFF]
+              Target = uint16 after
+              Tick = uint32 cyclesBefore
+              Length = uint8 vinsnLen
+              Cycles = uint8 (min 255 cycles)
+              FlagsBefore = uint8 flagsBefore
+              FlagsAfter = uint8 (port.Flags().ToU8())
+              Taken = (if after <> next then 1uy else 0uy) }
+        else
+          let insnLen = Disasm.disasmLength port.Memory pc
+          port.Step()
+          let after = port.Regs.Pc()
+          let cycles = int (port.CycleCount() - cyclesBefore)
+          let next = (pc + insnLen) &&& 0xFFFF
+          let m = port.Memory
+          recorder.Record
+            { Pc = uint16 pc
+              B0 = m[pc &&& 0xFFFF]
+              B1 = m[(pc + 1) &&& 0xFFFF]
+              B2 = m[(pc + 2) &&& 0xFFFF]
+              B3 = m[(pc + 3) &&& 0xFFFF]
+              Target = uint16 after
+              Tick = uint32 cyclesBefore
+              Length = uint8 insnLen
+              Cycles = uint8 (min 255 cycles)
+              FlagsBefore = uint8 flagsBefore
+              FlagsAfter = uint8 (port.Flags().ToU8())
+              Taken = (if after <> next then 1uy else 0uy) }
+        if step % snapshotInterval = 0 then recorder.RecordSnapshot(snapshotOf ())
+        step <- step + 1
+    else
+      // Bare loop: the machine services interrupts inside Step; nothing is
+      // captured. RecordWrite/RecordPort handlers early-return on the flag.
+      while port.CycleCount() < frameEnd do
         port.Step()
-        let after = port.Regs.Pc()
-        let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (vector + vinsnLen) &&& 0xFFFF
-        let m = port.Memory
-        recorder.Record
-          { Pc = uint16 vector
-            B0 = m[vector &&& 0xFFFF]
-            B1 = m[(vector + 1) &&& 0xFFFF]
-            B2 = m[(vector + 2) &&& 0xFFFF]
-            B3 = m[(vector + 3) &&& 0xFFFF]
-            Target = uint16 after
-            Tick = uint32 cyclesBefore
-            Length = uint8 vinsnLen
-            Cycles = uint8 (min 255 cycles)
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 (port.Flags().ToU8())
-            Taken = (if after <> next then 1uy else 0uy) }
-      else
-        let insnLen = Disasm.disasmLength port.Memory pc
-        port.Step()
-        let after = port.Regs.Pc()
-        let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (pc + insnLen) &&& 0xFFFF
-        let m = port.Memory
-        recorder.Record
-          { Pc = uint16 pc
-            B0 = m[pc &&& 0xFFFF]
-            B1 = m[(pc + 1) &&& 0xFFFF]
-            B2 = m[(pc + 2) &&& 0xFFFF]
-            B3 = m[(pc + 3) &&& 0xFFFF]
-            Target = uint16 after
-            Tick = uint32 cyclesBefore
-            Length = uint8 insnLen
-            Cycles = uint8 (min 255 cycles)
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 (port.Flags().ToU8())
-            Taken = (if after <> next then 1uy else 0uy) }
-      if step % snapshotInterval = 0 then recorder.RecordSnapshot(snapshotOf ())
-      step <- step + 1
     port.FrameEnd <- frameEnd + 69888L
     recorder.RecordFrameBoundary(uint32 (port.CycleCount()))
     frame <- frame + 1

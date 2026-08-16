@@ -1,0 +1,147 @@
+Rewind & Replay (plan20260816)
+==============================
+Goal: unlimited-distance time rewind + scripted replay for the running game.
+You die -> drag the slider back -> watch the replay to see why -> Go (play on
+from there) or Replay (scripted re-run of exactly what you did).
+
+Why this is safe to build now: the port machine is fully deterministic given
+(memory + registers + scheduler + keyboard state) - the EntryCache warm start
+already proves SaveState/LoadState is exact, and the differential validation
+proves frame-to-frame determinism. Restoring a snapshot and feeding the same
+keys reproduces the same future, byte for byte.
+
+Data model (new JetpacFR.Core/History.fs)
+-----------------------------------------
+FrameSnapshot
+  - full state = 64K memory + state.txt (regs, im, iff, cycles,
+    videoNextTime, nextWrap, scanline/flash, border, beeper)
+  - PLUS the keyboard matrix (8 half-row bytes). SaveState does not include
+    it; the session already funnels every key through Session.SetKey, so the
+    session owns the current matrix and stamps it into each snapshot
+    (keys held across a frame boundary must survive a restore).
+FrameHistory (the rewind store)
+  - anchor snapshot every 300 frames (6 s), delta entries between:
+    (frame, changed-byte list, small scalar text). Deltas are exact,
+    computed by a 64K compare per frame (~0.03 ms, noise vs 6 ms frames).
+  - frame 0 anchor = game entry state (slider min is always reachable).
+  - restore(frame): walk back to nearest anchor, apply deltas forward.
+    Cost bounded by 300 deltas x ~1 KB.
+  - eviction: drop oldest anchors under a memory budget (default 1.5 GB).
+    Jetpac writes a few hundred bytes per frame -> ~30-60 MB/min with
+    deltas, so a budget holds 30+ min of history; frame counter keeps
+    running, slider covers the retained window. (Disk spill is a later
+    option, not in this plan.)
+KeyLog
+  - events (frame, row, bit, pressed), appended from Session.SetKey.
+  - truncate(frame) on branch: rewinding to N keeps only events with
+    frame < N; everything after is abandoned.
+ReplayController
+  - mode = Live | Replaying; startFrame; endFrame = last recorded frame.
+  - while Replaying, per frame the session applies that frame's logged key
+    events instead of live keys (live keys are ignored, or optionally
+    cancel replay - default: ignored).
+  - when the replaying frame reaches endFrame: stop (pause), mode = Live.
+    Play then resumes with the real keyboard.
+
+Session integration (JetpacFR.Core/Session.fs)
+----------------------------------------------
+- ctor: create FrameHistory + KeyLog; anchor frame 0 (entry state).
+- SetKey: log the event (with current frame number) in Live mode; forward
+  to port as today.
+- RunFrame: after the frame completes, history.addFrame(snapshot deltas).
+  Snapshots are taken regardless of the trace-recording toggle (cost is a
+  64K compare; trace instrumentation stays off in record=off mode).
+- Branch (rewind to N then Go):
+  1. port.LoadState(history.restore(N)) + keyboard matrix restore
+  2. history.truncate(N), keyLog.truncate(N)
+  3. recorder ring RESET (not just pause): after a restore the machine's
+     cycle counter jumps backwards, so keeping old entries would break the
+     recorder's non-decreasing-tick invariant and the cinema's frame ticks.
+     Reset gives a clean window from the branch point.
+- Replay: RunFrame loop unchanged; only the key source differs. Audio and
+  screen present run exactly as in live play.
+
+UI (JetpacFR.Desktop, game pane - next to the game image)
+---------------------------------------------------------
+Controls: [rewind slider] [MM:SS label] [Go] [Replay]
+- Slider: range 0..lastFrame (frames, not ticks). While running, thumb is
+  pinned right and follows lastFrame.
+- Dragging the slider:
+  1. pauses the game (frameTimer stop),
+  2. loads the snapshot at that frame into the port,
+  3. presents it (presentGame renders from restored video memory +
+     state - no frame needs to execute),
+  4. UI shows "paused at frame N (MM:SS)".
+  Dragging is cheap enough to restore per-tick (~1 ms); if it ever stutters,
+  restore on thumb release only - decide by trying, not by default.
+- MM:SS label (right of slider): accumulated play time = frames / 50.
+  Always shows the position of the slider (live: total time).
+- Go: resume live play from the rewound state (branch as above: truncate
+  history + key log, reset recorder). New future starts here.
+- Replay: run from the rewound state with keys from the log; when the
+  frame counter catches up with the recording end, auto-stop and show
+  "replay finished - press Play". Play (existing Run button) then resumes
+  with the real keyboard from that point.
+  While replaying, the slider tracks the replaying frame.
+- Buttons disabled when they make no sense (Go/Replay disabled unless
+  paused at a rewound frame; Replay also disabled at frame 0 with an empty
+  log - or allowed, it just plays the no-input attract session).
+
+Behavior matrix
+---------------
+state                 slider        Go         Replay
+---------------       -----------   --------    -----------------
+running (live)        pinned right  n/a         n/a (pause first)
+paused at frame N     movable       resume      scripted run,
+                      (restores)    from N      stops at end
+replaying             tracks        pause+go    n/a
+                      replay        from here
+replay finished       at end        n/a         Play resumes live
+
+What you get
+------------
+- Died at 02:13 -> drag back to 02:05 -> Replay -> watch the exact inputs
+  and the screen that killed you -> Go at any point during the replay to
+  take over from there (mid-replay Go = pause + branch at current frame).
+- Unlimited in practice: deltas keep an hour+ of history well under budget.
+
+Tests (tests/JetpacFR.Core.Tests, new --test history)
+----------------------------------------------------
+- snapshot exactness: run 120 scripted frames, snapshotting each; restore
+  frame 37 and compare memory + state byte-for-byte against a second
+  machine that ran straight through to 37.
+- determinism after restore: from restored frame 37, run 50 frames with
+  the logged keys; memory + PC + PC trace identical to the original run.
+- delta correctness: anchor+delta restore equals full-snapshot restore for
+  every 10th frame across an anchor boundary (frame 0, 299, 300, 301...).
+- key log: events carry the right frame numbers; held keys survive a
+  restore (press Q at frame 10, hold, restore 12, state still pressed).
+- replay end-stop: replay from 0 with a 100-frame log stops exactly at
+  the end and leaves the machine at the recorded end state.
+- branch truncation: rewind to N, Go, new history replaces the old tail;
+  recorder ring is empty; frames continue from N.
+
+Phasing
+-------
+A. History.fs core (snapshots, deltas, key log, restore) + --test history
+   core cases. No UI.
+B. Session wiring (frame hook, key logging, branch/reset path).
+C. UI: slider + MM:SS + Go + Replay, pause-on-drag, present-on-restore.
+D. Polish: eviction budget, disabled-state logic, replay indicator in
+   status text, smoke run.
+
+Acceptance
+----------
+Play 30 s, die, drag back 10 s, see the old screen; Replay re-runs your
+exact inputs and stops at the end; Go at any point continues under live
+control; the trace cinema keeps working after a branch (ring reset, no
+broken ticks); 1 hour of play stays under the history budget; all tests
+in --test all (incl. the new history suite) pass.
+
+Out of scope (explicitly)
+-------------------------
+- Saving/loading history or key log to disk (a session is ephemeral for
+  now; the trace .jpt save/load stays the export path).
+- Replay speed control / frame-step in replay (the trace cinema already
+  gives instruction-level stepping on the recorded window).
+- Rewinding the trace ring itself; a branch resets it by design.

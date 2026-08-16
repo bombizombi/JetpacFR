@@ -509,7 +509,16 @@ module LiftedRoutines =
 
   let registry = [ screenClearRoutine; screenClear71CFRoutine; screenStepRoutine; tableLookup64E6Routine ]
 
+  /// Per-address dispatch table built once from the registry. The hook runs
+  /// on every executed instruction, so this must be O(1): scanning each
+  /// routine's arm list per instruction cost more than the lifted work itself.
+  let private hookTable : (Machine -> unit)[] =
+    let table = Array.zeroCreate<Machine -> unit> 0x10000
+    for routine in registry do
+      for addr in routine.EntryAddresses do
+        table[addr] <- routine.Execute
+    table
+
   let registryHook (address: int) : (Machine -> unit) option =
-    registry
-    |> List.tryPick (fun routine ->
-      if List.contains address routine.EntryAddresses then Some routine.Execute else None)
+    let f = hookTable[address &&& 0xFFFF]
+    if obj.ReferenceEquals(f, null) then None else Some f
