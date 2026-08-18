@@ -50,6 +50,15 @@ type VideoScreen(memory: byte[]) =
     flashCounter <- flashCounter_
     flashOn <- flashOn_
 
+
+  /// Re-render every visible line from current memory (rewind present):
+  /// `lines` holds scanline-pass snapshots, so after a state restore the
+  /// blit buffer would otherwise show the pre-restore frame until a new
+  /// frame executes. Border-only lines keep their captured border color.
+  member this.RenderAll() =
+    for y in 0 .. VideoConstants.VisibleHeight - 1 do
+      this.RenderLine(y + VideoConstants.VSyncLines)
+
   /// Advance one scanline; returns true when the 312-line counter wraps
   /// (the interrupt point).
   member this.NextScanLine() : bool =

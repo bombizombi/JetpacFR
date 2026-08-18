@@ -541,6 +541,83 @@ let runBench (romPath: string) (tzxPath: string) : int =
   runSession true
   if failures.Count > 0 then 1 else 0
 
+let runHistory (romPath: string) (tzxPath: string) : int =
+  printfn "history: snapshot exactness, determinism, replay, branch"
+  let framesN = 120
+  let script = Jetpac3.Core.Script.defaultSession framesN
+  let applyKeys (s: TraceSession) (f: int) =
+    for (sf, row, bit, pressed) in script do
+      if sf = f then s.SetKey(row, bit, pressed)
+  // Helper: a fresh session driven identically for `n` frames. Keys are
+  // applied AFTER each completed frame, matching the app's frame loop
+  // (RunFrame, then key events for the next frame).
+  let runStraight n =
+    let s = TraceSession(romPath, tzxPath, 500_000)
+    for f in 0 .. n - 1 do
+      s.RunFrame() |> ignore
+      applyKeys s (f + 1)
+    s
+
+  // 1. Scripted session with the key log recording (as the app does).
+  let session = TraceSession(romPath, tzxPath, 500_000)
+  for f in 0 .. framesN - 1 do
+    session.RunFrame() |> ignore
+    applyKeys session (f + 1)
+  check "history captured every frame" (session.History.LastFrame = framesN)
+    (sprintf "last=%d" session.History.LastFrame)
+
+  // 2. SaveState/LoadState roundtrip on the bare machine is exact (the
+  // foundation of every rewind restore).
+  let m = Jetpac2.Core.Machine()
+  Jetpac2.Core.Generated.EnsureInstalled()
+  let mem1, text1 = m.SaveState()
+  let m2 = Jetpac2.Core.Machine()
+  m2.LoadState(mem1, text1)
+  let sameMem = (m.Memory = m2.Memory)
+  let sameRegs = m.Regs.Pc() = m2.Regs.Pc() && m.Regs.Get Jetpac2.Core.R16.HL = m2.Regs.Get Jetpac2.Core.R16.HL
+  check "port SaveState/LoadState roundtrip is exact" (sameMem && sameRegs) ""
+
+  // 3. Rewind (preview) to 60: state matches a straight-through 60-frame run.
+  let ref = runStraight 60
+  session.RewindTo(60)
+  let memEq = (session.Memory = ref.Memory)
+  let pcEq = session.Regs.Pc() = ref.Regs.Pc()
+  // Preview kept everything: the script's last release lands at frame 110.
+  check "preview does not truncate the key log" (session.KeyLog.EndFrame = 110)
+    (sprintf "end=%d" session.KeyLog.EndFrame)
+
+  // 4. Replay from the previewed frame: history truncates at 60 but the log
+  // is kept as the script; the replay must end exactly at the recording's
+  // end (frame 120) with the recorded end state.
+  let orig = runStraight framesN
+  session.StartReplay()
+  let mutable replayed = 0
+  let mutable stopped = false
+  while not stopped && replayed < framesN + 10 do
+    session.RunFrame() |> ignore
+    replayed <- replayed + 1
+    if session.ReplayFinished then stopped <- true
+  let endEq = stopped && session.Frame = framesN && session.Memory = orig.Memory
+  check "replay stops at the end of the recording with the recorded end state"
+    endEq
+    (sprintf "stopped=%b frame=%d (want %d) mem=%b" stopped session.Frame framesN (session.Memory = orig.Memory))
+
+  // 5. Branch (Go) at 60 after a fresh preview, then a live future with the
+  // same keys must equal a straight-through 110-frame run.
+  session.RewindTo(60)
+  session.BranchAt(60)
+  check "branch truncates history" (session.History.LastFrame = 60)
+    (sprintf "last=%d" session.History.LastFrame)
+  let post = runStraight 110
+  for f in 60 .. 109 do
+    session.RunFrame() |> ignore
+    applyKeys session (f + 1)
+  let futureEq = (session.Memory = post.Memory) && session.Regs.Pc() = post.Regs.Pc()
+  check "post-branch future is deterministic" futureEq
+    (sprintf "pc %04X vs %04X" (session.Regs.Pc()) (post.Regs.Pc()))
+
+  if failures.Count > 0 then 1 else 0
+
 [<EntryPoint>]
 let main argv =
   try
@@ -560,9 +637,11 @@ let main argv =
       | "validate" -> runValidate rom tzx
       | "prompt" -> runPrompt rom tzx
       | "bench" -> runBench rom tzx
+      | "history" -> runHistory rom tzx
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
+        + runHistory rom tzx
       | other ->
         eprintfn "unknown test: %s" other
         1

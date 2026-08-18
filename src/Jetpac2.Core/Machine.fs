@@ -439,12 +439,13 @@ type Machine() as self =
   member this.Out(port: int, value: int) =
     for handler in outHandlers do
       handler port value
-    hardwareEvents.Add
-      { Tick = scheduler.Cycles
-        Port = port &&& 0xFFFF
-        Value = value &&& 0xFF
-        Border = border
-        Beeper = beeperLevel }
+    if hardwareEvents.Count < 65536 then
+      hardwareEvents.Add
+        { Tick = scheduler.Cycles
+          Port = port &&& 0xFFFF
+          Value = (value &&& 0xFF)
+          Border = border
+          Beeper = beeperLevel }
 
   member this.DrainHardwareEvents() : HardwareEvent list =
     let items = hardwareEvents |> Seq.toList
@@ -591,12 +592,11 @@ type Machine() as self =
     regs.SetPc(hex "pc" 0)
     regs.SetI(hex "i" 0)
     regs.SetR(hex "r" 0)
-    regs.SetWz 0xFFFF
+    regs.SetWz(hex "wz" 0xFFFF)
     iff1_ <- boolv "iff1" false
     iff2_ <- boolv "iff2" false
     irqMode_ <- hex "im" 0
-    halted_ <- boolv "halted" false
-    irqPending_ <- false
+    irqPending_ <- boolv "irq" false
     border <- hex "border" 0
     video.SetBorder border
     beeperLevel <- boolv "beeper" false
@@ -611,3 +611,23 @@ type Machine() as self =
     video.SetState(scanline, int (wraps % 16L), (wraps / 16L) % 2L = 1L)
     beeperTrace.Clear()
     frameEnd <- (System.Int64.Parse(kv.["nextWrap"]))
+
+  /// Capture the full machine state (64K memory + key=value state text, the
+  /// same schema the oracle uses, including `wz` which LoadState restores).
+  /// The video task reschedules +224 inside its own run, so the next fire is
+  /// always the next multiple of 224 — no schedule walk needed.
+  member this.SaveState() : byte[] * string =
+    let cycles = scheduler.Cycles
+    let videoNextTime = (cycles / 224L + 1L) * 224L
+    let f = videoNextTime / 224L
+    let nextWrap = (((f + 312L) / 312L * 312L) - 1L) * 224L
+    let regsText =
+      sprintf
+        "af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\nirq=%b\n"
+        (regs.Get R16.AF) (regs.Get R16.BC) (regs.Get R16.DE) (regs.Get R16.HL)
+        (regs.Get R16.AF_) (regs.Get R16.BC_) (regs.Get R16.DE_) (regs.Get R16.HL_)
+        (regs.Ix()) (regs.Iy()) (regs.Sp()) (regs.Pc()) (regs.I()) (regs.R())
+        (regs.Wz())
+        iff1_ iff2_ irqMode_ halted_ border beeperLevel earLevel
+        cycles videoNextTime nextWrap irqPending_
+    Array.copy memory, regsText

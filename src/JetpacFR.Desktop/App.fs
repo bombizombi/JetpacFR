@@ -158,7 +158,16 @@ type MainWindow() as self =
   let stageBtn = Button(Content = "Stage to Lifted/")
   let queuePromptsBtn = Button(Content = "Prompts for queue")
   let validateQueueBtn = Button(Content = "Validate queue")
-
+  let rewindSlider = Slider(Minimum = 0.0, Maximum = 0.0, Value = 0.0, Width = 260.0)
+  let timeLabel = TextBlock(Text = "00:00", VerticalAlignment = VerticalAlignment.Center)
+  let goBtn = Button(Content = "Go")
+  let replayBtn = Button(Content = "Replay")
+  let mutable rewinding = false // slider drag in progress
+  let mutable replaying = false // scripted replay driving the frame timer
+  /// Timeline extent frozen when Replay starts: the replay regrows history
+  /// in lockstep with the replaying frame, so LastFrame alone would pin the
+  /// thumb to the right edge instead of showing replay progress.
+  let mutable replayExtent = 0
   let keyMap (key: Key) : (int * int) list =
     match key with
     | Key.A -> [ (1, 0) ]
@@ -285,9 +294,10 @@ type MainWindow() as self =
             sprintf "   %04X  %-11s  %s" addr hex insn.Text
         rows.Add { Tag = tag; Brush = (if isErr then red else normal); IsCurrent = isErr }
         addr <- (addr + insn.Length) &&& 0xFFFF
-      disasmList.ItemsSource <- rows
-      cursorLabel.Text <- sprintf "emulator stopped - static disassembly around 0x%04X" pc
-    | None -> ()
+  /// MM:SS of accumulated play time at 50 fps (frames / 50).
+  let updateTimeLabel (s: TraceSession) =
+    let totalSeconds = s.Frame / 50
+    timeLabel.Text <- sprintf "%02d:%02d" (totalSeconds / 60) (totalSeconds % 60)
 
   let renderFrame () =
     match session with
@@ -296,8 +306,15 @@ type MainWindow() as self =
         let frameStart, _ = s.RunFrame()
         presentGame ()
         Audio.Play(s.DrainBeeperSamples(frameStart))
+        if s.ReplayFinished then
+          // Replay reached the recording's end: stop and hand back to Play.
+          replaying <- false
+          running <- false
+          frameTimer.Stop()
+          statusText.Text <- "replay finished - press Play to take over"
       with ex ->
         running <- false
+        replaying <- false
         frameTimer.Stop()
         let pc = s.Regs.Pc()
         statusText.Text <- sprintf "emulator error at 0x%04X: %s" pc ex.Message
@@ -1020,11 +1037,58 @@ type MainWindow() as self =
     let stepFrameBtn = Button(Content = "Step frame")
     let saveBtn = Button(Content = "Save trace")
     let loadBtn = Button(Content = "Load trace")
-    runBtn.Click.Add(fun _ -> pauseGame(); running <- true; frameTimer.Start())
-    pauseBtn.Click.Add(fun _ -> pauseGame())
-    stepFrameBtn.Click.Add(fun _ -> pauseGame(); renderFrame ())
+    runBtn.Click.Add(fun _ ->
+      pauseGame ()
+      match session with
+      | Some s when replaying -> s.StopReplay(); replaying <- false
+      | _ -> ()
+      running <- true
+      frameTimer.Start())
+    pauseBtn.Click.Add(fun _ ->
+      pauseGame ()
+      if replaying then replaying <- false)
+    stepFrameBtn.Click.Add(fun _ -> pauseGame (); renderFrame ())
     saveBtn.Click.Add(fun _ -> saveTrace ())
     loadBtn.Click.Add(fun _ -> loadTrace ())
+    // Rewind: dragging pauses the game and previews the snapshot at the
+    // slider's frame; Go commits the branch (new future starts here);
+    // Replay re-runs the recorded keys from here and stops at the end.
+    rewindSlider.PreviewMouseDown.Add(fun _ -> rewinding <- true)
+    rewindSlider.PreviewMouseUp.Add(fun _ -> rewinding <- false)
+    rewindSlider.ValueChanged.Add(fun args ->
+      match session with
+      | Some s ->
+        let target = int args.NewValue
+        if rewinding && target <= s.History.LastFrame then
+          if running || replaying then pauseGame ()
+          if replaying then
+            s.StopReplay ()
+            replaying <- false // drag aborts the script; preview takes over
+          s.RewindTo(target)
+          presentGame ()
+          updateTimeLabel s
+      | None -> ())
+    goBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        pauseGame ()
+        s.BranchAt(s.Frame)
+        replaying <- false
+        running <- true
+        frameTimer.Start()
+        statusText.Text <- sprintf "branched at frame %d - new future starts here" s.Frame
+      | None -> ())
+    replayBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        pauseGame ()
+        replayExtent <- max 1 s.History.LastFrame // timeline before truncation
+        s.StartReplay()
+        replaying <- true
+        running <- true
+        frameTimer.Start()
+        statusText.Text <- sprintf "replaying keys until frame %d" s.ReplayEndFrame
+      | None -> ())
     recordToggle.Checked.Add(fun _ -> match session with Some s -> s.Recorder.RecordEnabled <- true | None -> ())
     recordToggle.Unchecked.Add(fun _ -> match session with Some s -> s.Recorder.RecordEnabled <- false | None -> ())
     recordToggle.ToolTip <- "record every executed instruction into the ring buffer"
@@ -1228,6 +1292,10 @@ type MainWindow() as self =
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     toolbar.Children.Add sep |> ignore
+    // rewind + replay group
+    for c in [ rewindSlider :> FrameworkElement; timeLabel :> FrameworkElement; goBtn :> FrameworkElement; replayBtn :> FrameworkElement ] do
+      c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
+      toolbar.Children.Add c |> ignore
     for c in [ b100 :> Control; b10 :> Control; b1 :> Control; playBtn :> Control; f1 :> Control; f10 :> Control; f100 :> Control ] do
       c.Margin <- Thickness(2.0, 0.0, 2.0, 0.0)
       toolbar.Children.Add c |> ignore
@@ -1353,6 +1421,10 @@ type MainWindow() as self =
           with ex ->
             statusText.Text <- "boot failed: " + ex.Message
       | Some s ->
+        if not rewinding then
+          rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.History.LastFrame)
+          rewindSlider.Value <- float s.Frame
+        updateTimeLabel s
         if running then
           statusText.Text <-
             sprintf "frame=%d  tick=%.2fM  instr=%d/%d  distinct-pc=%d  selfmod=%d  rec=%s"

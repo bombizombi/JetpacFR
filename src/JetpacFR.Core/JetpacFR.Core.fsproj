@@ -11,6 +11,7 @@
     <Compile Include="Miner.fs" />
     <Compile Include="Contract.fs" />
     <Compile Include="Prompt.fs" />
+    <Compile Include="History.fs" />
     <Compile Include="Session.fs" />
     <Compile Include="Validation.fs" />
   </ItemGroup>

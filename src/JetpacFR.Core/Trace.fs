@@ -149,6 +149,23 @@ type TraceRecorder(capacity: int, segmentCount: int) =
   member this.RecordFrameBoundary(tick: uint32) =
     if recordEnabled then frameTicks.Add tick
 
+  /// Clear the window entirely (rewind branch): the machine's cycle counter
+  /// jumps backwards on restore, so stale entries would break the
+  /// non-decreasing-tick invariant and the frame-tick stream.
+  member this.Reset() =
+    head <- 0
+    count <- 0
+    snapshotCount <- 0
+    writes.Clear()
+    ports.Clear()
+    frameTicks.Clear()
+    Array.fill perPc 0 perPc.Length 0
+    Array.fill segments 0 segments.Length 0
+    Array.fill selfModified 0 selfModified.Length false
+    selfModCount <- 0
+    startTick <- 0u
+    endTick <- 0u
+
   /// Linearize the ring into a fresh Trace. O(window) copy; call on pause or
   /// before save, not per cursor move.
   member this.Build() : Trace =

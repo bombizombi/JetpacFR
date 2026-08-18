@@ -72,6 +72,17 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   let mutable frame = 0
   let mutable warmStart = false
   let snapshotInterval = 64
+  let history = FrameHistory(300, 1_500_000_000L)
+  let keyLog = KeyLog()
+  let mutable replayMode = false
+  let mutable replayEndFrame = -1
+  let mutable replayFinished = false
+  let mutable pendingReplayKeys: KeyEvent list = []
+
+  /// Capture the port state + keyboard matrix into the history store.
+  let captureState () =
+    let mem, text = port.SaveState()
+    history.Capture(frame, mem, text, port.Keyboard.ToBytes())
 
   /// Put the port into the game-entry state. Warm: load the cached snapshot.
   /// Cold: boot the oracle to the entry and cache its state for next time.
@@ -131,7 +142,9 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
           Value = uint8 (v &&& 0xFF)
           Border = uint8 (v &&& 7) })
     loadEntryState ()
+    captureState () // frame 0 anchor: the slider's always-reachable minimum
     recorder.RecordSnapshot(snapshotOf ())
+
 
   /// True when the entry state came from the cache (no oracle boot needed).
   member this.WarmStart = warmStart
@@ -141,7 +154,6 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   member this.Regs = port.Regs
   member this.Memory = port.Memory
 
-  member this.SetKey(row: int, bit: int, pressed: bool) = port.SetKey(row, bit, pressed)
 
   /// Rendered frame (BGRA 320x256) from the port's video state.
   member this.ScreenBuffer = port.Video.BlitTo()
@@ -153,17 +165,80 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
     port.BeeperTrace.Clear()
     Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
 
+  member this.SetKey(row: int, bit: int, pressed: bool) =
+    if replayMode then () // live keys ignored during scripted replay
+    else
+      keyLog.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
+      port.SetKey(row, bit, pressed)
+
+  member this.Replaying = replayMode
+  member this.ReplayEndFrame = replayEndFrame
+  member this.History = history
+  member this.KeyLog = keyLog
+
+  /// True when a replay reached the end of the recording in the last
+  /// RunFrame; the UI pauses the frame timer and hands control back.
+  member this.ReplayFinished = replayFinished
+
+  /// Rewind PREVIEW: restore the machine (registers, memory, keyboard) to
+  /// the state after `frameNumber` completed, without destroying anything.
+  /// History and the key log stay intact, so the slider can be dragged on
+  /// and "Replay" still has the whole script. Truncation happens only when
+  /// a branch is committed (Go) or a replay starts.
+  member this.RewindTo(frameNumber: int) =
+    if frameNumber < 0 || frameNumber > history.LastFrame then
+      invalidOp (sprintf "no history at frame %d (last=%d)" frameNumber history.LastFrame)
+    let buffer = Array.zeroCreate<byte> 0x10000
+    let text, keys = history.Restore(frameNumber, buffer)
+    port.LoadState(buffer, text)
+    port.Keyboard.Load(keys)
+    replayMode <- false
+    pendingReplayKeys <- []
+    frame <- frameNumber
+    port.Video.RenderAll()
+
+  /// Branch COMMIT: having previewed `frameNumber` (or reached it during a
+  /// replay), abandon the old future. History and the key log are truncated
+  /// so new captures continue from here; the trace recorder window resets
+  /// (the machine's cycle counter jumped, stale entries would break the
+  /// recorder's tick invariants).
+  member this.BranchAt(frameNumber: int) =
+    if frameNumber < 0 || frameNumber > history.LastFrame then
+      invalidOp (sprintf "no history at frame %d (last=%d)" frameNumber history.LastFrame)
+    history.Truncate(frameNumber, port.Memory)
+    keyLog.Truncate(frameNumber)
+    recorder.Reset()
+    replayMode <- false
+    pendingReplayKeys <- []
+    frame <- frameNumber
+
+  /// Begin scripted replay from the current (rewound) frame: history is
+  /// truncated at the branch point but the key log is KEPT as the script
+  /// (events after the point are replayed). Live keys are ignored while
+  /// replaying; RunFrame reports ReplayFinished at the recording's end.
+  member this.StartReplay() =
+    replayMode <- true
+    replayEndFrame <- history.LastFrame // recording end, before truncation
+    replayFinished <- false
+    history.Truncate(frame, port.Memory)
+    recorder.Reset()
+    pendingReplayKeys <- keyLog.ForFrame(frame)
+
+  /// Abort a running replay and return to live control immediately (the
+  /// frame timer's Run button mid-replay).
+  member this.StopReplay() =
+    replayMode <- false
+    pendingReplayKeys <- []
+
   /// Execute one frame (69888 T-states plus overshoot) on the port machine,
-  /// recording every instruction. Returns (frameStart, frameEnd) for the
-  /// audio call.
-  ///
-  /// With recording disabled the per-instruction instrumentation (PC/flags/
-  /// cycles capture, length decode, entry record) is skipped entirely, so the
-  /// game runs at bare machine speed; the toggle previously only gated the
-  /// record store itself, costing ~2x for no data.
+  /// recording every instruction. In replay mode the frame's logged key
+  /// events are applied before the machine runs.
   member this.RunFrame() : int64 * int64 =
     let frameStart = port.CycleCount()
     let frameEnd = port.FrameEnd
+    if replayMode then
+      for e in pendingReplayKeys do
+        port.SetKey(e.Row, e.Bit, e.Pressed)
     if recorder.RecordEnabled then
       let mutable step = 0
       while port.CycleCount() < frameEnd do
@@ -245,5 +320,18 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
         port.Step()
     port.FrameEnd <- frameEnd + 69888L
     recorder.RecordFrameBoundary(uint32 (port.CycleCount()))
+    // Rewind bookkeeping: the completed frame is `frame + 1`; stamp it into
+    // the history store (anchor or delta) under its own number, then advance
+    // the scripted replay if one is running. The replay's last executed
+    // frame is exactly replayEndFrame: the state after it matches the
+    // recording's end.
     frame <- frame + 1
+    captureState ()
+    if replayMode then
+      if frame >= replayEndFrame then
+        replayMode <- false
+        pendingReplayKeys <- []
+        replayFinished <- true
+      else
+        pendingReplayKeys <- keyLog.ForFrame(frame)
     frameStart, port.CycleCount()

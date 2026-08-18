@@ -8,6 +8,7 @@ type Keyboard() =
   let keys = Array.init 8 (fun _ -> Array.zeroCreate<bool> 5)
 
   member this.SetKey(row: int, bit: int, pressed: bool) = keys.[row].[bit] <- pressed
+  member this.GetKey(row: int, bit: int) : bool = keys.[row].[bit]
 
   /// Keyboard responds to any even address.
   member this.In(address: int) : int option =
@@ -24,3 +25,19 @@ type Keyboard() =
             if keys.[row].[bit] then
               value <- value &&& ~~~(1 <<< bit)
       Some value
+
+  /// The 8 half-row bytes (pressed bits inverted: 0 = pressed), the IN form.
+  member this.ToBytes() : byte[] =
+    let k = Array.zeroCreate<byte> 8
+    for row in 0 .. 7 do
+      let mutable bits = 0
+      for bit in 0 .. 4 do
+        if keys.[row].[bit] then bits <- bits ||| (1 <<< bit)
+      k.[row] <- byte (0xFF &&& ~~~bits)
+    k
+
+  /// Apply half-row bytes captured by `ToBytes`.
+  member this.Load(bytes: byte[]) =
+    for row in 0 .. 7 do
+      for bit in 0 .. 4 do
+        this.SetKey(row, bit, ((int bytes.[row] >>> bit) &&& 1 = 0))
