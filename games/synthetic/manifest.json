@@ -1,0 +1,6 @@
+{
+  "name": "Synthetic (test fixture)",
+  "rom": "../../assets/48.rom",
+  "tzx": "loader.tzx",
+  "boot": "manual"
+}

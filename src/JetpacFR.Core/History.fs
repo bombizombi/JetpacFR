@@ -115,6 +115,7 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
 type KeyLog() =
   let events = ResizeArray<KeyEvent>()
 
+  member _.Events = events
   member _.Count = events.Count
 
   member _.Add(e: KeyEvent) = events.Add e

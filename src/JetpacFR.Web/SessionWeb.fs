@@ -107,7 +107,7 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
       R = uint8 (r.R()) }
 
   do
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     port.AddMemoryWriteHandler(fun e ->
       recorder.RecordWrite
         { Tick = uint32 e.Tick

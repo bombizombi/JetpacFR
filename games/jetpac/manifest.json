@@ -1,0 +1,7 @@
+{
+  "name": "Jetpac",
+  "rom": "../../assets/48.rom",
+  "tzx": "../../assets/Jetpac.tzx",
+  "boot": "auto",
+  "script": "demo-keys.json"
+}

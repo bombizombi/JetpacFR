@@ -68,9 +68,23 @@ type MainWindow() as self =
   inherit Window()
 
   let mutable session: TraceSession option = None
-  let bootTask =
-    System.Threading.Tasks.Task.Run(fun () ->
-      TraceSession(LocalAssets.find "48.rom", LocalAssets.find "Jetpac.tzx", 4_000_000))
+  let mutable bootTask: System.Threading.Tasks.Task<TraceSession> option = None
+  let mutable manualBoot: ManualBoot option = None
+  let mutable currentGame: GameManifest option = None
+  let mutable gamesList: GameManifest list = []
+  let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
+
+  /// Walk up from the app base directory to the first folder containing a
+  /// games/ directory (the manifests live at the repository root).
+  let findGamesDir () =
+    let rec walk (d: System.IO.DirectoryInfo) =
+      let candidate = System.IO.Path.Combine(d.FullName, "games")
+      if System.IO.Directory.Exists candidate then candidate
+      else
+        match d.Parent with
+        | null -> ""
+        | parent -> walk parent
+    walk (System.IO.DirectoryInfo AppContext.BaseDirectory)
 
   // ---- palette -----------------------------------------------------------
   let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
@@ -135,6 +149,28 @@ type MainWindow() as self =
   let slider = Slider()
   let cursorLabel = TextBlock()
   let statusText = TextBlock()
+
+  /// Start a game from its manifest: warm cache -> fast port session; cold
+  /// auto -> oracle boot (slow, first run); cold manual -> the user runs the
+  /// loader in the oracle and marks the entry point.
+  let launchGame (m: GameManifest) =
+    manualBoot <- None
+    manualTimer.Stop()
+    currentGame <- Some m
+    match EntryCache.tryLoad m.Rom m.Tzx with
+    | Some _ ->
+      bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
+        TraceSession(m.Rom, m.Tzx, 4_000_000)))
+      statusText.Text <- sprintf "booting %s (cached entry state)..." m.Name
+    | None when m.Boot = "auto" ->
+      bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
+        TraceSession(m.Rom, m.Tzx, 4_000_000)))
+      statusText.Text <- sprintf "booting %s to game entry (first run, slow)..." m.Name
+    | None ->
+      manualBoot <- Some(ManualBoot(m.Rom, m.Tzx))
+      manualTimer.Start()
+      statusText.Text <-
+        sprintf "%s: run the game loader here; press 'Set as game entry' when it is ready" m.Name
   let recordToggle = CheckBox(Content = "Rec trace", IsChecked = Nullable<bool>(true))
   let playBtn = Button(Content = "Play")
   let regCells = Dictionary<string, TextBlock>()
@@ -159,6 +195,9 @@ type MainWindow() as self =
   let queuePromptsBtn = Button(Content = "Prompts for queue")
   let validateQueueBtn = Button(Content = "Validate queue")
   let rewindSlider = Slider(Minimum = 0.0, Maximum = 0.0, Value = 0.0, Width = 260.0)
+  let gameCombo = ComboBox(Width = 130.0, VerticalAlignment = VerticalAlignment.Center)
+  let setEntryBtn = Button(Content = "Set as game entry")
+  let exportScriptBtn = Button(Content = "Export script")
   let timeLabel = TextBlock(Text = "00:00", VerticalAlignment = VerticalAlignment.Center)
   let goBtn = Button(Content = "Go")
   let replayBtn = Button(Content = "Replay")
@@ -1288,7 +1327,55 @@ type MainWindow() as self =
       | :? string as s -> cinemaSpeed <- Int32.Parse s
       | _ -> ())
 
-    for c in [ runBtn :> Control; pauseBtn :> Control; stepFrameBtn :> Control; recordToggle :> Control; soundToggle :> Control; saveBtn :> Control; loadBtn :> Control ] do
+    // game selection + manual boot + script export
+    gamesList <- Manifest.discover (findGamesDir ())
+    if List.isEmpty gamesList then
+      // Fallback: no games/ folder reachable from the app; the Jetpac
+      // default keeps the app usable without manifests.
+      gamesList <-
+        [ { Name = "Jetpac"
+            Rom = LocalAssets.find "48.rom"
+            Tzx = LocalAssets.find "Jetpac.tzx"
+            Boot = "auto"
+            Script = None } ]
+    gameCombo.ItemsSource <- gamesList
+    gameCombo.DisplayMemberPath <- "Name"
+    gameCombo.SelectedIndex <- 0
+    gameCombo.SelectionChanged.Add(fun _ ->
+      match gameCombo.SelectedItem with
+      | :? GameManifest as g ->
+        if session.IsSome then pauseGame ()
+        session <- None
+        loaded <- None
+        built <- None
+        launchGame g
+      | _ -> ())
+    setEntryBtn.Click.Add(fun _ ->
+      match manualBoot with
+      | Some mb ->
+        mb.CaptureEntry()
+        manualBoot <- None
+        manualTimer.Stop()
+        statusText.Text <- "game entry captured - starting the port session..."
+        match currentGame with
+        | Some g -> launchGame g
+        | None -> ()
+      | None -> statusText.Text <- "no manual boot running (the game has a cached entry or boots automatically)")
+    exportScriptBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        let dlg = Microsoft.Win32.SaveFileDialog(Filter = "JSON (*.json)|*.json", FileName = "script.json")
+        if dlg.ShowDialog() = Nullable<bool>(true) then
+          let body =
+            s.KeyLog.Events
+            |> Seq.map (fun e ->
+              sprintf "  { \"frame\": %d, \"row\": %d, \"bit\": %d, \"pressed\": %b }" e.Frame e.Row e.Bit e.Pressed)
+            |> String.concat ",\n"
+          System.IO.File.WriteAllText(dlg.FileName, "[\n" + body + "\n]\n")
+          statusText.Text <- sprintf "exported %d key events to %s" s.KeyLog.Events.Count dlg.FileName
+      | None -> statusText.Text <- "no game running - play first, then export")
+
+    for c in [ gameCombo :> Control; setEntryBtn :> Control; exportScriptBtn :> Control; runBtn :> Control; pauseBtn :> Control; stepFrameBtn :> Control; recordToggle :> Control; soundToggle :> Control; saveBtn :> Control; loadBtn :> Control ] do
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     toolbar.Children.Add sep |> ignore
@@ -1389,11 +1476,17 @@ type MainWindow() as self =
     self.KeyDown.Add(fun e ->
       match session with
       | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, true)) (keyMap e.Key)
-      | None -> ())
+      | None ->
+        match manualBoot with
+        | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, true)) (keyMap e.Key)
+        | None -> ())
     self.KeyUp.Add(fun e ->
       match session with
       | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, false)) (keyMap e.Key)
-      | None -> ())
+      | None ->
+        match manualBoot with
+        | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
+        | None -> ())
 
     // timers
     frameTimer.Tick.Add(fun _ -> if running then renderFrame ())
@@ -1411,15 +1504,26 @@ type MainWindow() as self =
           slider.Value <- float cursor
           syncingSlider <- false
         else cinemaPlaying <- false)
+    manualTimer.Tick.Add(fun _ ->
+      match manualBoot with
+      | Some mb ->
+        mb.RunFrame()
+        gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), mb.ScreenBuffer, 320 * 4, 0)
+        statusText.Text <-
+          sprintf "manual boot: frame %d, tape %s - press 'Set as game entry' when the game is ready"
+            mb.FrameCount (if mb.TapePlaying then "playing" else "stopped")
+      | None -> ())
     uiTimer.Tick.Add(fun _ ->
       match session with
       | None ->
-        if bootTask.IsCompleted then
+        match bootTask with
+        | Some t when t.IsCompleted ->
           try
-            session <- Some bootTask.Result
+            session <- Some t.Result
             startGame ()
           with ex ->
             statusText.Text <- "boot failed: " + ex.Message
+        | _ -> ()
       | Some s ->
         if not rewinding then
           rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.History.LastFrame)
@@ -1446,11 +1550,18 @@ type MainWindow() as self =
               slider.IsEnabled <- true
             syncingSlider <- false)
     uiTimer.Start()
+    manualTimer.Start()
+
+    // Launch the first discovered game (the previous behavior: boot the
+    // default game on startup).
+    if not (List.isEmpty gamesList) then
+      launchGame (List.head gamesList)
 
     self.Closed.Add(fun _ ->
       running <- false
       frameTimer.Stop()
       cinemaTimer.Stop()
+      manualTimer.Stop()
       uiTimer.Stop()
       Audio.Stop ())
 

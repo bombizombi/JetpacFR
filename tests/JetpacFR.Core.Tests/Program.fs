@@ -261,27 +261,35 @@ let runAgree (romPath: string) (tzxPath: string) : int =
   if failures.Count > 0 then 1 else 0
 
 let runGaps () : int =
-  printfn "generated-table gap probe (the reported 0x6496 case)"
+  printfn "generic-table coverage probe (the reported 0x6496 case)"
   match EntryCache.tryLoad rom tzx with
   | Some (mem, state) ->
     let port = Jetpac2.Core.Machine()
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     port.LoadState(mem, state)
     // Fresh machine, zero cycles executed: the interrupt cannot be pending,
     // so a Step at this address is a pure dispatch.
     port.Regs.SetPc 0x6496
+    let opcode = int mem[0x6496]
     let outcome =
       try
         port.Step() |> ignore
         "executable"
       with ex ->
         if ex.Message.StartsWith "no code at" then
-          sprintf "gap, pc preserved=%b" (port.Regs.Pc() = 0x6496)
+          sprintf "uncovered opcode, pc preserved=%b" (port.Regs.Pc() = 0x6496)
         else "other: " + ex.Message
-    printfn "  0x6496 from entry state: %s" outcome
-    check "0x6496 is not executable in the port (translation gap)" (outcome.StartsWith "gap") outcome
-    check "failing PC is preserved after the error (UI can disassemble it)"
-      (outcome.StartsWith "gap, pc preserved=true") outcome
+    printfn "  0x6496 from entry state (opcode %02X): %s" opcode outcome
+    // The generic table dispatches by opcode, not address: 0x6496 holds a
+    // covered opcode (0xCD = CALL), so it executes even though the game
+    // never visits that address. Uncovered opcodes still raise "no code at"
+    // with the PC preserved (the UI's static-disasm path).
+    if opcode = 0xCD then
+      check "0x6496 (opcode CD) is executable in the generic table" (outcome = "executable") outcome
+      check "executed step advanced past 0x6496" (port.Regs.Pc() <> 0x6496)
+        (sprintf "pc=%04X" (port.Regs.Pc()))
+    else
+      check "uncovered opcode fails with pc preserved" (outcome.StartsWith "uncovered opcode, pc preserved=true") outcome
     if failures.Count > 0 then 1 else 0
   | None ->
     eprintfn "no entry cache; run --test trace first (cold boot)"
@@ -509,7 +517,7 @@ let runBench (romPath: string) (tzxPath: string) : int =
   let framesN = 600
   let runBare () =
     let m = Jetpac2.Core.Machine()
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     m.LoadState(mem, state)
     let sw = System.Diagnostics.Stopwatch.StartNew()
     let mutable steps = 0L
@@ -569,7 +577,7 @@ let runHistory (romPath: string) (tzxPath: string) : int =
   // 2. SaveState/LoadState roundtrip on the bare machine is exact (the
   // foundation of every rewind restore).
   let m = Jetpac2.Core.Machine()
-  Jetpac2.Core.Generated.EnsureInstalled()
+  Jetpac2.Core.Z80Table.EnsureInstalled()
   let mem1, text1 = m.SaveState()
   let m2 = Jetpac2.Core.Machine()
   m2.LoadState(mem1, text1)
@@ -618,6 +626,119 @@ let runHistory (romPath: string) (tzxPath: string) : int =
 
   if failures.Count > 0 then 1 else 0
 
+let runManifest () : int =
+  printfn "manifest: game discovery + load"
+  let rec walk (d: DirectoryInfo) =
+    let candidate = Path.Combine(d.FullName, "games")
+    if Directory.Exists candidate then Some candidate
+    else
+      match d.Parent with
+      | null -> None
+      | p -> walk p
+  let gamesDir =
+    match walk (DirectoryInfo AppContext.BaseDirectory) with
+    | Some d -> d
+    | None ->
+      check "games/ directory found from the test base" false "not found"
+      ""
+  match walk (DirectoryInfo AppContext.BaseDirectory) with
+  | None -> check "games/ directory found from the test base" false "not found"
+  | Some gamesDir ->
+    let games = Manifest.discover gamesDir
+    check "at least one game manifest discovered" (games.Length >= 1) (sprintf "%d games" games.Length)
+    match games |> List.tryFind (fun g -> g.Name = "Jetpac") with
+    | Some jetpac ->
+      check "jetpac manifest resolves rom" (File.Exists jetpac.Rom) jetpac.Rom
+      check "jetpac manifest resolves tzx" (File.Exists jetpac.Tzx) jetpac.Tzx
+      check "jetpac boots automatically" (jetpac.Boot = "auto") jetpac.Boot
+    | None -> check "jetpac manifest present" false ""
+  if failures.Count > 0 then 1 else 0
+
+let runGame2 () : int =
+  printfn "game2: synthetic 48K game at 0x7000 - full pipeline (multi-game proof)"
+  // Find the fixture through the manifest mechanism (same path the UI uses).
+  let rec walk (d: DirectoryInfo) =
+    let candidate = Path.Combine(d.FullName, "games")
+    if Directory.Exists candidate then Some candidate
+    else
+      match d.Parent with
+      | null -> None
+      | p -> walk p
+  match walk (DirectoryInfo AppContext.BaseDirectory) |> Option.bind (Manifest.discover >> List.tryFind (fun g -> g.Name = "Synthetic (test fixture)")) with
+  | None ->
+    check "synthetic game manifest discovered" false "not found"
+    1
+  | Some g ->
+    // 1. Seed the entry state. This is exactly what ManualBoot.CaptureEntry
+    // produces after the user runs the loader and marks the entry: the
+    // machine-code game below runs from 0x7000 (NOT the Jetpac layout),
+    // loops forever calling a subroutine at 0x7030 that writes a screen
+    // pattern, reads the keyboard into 0x7102, and RETs.
+    let code = Array.zeroCreate<byte> 0x80 // address - 0x7000 = index
+    code[0x00] <- 0x3Euy; code[0x01] <- 0x00uy // LD A,0 (reset frame counter)
+    code[0x02] <- 0x32uy; code[0x03] <- 0x01uy; code[0x04] <- 0x71uy // LD (0x7101),A
+    code[0x05] <- 0xCDuy; code[0x06] <- 0x30uy; code[0x07] <- 0x70uy // CALL 0x7030
+    code[0x08] <- 0x18uy; code[0x09] <- 0xFBuy // JR 0x7005 (infinite loop)
+    code[0x30] <- 0x3Auy; code[0x31] <- 0x01uy; code[0x32] <- 0x71uy // LD A,(0x7101)
+    code[0x33] <- 0x3Cuy // INC A
+    code[0x34] <- 0x32uy; code[0x35] <- 0x01uy; code[0x36] <- 0x71uy // LD (0x7101),A
+    code[0x37] <- 0x21uy; code[0x38] <- 0x00uy; code[0x39] <- 0x40uy // LD HL,0x4000
+    code[0x3A] <- 0x47uy // LD B,A
+    code[0x3B] <- 0x77uy; code[0x3C] <- 0x23uy; code[0x3D] <- 0x10uy; code[0x3E] <- 0xFCuy // LD (HL),A / INC HL / DJNZ 0x703B
+    code[0x3F] <- 0xDBuy; code[0x40] <- 0xFEuy; code[0x41] <- 0xE6uy; code[0x42] <- 0x1Fuy // IN A,(0xFE) / AND 0x1F
+    code[0x43] <- 0x32uy; code[0x44] <- 0x02uy; code[0x45] <- 0x71uy // LD (0x7102),A
+    code[0x46] <- 0xC9uy // RET
+    let mem = Array.zeroCreate<byte> 0x10000
+    Array.blit code 0 mem 0x7000 0x47
+    let state =
+      "af=0000\nbc=0000\nde=0000\nhl=0000\naf2=0000\nbc2=0000\nde2=0000\nhl2=0000\nix=0000\niy=0000\nsp=7FFE\npc=7000\ni=00\nr=00\nwz=FFFF\niff1=false\niff2=false\nim=0\nhalted=false\nborder=7\nbeeper=false\ntapeEar=false\ncycles=0\nvideoNextTime=224\nnextWrap=69664\nirq=false\n"
+    EntryCache.save g.Rom g.Tzx mem state
+
+    // 2. Rewind/replay/branch determinism on the non-Jetpac layout.
+    let historyCode = runHistory g.Rom g.Tzx
+    if historyCode <> 0 then historyCode
+    else
+      // 3. Mine: the subroutine at 0x7030 called from the 0x7005 loop.
+      let session = TraceSession(g.Rom, g.Tzx, 1_000_000)
+      let framesN = 120
+      let script = Jetpac3.Core.Script.defaultSession framesN
+      for f in 0 .. framesN - 1 do
+        session.RunFrame() |> ignore
+        for (sf, row, bit, pressed) in script do
+          if sf = f then session.SetKey(row, bit, pressed)
+      let trace = session.Recorder.Build()
+      let routines, edges = Miner.mine trace
+      let entrySet = routines |> List.map (fun r -> r.Entry) |> Set.ofList
+      check "synthetic routine 0x7030 mined" (entrySet.Contains 0x7030)
+        (sprintf "%d routines" routines.Length)
+      match routines |> List.tryFind (fun r -> r.Entry = 0x7030) with
+      | Some r ->
+        check "0x7030 called from the main loop" (r.CallCount >= 10) (sprintf "%d calls" r.CallCount)
+        check "call edge 0x7005 -> 0x7030 recorded"
+          (edges |> List.exists (fun e -> e.Callee = 0x7030 && e.Count >= 1)) ""
+        let pcCycles = Array.zeroCreate<int64> 0x10000
+        for e in trace.Entries do
+          if e.Length <> 0uy then pcCycles[int e.Pc] <- pcCycles[int e.Pc] + int64 e.Cycles
+        let contract = Contract.extract session.Memory trace r pcCycles
+        check "contract ends with RET" (contract.Disassembly |> List.exists (fun i -> i.Text = "RET")) ""
+        check "contract attributes writes to the screen/keyboard cells"
+          (contract.WriteRanges |> List.exists (fun (lo, hi, _, _) -> lo <= 0x7102 && hi >= 0x4000))
+          (sprintf "%A" (contract.WriteRanges |> List.truncate 4))
+      | None -> check "synthetic routine 0x7030 mined" false "not found"
+      // 4. Differential: port vs oracle, 0 diffs, 150 frames with keys.
+      // The lifted-registry hook is per-game: the synthetic game has no
+      // lifts yet, so an empty hook is the correct registry (Jetpac's
+      // registryHook would fire Jetpac lifts at the wrong addresses).
+      let report =
+        Validation.run g.Rom g.Tzx 150 (Jetpac3.Core.Script.defaultSession 150)
+          (fun _ -> None) System.Threading.CancellationToken.None
+      check "synthetic game validates 0 diffs vs the oracle"
+        report.Passed
+        (match report.FirstDivergence with
+         | Some d -> sprintf "%s@%04X port=%04X oracle=%04X" d.Kind d.Address d.PortPc d.OraclePc
+         | None -> "")
+      if failures.Count > 0 then 1 else 0
+
 [<EntryPoint>]
 let main argv =
   try
@@ -637,11 +758,13 @@ let main argv =
       | "validate" -> runValidate rom tzx
       | "prompt" -> runPrompt rom tzx
       | "bench" -> runBench rom tzx
+      | "manifest" -> runManifest ()
+      | "game2" -> runGame2 ()
       | "history" -> runHistory rom tzx
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
-        + runHistory rom tzx
+        + runHistory rom tzx + runManifest () + runGame2 ()
       | other ->
         eprintfn "unknown test: %s" other
         1

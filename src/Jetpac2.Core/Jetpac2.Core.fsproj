@@ -10,6 +10,7 @@
     <Compile Include="Timing.fs" />
     <Compile Include="Screen.fs" />
     <Compile Include="Machine.fs" />
+    <Compile Include="Z80Table.fs" />
     <Compile Include="Beeper.fs" />
     <Compile Include="Data.fs" />
     <Compile Include="Generated.fs" />

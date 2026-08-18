@@ -26,6 +26,7 @@
     <Compile Include="../Jetpac2.Core/Timing.fs" />
     <Compile Include="../Jetpac2.Core/Screen.fs" />
     <Compile Include="../Jetpac2.Core/Machine.fs" />
+    <Compile Include="../Jetpac2.Core/Z80Table.fs" />
     <Compile Include="../Jetpac2.Core/Beeper.fs" />
     <Compile Include="../Jetpac2.Core/Generated.fs" />
     <!-- Jetpac3.Core: ExecutionMode + lifted registry verbatim; Boot/Script are

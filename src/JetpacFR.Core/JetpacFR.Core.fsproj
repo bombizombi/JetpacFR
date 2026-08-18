@@ -13,6 +13,8 @@
     <Compile Include="Prompt.fs" />
     <Compile Include="History.fs" />
     <Compile Include="Session.fs" />
+    <Compile Include="Manifest.fs" />
+    <Compile Include="ManualBoot.fs" />
     <Compile Include="Validation.fs" />
   </ItemGroup>
 

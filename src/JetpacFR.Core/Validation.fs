@@ -114,7 +114,7 @@ module Validation =
     let oracle = Jetpac.Core.Spectrum48()
     oracle.LoadState(mem, state)
     let port = Jetpac2.Core.Machine()
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     port.Override <- overrideHook
     port.LoadState(mem, state)
     let mutable frame = 0

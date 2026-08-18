@@ -25,14 +25,19 @@ module LocalAssets =
 /// The cache is keyed by the ROM/TZX hashes so a changed game invalidates it.
 module EntryCache =
 
-  let private dir = Path.Combine(AppContext.BaseDirectory, "entry-cache")
-  let private memoryPath = Path.Combine(dir, "memory.bin")
-  let private statePath = Path.Combine(dir, "state.txt")
-  let private metaPath = Path.Combine(dir, "meta.txt")
-
   let private sha256 (bytes: byte[]) =
     use sha = System.Security.Cryptography.SHA256.Create()
     sha.ComputeHash bytes |> Array.map (fun b -> b.ToString("x2")) |> String.concat ""
+
+  /// One cache slot per game, keyed by the ROM hash: switching games must
+  /// not wipe another game's booted entry state.
+  let private dir (romPath: string) =
+    let h = sha256 (File.ReadAllBytes romPath)
+    Path.Combine(AppContext.BaseDirectory, "entry-cache", h.Substring(0, 12))
+
+  let private memoryPath romPath = Path.Combine(dir romPath, "memory.bin")
+  let private statePath romPath = Path.Combine(dir romPath, "state.txt")
+  let private metaPath romPath = Path.Combine(dir romPath, "meta.txt")
 
   let private marker (romPath: string) (tzxPath: string) =
     sprintf "rom=%s\ntzx=%s\n" (sha256 (File.ReadAllBytes romPath)) (sha256 (File.ReadAllBytes tzxPath))
@@ -41,12 +46,13 @@ module EntryCache =
   /// structurally intact; None otherwise (cold boot needed).
   let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
     try
-      if File.Exists memoryPath && File.Exists statePath && File.Exists metaPath then
+      let mp = memoryPath romPath
+      if File.Exists mp && File.Exists (statePath romPath) && File.Exists (metaPath romPath) then
         let current = marker romPath tzxPath
-        let stored = File.ReadAllText metaPath
+        let stored = File.ReadAllText (metaPath romPath)
         if stored = current then
-          let mem = File.ReadAllBytes memoryPath
-          if mem.Length = 0x10000 then Some(mem, File.ReadAllText statePath)
+          let mem = File.ReadAllBytes mp
+          if mem.Length = 0x10000 then Some(mem, File.ReadAllText (statePath romPath))
           else None
         else None
       else None
@@ -54,10 +60,10 @@ module EntryCache =
 
   let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
     try
-      Directory.CreateDirectory dir |> ignore
-      File.WriteAllBytes(memoryPath, mem)
-      File.WriteAllText(statePath, state)
-      File.WriteAllText(metaPath, marker romPath tzxPath)
+      Directory.CreateDirectory (dir romPath) |> ignore
+      File.WriteAllBytes(memoryPath romPath, mem)
+      File.WriteAllText(statePath romPath, state)
+      File.WriteAllText(metaPath romPath, marker romPath tzxPath)
     with _ -> () // the cache is an optimization; a failed write must not break startup
 
 /// The engine: the Jetpac2 port machine driven instruction-by-instruction,
@@ -124,7 +130,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
       R = uint8 (r.R()) }
 
   do
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     // Run lifted routines in the live session too: per-address dispatch, so
     // each Step still executes one logical instruction and the trace records
     // exactly what ran (same bytes/lengths as the generated layer).

@@ -11,7 +11,7 @@ type Jetpac() =
   let mutable fixtureRegsText = ""
 
   do
-    Generated.EnsureInstalled()
+    Z80Table.EnsureInstalled()
     machine.Override <- Semantic.hook
 
   member this.DebugMachine = machine

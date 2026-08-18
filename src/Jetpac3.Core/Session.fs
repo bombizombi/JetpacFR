@@ -134,7 +134,7 @@ type Session(romPath: string, tzxPath: string) as self =
     | _ -> ()
 
   do
-    Jetpac2.Core.Generated.EnsureInstalled()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
     attachPort port
     // OUT (n),A / OUT (C),r is the only path a 48K Spectrum can drive the
     // beeper through; hook the oracle's OUT dispatch to log each write.
