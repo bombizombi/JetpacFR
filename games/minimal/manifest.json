@@ -1,0 +1,5 @@
+{
+  "name": "Minimal",
+  "program": { "bin": "proba.bin", "address": 32768 },
+  "boot": "program"
+}

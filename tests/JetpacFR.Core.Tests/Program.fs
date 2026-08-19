@@ -10,6 +10,7 @@ module JetpacFRTests.Program
 open System
 open System.IO
 open JetpacFR.Core
+open Jetpac2.Core.Z80BuilderInstance
 
 let rom = LocalAssets.find "48.rom"
 let tzx = LocalAssets.find "Jetpac.tzx"
@@ -652,6 +653,13 @@ let runManifest () : int =
       check "jetpac manifest resolves tzx" (File.Exists jetpac.Tzx) jetpac.Tzx
       check "jetpac boots automatically" (jetpac.Boot = "auto") jetpac.Boot
     | None -> check "jetpac manifest present" false ""
+    match games |> List.tryFind (fun g -> g.Name = "Minimal") with
+    | Some m ->
+      check "minimal manifest is a program boot" (m.Boot = "program") m.Boot
+      check "minimal manifest has program bin+address"
+        (m.ProgramBin.IsSome && m.ProgramAddress = Some 32768)
+        (sprintf "bin=%b addr=%A" m.ProgramBin.IsSome m.ProgramAddress)
+    | None -> check "minimal manifest present" false ""
   if failures.Count > 0 then 1 else 0
 
 let runGame2 () : int =
@@ -739,6 +747,380 @@ let runGame2 () : int =
          | None -> "")
       if failures.Count > 0 then 1 else 0
 
+let runMinimal () : int =
+  printfn "minimal: CE DSL game project - bytes, mixed CE+raw, oracle lockstep"
+    // 1. Structure -> bytes: assembling the CE program reproduces the image.
+  check "CE assemble reproduces the game image" (MinimalGame.Game.assembled = MinimalGame.Game.binary)
+    (sprintf "%d vs %d bytes" MinimalGame.Game.assembled.Length MinimalGame.Game.binary.Length)
+  // 2. Mixed raw + CE program: the two forms interleave and assemble
+  // exactly (raw bytes not yet disassembled, CE ops once lifted).
+  let mixed : Jetpac2.Core.Z80Op list =
+    z80 {
+      yield! [| 0x3Euy; 0x00uy |] // LD A,0 (raw)
+      Jetpac2.Core.Z80Vocab.INC_A
+      Jetpac2.Core.Z80Vocab.LD_HL 16384
+      yield! [| 0xC9uy |] // RET (raw)
+    }
+  let mixedBytes = Jetpac2.Core.Z80.assemble mixed
+  let expected = [| 0x3Euy; 0x00uy; 0x3Cuy; 0x21uy; 0x00uy; 0x40uy; 0xC9uy |]
+  check "mixed raw+CE assembles to the expected bytes" (mixedBytes = expected)
+    (sprintf "%A" mixedBytes)
+  // 3. Structure -> behavior: the CE frame driver on the port must
+  // lockstep with the oracle (which executes the same bytes natively) over
+  // 150 frames: identical memory, PC/SP, and cycle counts.
+  let mem, state = MinimalGame.Game.entryState MinimalGame.Game.binary
+  let port = Jetpac2.Core.Machine()
+  Jetpac2.Core.Z80Table.EnsureInstalled()
+  port.LoadState(mem, state)
+  let oracle = Jetpac.Core.Spectrum48()
+  oracle.LoadState(mem, state)
+  let mutable ok = true
+  let mutable detail = ""
+  let mutable f = 0
+  while ok && f < 150 do
+    MinimalGame.Game.runFrame port |> ignore
+    oracle.RunGameFrame()
+    let mutable memDiff = -1
+    let mutable i = 0x4000
+    while memDiff < 0 && i < 0x10000 do
+      if port.Memory[i] <> oracle.Memory[i] then memDiff <- i
+      i <- i + 1
+    let z = oracle.DebugZ80
+    let regsOk =
+      port.Regs.Pc() = z.Regs.Pc()
+      && port.Regs.Sp() = z.Regs.Sp()
+      && port.CycleCount() = int64 (z.CycleCount())
+    if memDiff >= 0 || not regsOk then
+      ok <- false
+      detail <- sprintf "frame %d memDiff=%d pc=%04X/%04X cycles=%d/%d"
+        f memDiff (port.Regs.Pc()) (z.Regs.Pc()) (port.CycleCount()) (z.CycleCount())
+    f <- f + 1
+  check "CE driver locksteps with the oracle over 150 frames" ok detail
+  // 4. If proba.bin is present, the assembled bytes must equal it exactly
+  // (the "compare emitted bytes to the original" contract).
+  let rec findMinimal (d: DirectoryInfo) =
+    let candidate = Path.Combine(d.FullName, "games", "minimal", "proba.bin")
+    if File.Exists candidate then Some candidate
+    else
+      match d.Parent with
+      | null -> None
+      | p -> findMinimal p
+  match findMinimal (DirectoryInfo AppContext.BaseDirectory) with
+  | Some proba ->
+    let orig = File.ReadAllBytes proba
+    check "assembled bytes match proba.bin" (MinimalGame.Game.assembled = orig)
+      (sprintf "%d vs %d bytes" MinimalGame.Game.assembled.Length orig.Length)
+  | None -> printfn "  proba.bin not present yet - placeholder game used"
+  if failures.Count > 0 then 1 else 0
+
+let runZ80Ops () : int =
+  printfn "z80ops: per-op oracle lockstep (%d ops)" Jetpac2.Core.Z80Vocab.allOps.Length
+  let stateText (af: int) (bc: int) (de: int) (hl: int) (ix: int) (iy: int) (sp: int) =
+    sprintf "af=%04X\nbc=%04X\nde=%04X\nhl=%04X\naf2=0000\nbc2=0000\nde2=0000\nhl2=0000\nix=%04X\niy=%04X\nsp=%04X\npc=8000\ni=00\nr=00\nwz=FFFF\niff1=false\niff2=false\nim=0\nhalted=false\nborder=7\nbeeper=false\ntapeEar=false\ncycles=0\nvideoNextTime=224\nnextWrap=69664\nirq=false\n"
+      af bc de hl ix iy sp
+  let mutable badOps = 0
+  let mutable detail = ""
+  for (name, op, kind) in Jetpac2.Core.Z80Vocab.allOps do
+    let mem = Array.zeroCreate<byte> 0x10000
+    // Program = [op; HALT] at 0x8000 (HALT alone for itself: a halted CPU
+    // re-executes at 1 cycle, which the second-op model would mismatch).
+    let program = if kind = "halt" then [ op ] else [ op; Jetpac2.Core.Z80Vocab.HALT ]
+    let bytes = Jetpac2.Core.Z80.assemble program
+    Array.blit bytes 0 mem 0x8000 bytes.Length
+    let mutable af, bc, de, hl, ix, iy, sp = 0, 0, 0, 0, 0, 0, 0x7FFE
+    match kind with
+    | "hl" ->
+      hl <- 0x9000; mem[0x9000] <- 0x12uy
+    | "ixd" ->
+      ix <- 0x9000; mem[0x9002] <- 0x12uy
+    | "iyd" ->
+      iy <- 0x9000; mem[0x9002] <- 0x12uy
+    | "nn" ->
+      mem[0x9000] <- 0x34uy; mem[0x9001] <- 0x12uy
+    | "sp" ->
+      mem[0x7FFE] <- 0x34uy; mem[0x7FFF] <- 0x12uy
+    | "exsp" ->
+      mem[0x7FFE] <- 0x34uy; mem[0x7FFF] <- 0x12uy
+    | "djnz" ->
+      bc <- 0x0001
+    | "jp" ->
+      mem[0x0000] <- 0x76uy
+    | "ret" ->
+      // RET pops to the HALT byte that follows the op (1- or 2-byte ops).
+      let haltAddr = 0x8000 + op.Bytes.Length
+      mem[0x7FFE] <- byte (haltAddr &&& 0xFF)
+      mem[0x7FFF] <- byte ((haltAddr >>> 8) &&& 0xFF)
+    | "rst" ->
+      mem[0x00] <- 0x76uy; mem[0x08] <- 0x76uy; mem[0x10] <- 0x76uy; mem[0x18] <- 0x76uy
+      mem[0x20] <- 0x76uy; mem[0x28] <- 0x76uy; mem[0x30] <- 0x76uy; mem[0x38] <- 0x76uy
+    | "block" ->
+      // Single pass: BC=1 so the repeat ops (LDIR/CPIR) do not loop.
+      hl <- 0x9000; de <- 0x9100; bc <- 0x0001
+      mem[0x9000] <- 0x12uy; mem[0x9100] <- 0x55uy
+    | _ -> ()
+    let state = stateText af bc de hl ix iy sp
+    let port = Jetpac2.Core.Machine()
+    Jetpac2.Core.Z80Table.EnsureInstalled()
+    port.LoadState(mem, state)
+    let oracle = Jetpac.Core.Spectrum48()
+    oracle.LoadState(mem, state)
+    // CE run of the two-op program vs the oracle's native execution.
+    Jetpac2.Core.Z80.run program port
+    let z = oracle.DebugZ80
+    z.ExecuteOne()
+    if kind <> "halt" then z.ExecuteOne()
+    let mutable memDiff = -1
+    let mutable i = 0
+    while memDiff < 0 && i < 0x10000 do
+      if port.Memory[i] <> oracle.Memory[i] then memDiff <- i
+      i <- i + 1
+    let regsOk =
+      port.Regs.Pc() = z.Regs.Pc()
+      && port.Regs.Sp() = z.Regs.Sp()
+      && port.Regs.Get Jetpac2.Core.R16.AF = z.Regs.Get Jetpac.Core.R16.AF
+      && port.Regs.Get Jetpac2.Core.R16.BC = z.Regs.Get Jetpac.Core.R16.BC
+      && port.Regs.Get Jetpac2.Core.R16.DE = z.Regs.Get Jetpac.Core.R16.DE
+      && port.Regs.Get Jetpac2.Core.R16.HL = z.Regs.Get Jetpac.Core.R16.HL
+      && port.Regs.Get Jetpac2.Core.R16.AF_ = z.Regs.Get Jetpac.Core.R16.AF_
+      && port.Regs.Get Jetpac2.Core.R16.BC_ = z.Regs.Get Jetpac.Core.R16.BC_
+      && port.Regs.Get Jetpac2.Core.R16.DE_ = z.Regs.Get Jetpac.Core.R16.DE_
+      && port.Regs.Get Jetpac2.Core.R16.HL_ = z.Regs.Get Jetpac.Core.R16.HL_
+      && port.Regs.Ix() = z.Regs.Ix()
+      && port.Regs.Iy() = z.Regs.Iy()
+      && port.Regs.I() = z.Regs.I()
+      && port.Regs.R() = z.Regs.R()
+      && port.Iff1 = z.Iff1
+      && port.Iff2 = z.Iff2
+      && port.IrqMode = z.IrqMode
+    let cyclesOk = port.CycleCount() = int64 (z.CycleCount())
+    if memDiff >= 0 || not regsOk || not cyclesOk then
+      badOps <- badOps + 1
+      if badOps <= 10 then
+        printfn "  FAIL %s: mem=%d pc=%04X/%04X cycles=%d/%d" name memDiff
+          (port.Regs.Pc()) (z.Regs.Pc()) (port.CycleCount()) (z.CycleCount())
+  check "every vocabulary op locksteps with the oracle" (badOps = 0)
+    (sprintf "%d/%d failed%s" badOps Jetpac2.Core.Z80Vocab.allOps.Length detail)
+  if badOps = 0 then printfn "  all %d ops matched the oracle" Jetpac2.Core.Z80Vocab.allOps.Length
+  if failures.Count > 0 then 1 else 0
+
+let runLabels () : int =
+  printfn "labels: two-pass symbolic assembly + oracle lockstep"
+  // Bounded loop with a backward JP: LD B,3; loop: DEC B; JP NZ loop; HALT.
+  let loop = Jetpac2.Core.Z80.label ()
+  let loopProgram : Jetpac2.Core.Z80Op list =
+    z80 {
+      Jetpac2.Core.Z80Vocab.LD_B 0x03
+      Jetpac2.Core.Z80.at loop
+      Jetpac2.Core.Z80Vocab.DEC_B
+      Jetpac2.Core.Z80.JP_NZ_LBL loop
+      Jetpac2.Core.Z80Vocab.HALT
+    }
+  let bytes = Jetpac2.Core.Z80.assemble loopProgram
+  // Layout: 06 03 | 05 | C2 02 00 (JP NZ -> the DEC B at offset 2) | 76
+  let expected = [| 0x06uy; 0x03uy; 0x05uy; 0xC2uy; 0x02uy; 0x00uy; 0x76uy |]
+  check "backward JP label assembles to the expected bytes" (bytes = expected)
+    (sprintf "%A" bytes)
+  // Forward reference: JR over a NOP. Layout: 00 | 18 FD | 76
+  // (JR at offset 1: disp = target(0) - (1 + 2) = -3 = 0xFD).
+  let fwdProgram : Jetpac2.Core.Z80Op list =
+    z80 {
+      let target = Jetpac2.Core.Z80.label ()
+      Jetpac2.Core.Z80.at target
+      Jetpac2.Core.Z80Vocab.NOP
+      Jetpac2.Core.Z80.JR_LBL target
+      Jetpac2.Core.Z80Vocab.HALT
+    }
+  let fwdBytes = Jetpac2.Core.Z80.assemble fwdProgram
+  let fwdExpected = [| 0x00uy; 0x18uy; 0xFDuy; 0x76uy |]
+  check "backward JR label (over a NOP) assembles to the expected bytes" (fwdBytes = fwdExpected)
+    (sprintf "%A" fwdBytes)
+  // CALL to a forward subroutine: LD A,5; CALL sub; HALT; sub: DEC A; RET.
+  let callProgram : Jetpac2.Core.Z80Op list =
+    z80 {
+      let sub = Jetpac2.Core.Z80.label ()
+      Jetpac2.Core.Z80Vocab.LD_A 0x05
+      Jetpac2.Core.Z80.CALL_LBL sub
+      Jetpac2.Core.Z80Vocab.HALT
+      Jetpac2.Core.Z80.at sub
+      Jetpac2.Core.Z80Vocab.DEC_A
+      Jetpac2.Core.Z80Vocab.RET
+    }
+  let callBytes = Jetpac2.Core.Z80.assemble callProgram
+  // Layout: 3E 05 | CD 03 00 (CALL -> sub at offset 3) | 76 | 3D | C9
+  // Layout: 3E 05 | CD 06 00 (CALL -> sub at offset 6) | 76 | 3D | C9
+  let callExpected = [| 0x3Euy; 0x05uy; 0xCDuy; 0x06uy; 0x00uy; 0x76uy; 0x3Duy; 0xC9uy |]
+  check "forward CALL label assembles to the expected bytes" (callBytes = callExpected)
+    (sprintf "%A" callBytes)
+  // Oracle lockstep on the bounded loop: 7 instructions (3 x DEC+JP, HALT).
+  let mem = Array.zeroCreate<byte> 0x10000
+  Array.blit bytes 0 mem 0x8000 bytes.Length
+  let state =
+    "af=0000\nbc=0000\nde=0000\nhl=0000\naf2=0000\nbc2=0000\nde2=0000\nhl2=0000\nix=0000\niy=0000\nsp=7FFE\npc=8000\ni=00\nr=00\nwz=FFFF\niff1=false\niff2=false\nim=0\nhalted=false\nborder=7\nbeeper=false\ntapeEar=false\ncycles=0\nvideoNextTime=224\nnextWrap=69664\nirq=false\n"
+  let port = Jetpac2.Core.Machine()
+  Jetpac2.Core.Z80Table.EnsureInstalled()
+  port.LoadState(mem, state)
+  let oracle = Jetpac.Core.Spectrum48()
+  oracle.LoadState(mem, state)
+  let z = oracle.DebugZ80
+  for _ in 1 .. 7 do
+    port.Step()
+    z.ExecuteOne()
+  let mutable memDiff = -1
+  let mutable i = 0
+  while memDiff < 0 && i < 0x10000 do
+    if port.Memory[i] <> oracle.Memory[i] then memDiff <- i
+    i <- i + 1
+  let ok =
+    memDiff < 0
+    && port.Regs.Pc() = z.Regs.Pc()
+    && port.Regs.Get Jetpac2.Core.R16.AF = z.Regs.Get Jetpac.Core.R16.AF
+    && port.Regs.Get Jetpac2.Core.R16.BC = z.Regs.Get Jetpac.Core.R16.BC
+    && port.CycleCount() = int64 (z.CycleCount())
+  check "labeled loop locksteps with the oracle" ok
+    (sprintf "mem=%d pc=%04X/%04X cycles=%d/%d" memDiff (port.Regs.Pc()) (z.Regs.Pc())
+       (port.CycleCount()) (z.CycleCount()))
+  // The CE index (used by runFrame) also resolves labels.
+  let idx = Jetpac2.Core.Z80.makeIndex loopProgram
+  check "label resolution via makeIndex"
+    (idx.Lookup 2 |> Option.isSome && !loop = 2) (sprintf "cell=%d" !loop)
+  if failures.Count > 0 then 1 else 0
+
+let runIntegration () : int =
+  printfn "integration: CE invalidation + co-executing effects"
+  let state =
+    "af=0000\nbc=0000\nde=0000\nhl=0000\naf2=0000\nbc2=0000\nde2=0000\nhl2=0000\nix=0000\niy=0000\nsp=FFFE\npc=8000\ni=00\nr=00\nwz=FFFF\niff1=false\niff2=false\nim=0\nhalted=false\nborder=7\nbeeper=false\ntapeEar=false\ncycles=0\nvideoNextTime=224\nnextWrap=69664\nirq=false\n"
+
+  let smcProgram =
+    [ Jetpac2.Core.Z80Vocab.LD_A 1
+      Jetpac2.Core.Z80Vocab.HALT ]
+  let smcImage = Jetpac2.Core.Z80.assemble smcProgram
+  let smcMem = Array.zeroCreate<byte> 0x10000
+  Array.blit smcImage 0 smcMem 0x8000 smcImage.Length
+  let smcMachine = Jetpac2.Core.Machine()
+  Jetpac2.Core.Z80Table.EnsureInstalled()
+  smcMachine.LoadState(smcMem, state)
+  let smcIndex = Jetpac2.Core.Z80.makeIndexAt 0x8000 smcProgram
+  smcIndex.Attach smcMachine
+  let mutable visits = 0
+  smcMachine.AddCoHook(0x8000, fun m ->
+    visits <- visits + 1
+    m.Write(0x8001, 2)
+    [ Jetpac2.Core.Say "patched" ]) |> ignore
+  let resolveSmc (m: Jetpac2.Core.Machine) =
+    match smcIndex.Lookup(m.Regs.Pc()) with
+    | Some op -> op.Run m
+    | None -> Jetpac2.Core.Machine.GeneratedStep m
+  smcMachine.ExecuteOne resolveSmc
+  check "SMC hook invalidates the CE entry before dispatch"
+    (visits = 1 && smcMachine.Regs.Get Jetpac2.Core.R8.A = 2
+     && not (smcIndex.IsValid 0x8000))
+    (sprintf "visits=%d A=%d valid=%b" visits (smcMachine.Regs.Get Jetpac2.Core.R8.A)
+      (smcIndex.IsValid 0x8000))
+  check "co-hook Say effect is emitted" (smcMachine.DrainEffects() = [ Jetpac2.Core.Say "patched" ]) ""
+  smcMachine.LoadState(smcMem, state)
+  check "state reload refreshes CE validity" (smcIndex.IsValid 0x8000) "entry stayed invalid after reload"
+
+  let hookProgram =
+    [ Jetpac2.Core.Z80Vocab.LD_A 9
+      Jetpac2.Core.Z80Vocab.HALT ]
+  let hookImage = Jetpac2.Core.Z80.assemble hookProgram
+  let hookMem = Array.zeroCreate<byte> 0x10000
+  Array.blit hookImage 0 hookMem 0x8000 hookImage.Length
+  let hookMachine = Jetpac2.Core.Machine()
+  hookMachine.LoadState(hookMem, state)
+  let hookIndex = Jetpac2.Core.Z80.makeIndexAt 0x8000 hookProgram
+  hookIndex.Attach hookMachine
+  hookMachine.AddCoHook(0x8000, fun _ ->
+    [ Jetpac2.Core.Say "first"; Jetpac2.Core.Tick 2 ]) |> ignore
+  hookMachine.AddCoHook(0x8000, fun _ -> [ Jetpac2.Core.Say "second" ]) |> ignore
+  let resolveHook (m: Jetpac2.Core.Machine) =
+    match hookIndex.Lookup(m.Regs.Pc()) with
+    | Some op -> op.Run m
+    | None -> Jetpac2.Core.Machine.GeneratedStep m
+  hookMachine.ExecuteOne resolveHook
+  check "co-hooks run in registration order and preserve the instruction"
+    (hookMachine.Regs.Get Jetpac2.Core.R8.A = 9
+     && hookMachine.DrainEffects() = [ Jetpac2.Core.Say "first"; Jetpac2.Core.Say "second" ]
+     && hookMachine.CycleCount() = 9L)
+    (sprintf "A=%d cycles=%d" (hookMachine.Regs.Get Jetpac2.Core.R8.A) (hookMachine.CycleCount()))
+  let stepMachine = Jetpac2.Core.Machine()
+  stepMachine.LoadState(hookMem, state)
+  stepMachine.AddCoHook(0x8000, fun _ -> [ Jetpac2.Core.Say "step" ]) |> ignore
+  stepMachine.Step()
+  check "co-hooks also run on the generated interpreter path"
+    (stepMachine.Regs.Get Jetpac2.Core.R8.A = 9
+     && stepMachine.DrainEffects() = [ Jetpac2.Core.Say "step" ]) ""
+  let dynamicCache = Jetpac3.Core.CodeCache()
+  dynamicCache.Attach stepMachine
+  dynamicCache.Decode stepMachine.Memory 0x8000 |> ignore
+  let decodedBeforeReset = dynamicCache.Count
+  stepMachine.LoadState(hookMem, state)
+  check "dynamic decode cache clears on state reload"
+    (decodedBeforeReset = 1 && dynamicCache.Count = 0)
+    (sprintf "before=%d after=%d" decodedBeforeReset dynamicCache.Count)
+  if failures.Count > 0 then 1 else 0
+
+let runCE () : int =
+  printfn "ce: binary -> CE ops (roundtrip) + F# source"
+  let rec findMinimal (d: DirectoryInfo) =
+    let candidate = Path.Combine(d.FullName, "games", "minimal", "proba.bin")
+    if File.Exists candidate then Some candidate
+    else
+      match d.Parent with
+      | null -> None
+      | p -> findMinimal p
+  match findMinimal (DirectoryInfo AppContext.BaseDirectory) with
+  | None ->
+    check "proba.bin present" false "missing"
+    1
+  | Some path ->
+    let img = File.ReadAllBytes path
+    let mem = Array.zeroCreate<byte> 0x10000
+    Array.blit img 0 mem 0x8000 img.Length
+    // 1. The roundtrip contract: assemble(toOps(binary)) == binary.
+    let ops = Z80CE.toOps mem 0x8000 img.Length
+    let rebuilt = Jetpac2.Core.Z80.assemble ops
+    check "roundtrip: assemble(toOps(binary)) == binary" (rebuilt = img)
+      (sprintf "%d vs %d bytes" rebuilt.Length img.Length)
+    // 2. Coverage: proba.bin decodes almost entirely to real ops.
+    let rawBytes = ops |> List.filter (fun o -> o.Mnemonic = "raw") |> List.sumBy (fun o -> o.Bytes.Length)
+    check "proba.bin decodes to real ops (raw < 5%)"
+      (rawBytes < img.Length / 20)
+      (sprintf "%d raw of %d bytes" rawBytes img.Length)
+    // 3. The F# source: labels + named ops.
+    let src = Z80CE.toSource mem 0x8000 img.Length
+    check "source opens a z80 block" (src.Contains "z80 {") ""
+    check "source labels in-range jumps" (src.Contains "Z80.at lbl0") ""
+    check "source uses labeled conditional jumps" (src.Contains "Z80.JR_Z_LBL" || src.Contains "Z80.JR_LBL" || src.Contains "Z80.JP_NZ_LBL") ""
+    check "source emits LDIR" (src.Contains "Z80Vocab.LDIR") ""
+    check "source emits the self-modifying store" (src.Contains "Z80Vocab.LD_ptr_BC 0x802D") ""
+    // 4. The CEGame engine wrapper (used by the Desktop/Web toggles)
+    // locksteps with the oracle.
+    let ceState = snd (MinimalGame.Game.entryState img)
+    let ce = JetpacFR.Core.CEGame(MinimalGame.Game.program, mem, ceState)
+    let oracle2 = Jetpac.Core.Spectrum48()
+    oracle2.LoadState(mem, ceState)
+    let mutable ok2 = true
+    let mutable detail2 = ""
+    let mutable f2 = 0
+    while ok2 && f2 < 30 do
+      ce.RunFrame() |> ignore
+      oracle2.RunGameFrame()
+      let mutable d = -1
+      let mutable i = 0x4000
+      while d < 0 && i < 0x10000 do
+        if ce.Memory[i] <> oracle2.Memory[i] then d <- i
+        i <- i + 1
+      let z2 = oracle2.DebugZ80
+      if d >= 0 || ce.Regs.Pc() <> z2.Regs.Pc() || ce.CycleCount <> int64 (z2.CycleCount()) then
+        ok2 <- false
+        detail2 <- sprintf "frame %d mem=%d pc=%04X/%04X" f2 d (ce.Regs.Pc()) (z2.Regs.Pc())
+      f2 <- f2 + 1
+    check "CEGame engine wrapper locksteps with the oracle" ok2 detail2
+    printfn "  --- generated source (first 24 lines) ---"
+    src.Split('\n') |> Array.truncate 24 |> Array.iter (printfn "  %s")
+    if failures.Count > 0 then 1 else 0
+
 [<EntryPoint>]
 let main argv =
   try
@@ -759,12 +1141,18 @@ let main argv =
       | "prompt" -> runPrompt rom tzx
       | "bench" -> runBench rom tzx
       | "manifest" -> runManifest ()
+      | "minimal" -> runMinimal ()
       | "game2" -> runGame2 ()
       | "history" -> runHistory rom tzx
+      | "z80ops" -> runZ80Ops ()
+      | "labels" -> runLabels ()
+      | "integration" -> runIntegration ()
+      | "ce" -> runCE ()
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
-        + runHistory rom tzx + runManifest () + runGame2 ()
+        + runHistory rom tzx + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
+        + runLabels () + runIntegration () + runCE ()
       | other ->
         eprintfn "unknown test: %s" other
         1

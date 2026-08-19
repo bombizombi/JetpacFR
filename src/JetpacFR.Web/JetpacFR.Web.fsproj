@@ -27,6 +27,9 @@
     <Compile Include="../Jetpac2.Core/Screen.fs" />
     <Compile Include="../Jetpac2.Core/Machine.fs" />
     <Compile Include="../Jetpac2.Core/Z80Table.fs" />
+    <Compile Include="../Jetpac2.Core/Z80Asm.fs" />
+    <Compile Include="../Jetpac2.Core/Z80Vocab.fs" />
+    <Compile Include="../Jetpac2.Core/Z80Decode.fs" />
     <Compile Include="../Jetpac2.Core/Beeper.fs" />
     <Compile Include="../Jetpac2.Core/Generated.fs" />
     <!-- Jetpac3.Core: ExecutionMode + lifted registry verbatim; Boot/Script are
@@ -39,6 +42,9 @@
          are web shims (originals use System.IO/Marshal) -->
     <Compile Include="TraceTypesWeb.fs" />
     <Compile Include="../JetpacFR.Core/Disasm.fs" />
+    <Compile Include="../JetpacFR.Core/Z80CE.fs" />
+    <Compile Include="../JetpacFR.Core/CEGame.fs" />
+    <Compile Include="../../games/minimal/Game.fs" />
     <Compile Include="SessionWeb.fs" />
     <Compile Include="../JetpacFR.Core/Miner.fs" />
     <Compile Include="../JetpacFR.Core/Contract.fs" />
@@ -47,6 +53,7 @@
     <Compile Include="TraceCodecWeb.fs" />
     <!-- The shell UI -->
     <Compile Include="App.fs" />
+    <Compile Include="CEHost.fs" />
   </ItemGroup>
 
   <ItemGroup>

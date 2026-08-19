@@ -11,7 +11,7 @@ import { equals as equals_1, clear, disposeSafe, getEnumerator } from "../fable_
 import { op_Addition, fromUInt64, toInt64_unchecked, equals, compare } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
 import { Z80__get_Halted, Z80__get_IrqMode, Z80__get_Iff2, Z80__get_Iff1, Z80__CycleCount, Z80__ExecuteOne, Z80__get_Regs } from "../Jetpac.Core/Z80.js";
 import { disasmMemory } from "./Disasm.js";
-import { EnsureInstalled } from "../Jetpac2.Core/Generated.js";
+import { EnsureInstalled } from "../Jetpac2.Core/Z80Table.js";
 import { isCancellationRequested } from "../fable_modules/fable-library-js.5.13.0/Async.js";
 import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
 import { toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";

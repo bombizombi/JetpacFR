@@ -1,16 +1,16 @@
 
 import { FSharpRef, Union, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { uint8_type, record_type, bool_type, int32_type, int64_type, union_type, class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { clear, disposeSafe, getEnumerator, curry2, Exception, Lazy, defaultOf, equals } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { copyTo, item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { uint8_type, string_type, record_type, bool_type, int32_type, int64_type, union_type, class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { clear, curry2, disposeSafe, getEnumerator, Exception, Lazy, defaultOf, equals } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { copy, copyTo, item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
 import { Keyboard__SetKey_289F56A, Keyboard__In_Z524259A4, Keyboard_$ctor } from "./Keyboard.js";
 import { SchedulerTask_$ctor_43314A15, Scheduler__Reset_Z524259C1, Scheduler__Tick_Z524259C1, Scheduler__get_Cycles, Scheduler__Schedule_79A1460, Scheduler_$ctor } from "./Timing.js";
 import { VideoConstants_CyclesPerScanLine, VideoScreen__NextScanLine, VideoScreen__SetState_289F56A, VideoScreen__SetBorder_Z524259A4, VideoScreen_$ctor_Z3F6BC7B1 } from "./Screen.js";
-import { equals as equals_1, op_Modulus, toInt32_unchecked, op_Division, op_Subtraction, fromInt32, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
+import { op_Addition, op_Multiply, equals as equals_1, op_Modulus, toInt32_unchecked, op_Division, op_Subtraction, fromInt32, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
+import { getItemFromDict, tryGetValue } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
 import { toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
 import { min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { replace, substring } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { getItemFromDict, tryGetValue } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
+import { printf, toText, replace, substring } from "../fable_modules/fable-library-js.5.13.0/String.js";
 import { parse } from "../fable_modules/fable-library-js.5.13.0/Int32.js";
 import { parse as parse_1 } from "../fable_modules/fable-library-js.5.13.0/Long.js";
 
@@ -650,6 +650,30 @@ export function HardwareEvent_$reflection() {
 }
 
 /**
+ * Co-execution effect emitted by an address hook. `Tick` is intentionally
+ * behavior-changing: it advances the same scheduler used by the CPU and is
+ * therefore for explicit instrumentation experiments, not normal parity runs.
+ */
+export class Effect extends Union {
+    constructor(tag, fields) {
+        super();
+        this.tag = tag;
+        this.fields = fields;
+    }
+    cases() {
+        return ["Tick", "Say"];
+    }
+}
+
+export function Effect_$reflection() {
+    return union_type("Jetpac2.Core.Effect", [], Effect, () => [[["Item", int32_type]], [["Item", string_type]]]);
+}
+
+/**
+ * Address-attached hooks run before the resolved instruction and do not
+ * replace it. The returned effects are applied immediately, in list order.
+ * `Machine -> Effect list` keeps the hook Fable-clean and lets hooks inspect
+ * or deliberately mutate the shared machine state.
  * Invalidation input for decoded code/cache layers.
  */
 export class MemoryWriteEvent extends Record {
@@ -680,6 +704,11 @@ export class Machine {
         this.outHandlers = [];
         this.hardwareEvents = [];
         this.memoryWriteHandlers = [];
+        this.memoryResetHandlers = [];
+        this.instrumentationEffects = [];
+        this.coHooks = initialize(65536, (_arg) => []);
+        this.coHookLocations = (new Map([]));
+        this.nextCoHookToken = 0;
         this.beeperTrace = [];
         this.beeperLevel = false;
         this.earLevel = false;
@@ -689,11 +718,11 @@ export class Machine {
         this.iff1_ = false;
         this.iff2_ = false;
         this.irqMode_ = 0;
-        this.overrideHook = ((_arg) => undefined);
+        this.overrideHook = ((_arg_1) => undefined);
         this.frameEnd = (0n);
-        this["videoTask@370"] = (new Lazy(() => Machine__videoTask(this)));
-        this["videoTask@370-1"] = this["videoTask@370"].Value;
-        Scheduler__Schedule_79A1460(this.scheduler, this["videoTask@370-1"], toInt64_unchecked(fromInt32(0)));
+        this["videoTask@389"] = (new Lazy(() => Machine__videoTask(this)));
+        this["videoTask@389-1"] = this["videoTask@389"].Value;
+        Scheduler__Schedule_79A1460(this.scheduler, this["videoTask@389-1"], toInt64_unchecked(fromInt32(0)));
         void (this.outHandlers.push((port) => ((value) => {
             if ((port & 255) === 254) {
                 VideoScreen__SetBorder_Z524259A4(this.video, value & 7);
@@ -707,7 +736,7 @@ export class Machine {
         })));
         void (this.inHandlers.push((port_1) => Keyboard__In_Z524259A4(this.keyboard, port_1)));
         void (this.inHandlers.push((port_2) => (((port_2 & 1) !== 0) ? undefined : (191 | (this.earLevel ? 64 : 0)))));
-        this["init@346"] = 1;
+        this["init@359"] = 1;
     }
 }
 
@@ -724,6 +753,37 @@ export function Machine_$ctor() {
         throw new Exception("Generated instruction table not installed");
     });
 })();
+
+function Machine__ApplyEffect_3D049D32(this$, effect) {
+    if (effect.tag === 1) {
+        void (this$.instrumentationEffects.push(effect));
+    }
+    else {
+        const n = effect.fields[0] | 0;
+        if (n < 0) {
+            throw new Exception("Tick cannot be negative (Parameter \'effect\')");
+        }
+        Machine__PassTime_Z524259A4(this$, n);
+    }
+}
+
+function Machine__RunCoHooks(this$) {
+    const hooks = item(RegisterFile__Pc(this$.regs) & 65535, this$.coHooks);
+    const count = hooks.length | 0;
+    let i = 0;
+    while (i < count) {
+        const enumerator = getEnumerator(item(i, hooks)[1](this$));
+        try {
+            while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+                Machine__ApplyEffect_3D049D32(this$, enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]());
+            }
+        }
+        finally {
+            disposeSafe(enumerator);
+        }
+        i = ((i + 1) | 0);
+    }
+}
 
 export function Machine__get_Memory(this$) {
     return this$.memory;
@@ -757,8 +817,16 @@ export function Machine__get_HardwareEvents(this$) {
     return this$.hardwareEvents;
 }
 
+export function Machine__get_Effects(this$) {
+    return this$.instrumentationEffects;
+}
+
 export function Machine__get_Halted(this$) {
     return this$.halted_;
+}
+
+export function Machine__set_Halted_Z1FBCCD16(this$, v) {
+    this$.halted_ = v;
 }
 
 export function Machine__get_IrqPending(this$) {
@@ -841,6 +909,51 @@ export function Machine__AddMemoryWriteHandler_Z3CB4FF01(this$, handler) {
     void (this$.memoryWriteHandlers.push(handler));
 }
 
+export function Machine__AddMemoryResetHandler_3A5B6456(this$, handler) {
+    void (this$.memoryResetHandlers.push(handler));
+}
+
+/**
+ * Register a co-executing hook. Hooks at one address execute in registration
+ * order. The token is stable for the lifetime of this machine.
+ */
+export function Machine__AddCoHook_6363443A(this$, address, hook) {
+    const addr = (address & 65535) | 0;
+    const token = this$.nextCoHookToken | 0;
+    this$.nextCoHookToken = ((this$.nextCoHookToken + 1) | 0);
+    void (item(addr, this$.coHooks).push([token, hook]));
+    this$.coHookLocations.set(token, addr);
+    return token | 0;
+}
+
+export function Machine__RemoveCoHook_Z524259A4(this$, token) {
+    let matchValue;
+    let outArg = 0;
+    matchValue = [tryGetValue(this$.coHookLocations, token, new FSharpRef(() => (outArg | 0), (v) => {
+        outArg = (v | 0);
+    })), outArg];
+    if (matchValue[0]) {
+        const hooks = item(matchValue[1], this$.coHooks);
+        let i = 0;
+        while (i < hooks.length) {
+            if (item(i, hooks)[0] === token) {
+                hooks.splice(i, 1);
+                i = (hooks.length | 0);
+            }
+            else {
+                i = ((i + 1) | 0);
+            }
+        }
+        this$.coHookLocations.delete(token);
+    }
+}
+
+export function Machine__DrainEffects(this$) {
+    const items = toList(this$.instrumentationEffects);
+    clear(this$.instrumentationEffects);
+    return items;
+}
+
 export function Machine__In_Z524259A4(this$, port) {
     let combined = 255;
     let enumerator = getEnumerator(this$.inHandlers);
@@ -871,7 +984,9 @@ export function Machine__Out_Z37302880(this$, port, value) {
     finally {
         disposeSafe(enumerator);
     }
-    void (this$.hardwareEvents.push(new HardwareEvent(Scheduler__get_Cycles(this$.scheduler), port & 65535, value & 255, this$.border, this$.beeperLevel)));
+    if (this$.hardwareEvents.length < 65536) {
+        void (this$.hardwareEvents.push(new HardwareEvent(Scheduler__get_Cycles(this$.scheduler), port & 65535, value & 255, this$.border, this$.beeperLevel)));
+    }
 }
 
 export function Machine__DrainHardwareEvents(this$) {
@@ -882,22 +997,7 @@ export function Machine__DrainHardwareEvents(this$) {
 
 export function Machine__Write_Z37302880(this$, address, value) {
     Machine__PassTime_Z524259A4(this$, 3);
-    const addr = (address & 65535) | 0;
-    const oldValue = item(addr, this$.memory);
-    const newValue = (value & 255) & 0xFF;
-    this$.memory[addr] = newValue;
-    if (oldValue !== newValue) {
-        const event = new MemoryWriteEvent(Scheduler__get_Cycles(this$.scheduler), addr, oldValue, newValue);
-        let enumerator = getEnumerator(this$.memoryWriteHandlers);
-        try {
-            while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
-                enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]()(event);
-            }
-        }
-        finally {
-            disposeSafe(enumerator);
-        }
-    }
+    Machine__storeRamByte(this$, address, value);
 }
 
 export function Machine__SetKey_289F56A(this$, row, bit, pressed) {
@@ -916,8 +1016,7 @@ export function Machine__Branch_Z524259A4(this$, offset) {
 /**
  * One opcode/prefix byte: refresh register + 4 T-states + PC advance
  * (mirrors Z80.ReadOpcode; the instruction bytes are decoded statically,
- * so the memory read itself is skipped — the generated guard checks the
- * opcode byte still matches).
+ * so the memory read itself is skipped).
  */
 export function Machine__Fetch(this$) {
     Machine__PassTime_Z524259A4(this$, 3);
@@ -985,8 +1084,8 @@ function Machine__HandleInterrupt(this$) {
         this$.iff2_ = false;
         Machine__PassTime_Z524259A4(this$, 7);
         RegisterFile__SetSp_Z524259A4(this$.regs, (RegisterFile__Sp(this$.regs) - 2) & 65535);
-        this$.memory[RegisterFile__Sp(this$.regs)] = ((RegisterFile__Pc(this$.regs) & 255) & 0xFF);
-        this$.memory[(RegisterFile__Sp(this$.regs) + 1) & 65535] = (((RegisterFile__Pc(this$.regs) >> 8) & 255) & 0xFF);
+        Machine__storeRamByte(this$, RegisterFile__Sp(this$.regs), RegisterFile__Pc(this$.regs) & 255);
+        Machine__storeRamByte(this$, (RegisterFile__Sp(this$.regs) + 1) & 65535, (RegisterFile__Pc(this$.regs) >> 8) & 255);
         const matchValue = this$.irqMode_ | 0;
         switch (matchValue) {
             case 0:
@@ -1006,9 +1105,11 @@ function Machine__HandleInterrupt(this$) {
 }
 
 /**
- * Execute one instruction (mirrors Z80.ExecuteOne).
+ * Execute one instruction using a caller-provided base resolver. The
+ * resolver runs after co-hooks, so a hook that modifies the current opcode
+ * cannot leave a stale CE operation selected before the hook ran.
  */
-export function Machine__Step(this$) {
+export function Machine__ExecuteOne_5007B66A(this$, resolve) {
     if (this$.irqPending_) {
         Machine__HandleInterrupt(this$);
     }
@@ -1016,14 +1117,24 @@ export function Machine__Step(this$) {
         Machine__PassTime_Z524259A4(this$, 1);
     }
     else {
+        Machine__RunCoHooks(this$);
         const matchValue = this$.overrideHook(RegisterFile__Pc(this$.regs));
         if (matchValue == null) {
-            Machine_get_GeneratedStep()(this$);
+            resolve(this$);
         }
         else {
             matchValue(this$);
         }
     }
+}
+
+/**
+ * Execute one generated-table instruction (mirrors Z80.ExecuteOne).
+ */
+export function Machine__Step(this$) {
+    Machine__ExecuteOne_5007B66A(this$, (m) => {
+        Machine_get_GeneratedStep()(m);
+    });
 }
 
 /**
@@ -1046,11 +1157,20 @@ export function Machine_set_GeneratedStep_5007B66A(v) {
  */
 export function Machine__ResetClock_Z373037E0(this$, cycles, videoNextTime) {
     Scheduler__Reset_Z524259C1(this$.scheduler, cycles);
-    Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@370-1"], toInt64_unchecked(op_Subtraction(videoNextTime, cycles)));
+    Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@389-1"], toInt64_unchecked(op_Subtraction(videoNextTime, cycles)));
 }
 
 export function Machine__LoadState_5EF83E14(this$, bytes, regsText) {
     copyTo(bytes, 0, this$.memory, 0, min(bytes.length, 65536));
+    let enumerator = getEnumerator(this$.memoryResetHandlers);
+    try {
+        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+            enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]()();
+        }
+    }
+    finally {
+        disposeSafe(enumerator);
+    }
     const kv = new Map([]);
     const arr = regsText.split("\n");
     for (let idx = 0; idx <= (arr.length - 1); idx++) {
@@ -1112,12 +1232,11 @@ export function Machine__LoadState_5EF83E14(this$, bytes, regsText) {
     RegisterFile__SetPc_Z524259A4(this$.regs, hex("pc", 0));
     RegisterFile__SetI_Z524259A4(this$.regs, hex("i", 0));
     RegisterFile__SetR_Z524259A4(this$.regs, hex("r", 0));
-    RegisterFile__SetWz_Z524259A4(this$.regs, 65535);
+    RegisterFile__SetWz_Z524259A4(this$.regs, hex("wz", 65535));
     this$.iff1_ = boolv("iff1", false);
     this$.iff2_ = boolv("iff2", false);
     this$.irqMode_ = (hex("im", 0) | 0);
-    this$.halted_ = boolv("halted", false);
-    this$.irqPending_ = false;
+    this$.irqPending_ = boolv("irq", false);
     this$.border = (hex("border", 0) | 0);
     VideoScreen__SetBorder_Z524259A4(this$.video, this$.border);
     this$.beeperLevel = boolv("beeper", false);
@@ -1133,12 +1252,71 @@ export function Machine__LoadState_5EF83E14(this$, bytes, regsText) {
     this$.frameEnd = toInt64_unchecked(parse_1(getItemFromDict(kv, "nextWrap"), 511, false, 64));
 }
 
+/**
+ * Capture the full machine state (64K memory + key=value state text, the
+ * same schema the oracle uses, including `wz` which LoadState restores).
+ * The video task reschedules +224 inside its own run, so the next fire is
+ * always the next multiple of 224 — no schedule walk needed.
+ */
+export function Machine__SaveState(this$) {
+    const cycles = Scheduler__get_Cycles(this$.scheduler);
+    const videoNextTime = toInt64_unchecked(op_Multiply(toInt64_unchecked(op_Addition(toInt64_unchecked(op_Division(cycles, 224n)), 1n)), 224n));
+    const nextWrap = toInt64_unchecked(op_Multiply(toInt64_unchecked(op_Subtraction(toInt64_unchecked(op_Multiply(toInt64_unchecked(op_Division(toInt64_unchecked(op_Addition(toInt64_unchecked(op_Division(videoNextTime, 224n)), 312n)), 312n)), 312n)), 1n)), 224n));
+    let regsText;
+    const arg = RegisterFile__Get_Z61FD1070(this$.regs, R16.AF) | 0;
+    const arg_1 = RegisterFile__Get_Z61FD1070(this$.regs, R16.BC) | 0;
+    const arg_2 = RegisterFile__Get_Z61FD1070(this$.regs, R16.DE) | 0;
+    const arg_3 = RegisterFile__Get_Z61FD1070(this$.regs, R16.HL) | 0;
+    const arg_4 = RegisterFile__Get_Z61FD1070(this$.regs, R16.AF_) | 0;
+    const arg_5 = RegisterFile__Get_Z61FD1070(this$.regs, R16.BC_) | 0;
+    const arg_6 = RegisterFile__Get_Z61FD1070(this$.regs, R16.DE_) | 0;
+    const arg_7 = RegisterFile__Get_Z61FD1070(this$.regs, R16.HL_) | 0;
+    const arg_8 = RegisterFile__Ix(this$.regs) | 0;
+    const arg_9 = RegisterFile__Iy(this$.regs) | 0;
+    const arg_10 = RegisterFile__Sp(this$.regs) | 0;
+    const arg_11 = RegisterFile__Pc(this$.regs) | 0;
+    const arg_12 = RegisterFile__I(this$.regs) | 0;
+    const arg_13 = RegisterFile__R(this$.regs) | 0;
+    const arg_14 = RegisterFile__Wz(this$.regs) | 0;
+    const arg_15 = this$.iff1_;
+    const arg_16 = this$.iff2_;
+    const arg_17 = this$.irqMode_ | 0;
+    const arg_18 = this$.halted_;
+    const arg_19 = this$.border | 0;
+    const arg_20 = this$.beeperLevel;
+    const arg_21 = this$.earLevel;
+    const arg_25 = this$.irqPending_;
+    regsText = toText(printf("af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\nirq=%b\n"))(arg)(arg_1)(arg_2)(arg_3)(arg_4)(arg_5)(arg_6)(arg_7)(arg_8)(arg_9)(arg_10)(arg_11)(arg_12)(arg_13)(arg_14)(arg_15)(arg_16)(arg_17)(arg_18)(arg_19)(arg_20)(arg_21)(cycles)(videoNextTime)(nextWrap)(arg_25);
+    return [copy(this$.memory), regsText];
+}
+
 export function Machine__videoTask(this$) {
     return SchedulerTask_$ctor_43314A15((_arg) => {
         if (VideoScreen__NextScanLine(this$.video)) {
             this$.irqPending_ = true;
         }
-        Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@370"].Value, toInt64_unchecked(fromInt32(VideoConstants_CyclesPerScanLine)));
+        Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@389"].Value, toInt64_unchecked(fromInt32(VideoConstants_CyclesPerScanLine)));
     });
+}
+
+export function Machine__storeRamByte(this$, address, value) {
+    const addr = (address & 65535) | 0;
+    if (addr >= 16384) {
+        const oldValue = item(addr, this$.memory);
+        const newValue = (value & 255) & 0xFF;
+        this$.memory[addr] = newValue;
+        if (oldValue !== newValue) {
+            const event = new MemoryWriteEvent(Scheduler__get_Cycles(this$.scheduler), addr, oldValue, newValue);
+            let enumerator = getEnumerator(this$.memoryWriteHandlers);
+            try {
+                while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+                    enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]()(event);
+                }
+            }
+            finally {
+                disposeSafe(enumerator);
+            }
+        }
+    }
 }
 

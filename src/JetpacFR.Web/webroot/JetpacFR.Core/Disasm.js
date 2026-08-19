@@ -1773,6 +1773,37 @@ export function decode(get$, pc) {
 }
 
 /**
+ * Instruction length only — no mnemonic rendering, no closures. The
+ * recorder's hot path calls this for every executed instruction; the
+ * rendered text is produced on demand for the cinema and contract views.
+ * Mirrors `decode`'s prefix logic without any string or lambda work.
+ */
+export function disasmLength(memory, address) {
+    const pc = (address & 65535) | 0;
+    const op = ~~item(pc, memory) | 0;
+    switch (op) {
+        case 203:
+            return 2;
+        case 221:
+        case 253: {
+            const inner = ~~item((pc + 1) & 65535, memory) | 0;
+            switch (inner) {
+                case 203:
+                    return 4;
+                case 237:
+                    return (edLen(inner) + 1) | 0;
+                default:
+                    return ((baseLen(inner) + (usesHlMem(inner) ? 1 : 0)) + 1) | 0;
+            }
+        }
+        case 237:
+            return edLen(~~item((pc + 1) & 65535, memory)) | 0;
+        default:
+            return baseLen(op) | 0;
+    }
+}
+
+/**
  * Disassemble one instruction at `address` in a 64K memory image.
  */
 export function disasmMemory(memory, address) {

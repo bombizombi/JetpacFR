@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <Compile Include="Disasm.fs" />
+    <Compile Include="Z80CE.fs" />
+    <Compile Include="CEGame.fs" />
     <Compile Include="Trace.fs" />
     <Compile Include="Miner.fs" />
     <Compile Include="Contract.fs" />

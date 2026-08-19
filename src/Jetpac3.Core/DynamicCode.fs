@@ -177,7 +177,12 @@ type CodeCache() as self =
       dependents.Remove address |> ignore
     | _ -> ()
 
+  member this.Clear() =
+    instructions.Clear()
+    dependents.Clear()
+
   member this.Count = instructions.Count
 
   member this.Attach(machine: Jetpac2.Core.Machine) =
     machine.AddMemoryWriteHandler(fun event -> self.Invalidate event.Address)
+    machine.AddMemoryResetHandler(fun () -> self.Clear())

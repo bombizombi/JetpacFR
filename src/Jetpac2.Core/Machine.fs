@@ -336,6 +336,19 @@ type HardwareEvent =
     Border: int
     Beeper: bool }
 
+/// Co-execution effect emitted by an address hook. `Tick` is intentionally
+/// behavior-changing: it advances the same scheduler used by the CPU and is
+/// therefore for explicit instrumentation experiments, not normal parity runs.
+type Effect =
+  | Tick of int
+  | Say of string
+
+/// Address-attached hooks run before the resolved instruction and do not
+/// replace it. The returned effects are applied immediately, in list order.
+/// `Machine -> Effect list` keeps the hook Fable-clean and lets hooks inspect
+/// or deliberately mutate the shared machine state.
+
+
 /// Invalidation input for decoded code/cache layers.
 type MemoryWriteEvent =
   { Tick: int64
@@ -353,6 +366,12 @@ type Machine() as self =
   let outHandlers = System.Collections.Generic.List<int -> int -> unit>()
   let hardwareEvents = System.Collections.Generic.List<HardwareEvent>()
   let memoryWriteHandlers = System.Collections.Generic.List<MemoryWriteEvent -> unit>()
+  let memoryResetHandlers = System.Collections.Generic.List<unit -> unit>()
+  let instrumentationEffects = System.Collections.Generic.List<Effect>()
+  let coHooks : ResizeArray<int * (Machine -> Effect list)>[] =
+    Array.init 0x10000 (fun _ -> ResizeArray())
+  let coHookLocations = System.Collections.Generic.Dictionary<int, int>()
+  let mutable nextCoHookToken = 0
   let beeperTrace = System.Collections.Generic.List<int64 * bool>()
   let mutable beeperLevel = false
   let mutable earLevel = false
@@ -390,6 +409,37 @@ type Machine() as self =
       else
         Some(0xBF ||| (if earLevel then 0x40 else 0)))
 
+  let storeRamByte (address: int) (value: int) =
+    let addr = address &&& 0xFFFF
+    if addr >= 0x4000 then
+      let oldValue = memory.[addr]
+      let newValue = byte (value &&& 0xFF)
+      memory.[addr] <- newValue
+      if oldValue <> newValue then
+        let event =
+          { Tick = scheduler.Cycles
+            Address = addr
+            OldValue = oldValue
+            NewValue = newValue }
+        for handler in memoryWriteHandlers do handler event
+
+  member private this.ApplyEffect(effect: Effect) =
+    match effect with
+    | Tick n ->
+      if n < 0 then invalidArg "effect" "Tick cannot be negative"
+      this.PassTime n
+    | Say _ -> instrumentationEffects.Add effect
+
+  member private this.RunCoHooks() =
+    let hooks = coHooks.[regs.Pc() &&& 0xFFFF]
+    let count = hooks.Count
+    let mutable i = 0
+    while i < count do
+      let (_, hook) = hooks.[i]
+      let effects = hook this
+      for effect in effects do this.ApplyEffect effect
+      i <- i + 1
+
   member this.Memory = memory
   member this.Regs = regs
   member this.Video = video
@@ -398,7 +448,10 @@ type Machine() as self =
   member this.BeeperLevel = beeperLevel
   member this.BeeperTrace = beeperTrace
   member this.HardwareEvents = hardwareEvents
-  member this.Halted = halted_
+  member this.Effects = instrumentationEffects
+  member this.Halted
+    with get () = halted_
+    and set v = halted_ <- v
   member this.IrqPending = irqPending_
 
   member this.Iff1
@@ -428,6 +481,38 @@ type Machine() as self =
   member this.AddInHandler(handler: int -> int option) = inHandlers.Add handler
   member this.AddOutHandler(handler: int -> int -> unit) = outHandlers.Add handler
   member this.AddMemoryWriteHandler(handler: MemoryWriteEvent -> unit) = memoryWriteHandlers.Add handler
+  member this.AddMemoryResetHandler(handler: unit -> unit) = memoryResetHandlers.Add handler
+
+  /// Register a co-executing hook. Hooks at one address execute in registration
+  /// order. The token is stable for the lifetime of this machine.
+  member this.AddCoHook(address: int, hook: Machine -> Effect list) : int =
+    let addr = address &&& 0xFFFF
+    let token = nextCoHookToken
+    nextCoHookToken <- nextCoHookToken + 1
+    coHooks.[addr].Add((token, hook))
+    coHookLocations.[token] <- addr
+    token
+
+  member this.RemoveCoHook(token: int) =
+    match coHookLocations.TryGetValue token with
+    | true, addr ->
+      let hooks = coHooks.[addr]
+      let mutable i = 0
+      while i < hooks.Count do
+        let id, _ = hooks.[i]
+        if id = token then
+          hooks.RemoveAt i
+          i <- hooks.Count
+        else
+          i <- i + 1
+      coHookLocations.Remove token |> ignore
+    | _ -> ()
+
+  member this.DrainEffects() : Effect list =
+    let items = instrumentationEffects |> Seq.toList
+    instrumentationEffects.Clear()
+    items
+
   member this.In(port: int) : int =
     let mutable combined = 0xFF
     for handler in inHandlers do
@@ -452,16 +537,10 @@ type Machine() as self =
     hardwareEvents.Clear()
     items
 
-
   member this.Write(address: int, value: int) =
     this.PassTime 3
-    let addr = address &&& 0xFFFF
-    let oldValue = memory.[addr]
-    let newValue = byte (value &&& 0xFF)
-    memory.[addr] <- newValue
-    if oldValue <> newValue then
-      let event = { Tick = scheduler.Cycles; Address = addr; OldValue = oldValue; NewValue = newValue }
-      for handler in memoryWriteHandlers do handler event
+    storeRamByte address value
+
   member this.SetKey(row: int, bit: int, pressed: bool) = keyboard.SetKey(row, bit, pressed)
 
   member this.Halt() =
@@ -472,8 +551,7 @@ type Machine() as self =
 
   /// One opcode/prefix byte: refresh register + 4 T-states + PC advance
   /// (mirrors Z80.ReadOpcode; the instruction bytes are decoded statically,
-  /// so the memory read itself is skipped — the generated guard checks the
-  /// opcode byte still matches).
+  /// so the memory read itself is skipped).
   member this.Fetch() =
     this.PassTime 3
     regs.SetPc((regs.Pc() + 1) &&& 0xFFFF)
@@ -490,7 +568,6 @@ type Machine() as self =
     let low = this.ReadImm()
     let high = this.ReadImm()
     ((high <<< 8) ||| low) &&& 0xFFFF
-
 
   member this.Read(address: int) : int =
     this.PassTime 3
@@ -529,8 +606,8 @@ type Machine() as self =
       iff2_ <- false
       this.PassTime 7
       regs.SetSp((regs.Sp() - 2) &&& 0xFFFF)
-      memory.[regs.Sp()] <- byte (regs.Pc() &&& 0xFF)
-      memory.[(regs.Sp() + 1) &&& 0xFFFF] <- byte ((regs.Pc() >>> 8) &&& 0xFF)
+      storeRamByte (regs.Sp()) (regs.Pc() &&& 0xFF)
+      storeRamByte ((regs.Sp() + 1) &&& 0xFFFF) ((regs.Pc() >>> 8) &&& 0xFF)
       match irqMode_ with
       | 0
       | 1 -> regs.SetPc 0x38
@@ -540,16 +617,23 @@ type Machine() as self =
         regs.SetPc(vector &&& 0xFFFF)
       | _ -> failwith "Inconceivable interrupt mode"
 
-  /// Execute one instruction (mirrors Z80.ExecuteOne).
-  member this.Step() =
+  /// Execute one instruction using a caller-provided base resolver. The
+  /// resolver runs after co-hooks, so a hook that modifies the current opcode
+  /// cannot leave a stale CE operation selected before the hook ran.
+  member this.ExecuteOne(resolve: Machine -> unit) =
     if irqPending_ then
       this.HandleInterrupt()
     if halted_ then
       this.PassTime 1
     else
+      this.RunCoHooks()
       match overrideHook (regs.Pc()) with
       | Some f -> f this
-      | None -> Machine.GeneratedStep this
+      | None -> resolve this
+
+  /// Execute one generated-table instruction (mirrors Z80.ExecuteOne).
+  member this.Step() =
+    this.ExecuteOne(fun m -> Machine.GeneratedStep m)
 
   /// Installed by Generated.fs (same pattern as Z80Ops/Z80Dispatch).
   static member val GeneratedStep: Machine -> unit =
@@ -563,6 +647,7 @@ type Machine() as self =
 
   member this.LoadState(bytes: byte[], regsText: string) =
     Array.blit bytes 0 memory 0 (min bytes.Length 0x10000)
+    for handler in memoryResetHandlers do handler ()
     let kv = System.Collections.Generic.Dictionary<string, string>()
     for line in regsText.Split('\n') do
       let line = line.Trim()

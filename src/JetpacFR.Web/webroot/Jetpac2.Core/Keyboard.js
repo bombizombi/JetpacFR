@@ -1,5 +1,5 @@
 
-import { item, fill, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { setItem, item, fill, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
 import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
 
 /**
@@ -25,6 +25,10 @@ export function Keyboard__SetKey_289F56A(this$, row, bit, pressed) {
     item(row, this$.keys)[bit] = pressed;
 }
 
+export function Keyboard__GetKey_Z37302880(this$, row, bit) {
+    return item(bit, item(row, this$.keys));
+}
+
 /**
  * Keyboard responds to any even address.
  */
@@ -45,6 +49,34 @@ export function Keyboard__In_Z524259A4(this$, address) {
             }
         }
         return value;
+    }
+}
+
+/**
+ * The 8 half-row bytes (pressed bits inverted: 0 = pressed), the IN form.
+ */
+export function Keyboard__ToBytes(this$) {
+    const k = new Uint8Array(8);
+    for (let row = 0; row <= 7; row++) {
+        let bits = 0;
+        for (let bit = 0; bit <= 4; bit++) {
+            if (item(bit, item(row, this$.keys))) {
+                bits = ((bits | (1 << bit)) | 0);
+            }
+        }
+        setItem(k, row, (255 & ~bits) & 0xFF);
+    }
+    return k;
+}
+
+/**
+ * Apply half-row bytes captured by `ToBytes`.
+ */
+export function Keyboard__Load_Z3F6BC7B1(this$, bytes) {
+    for (let row = 0; row <= 7; row++) {
+        for (let bit = 0; bit <= 4; bit++) {
+            Keyboard__SetKey_289F56A(this$, row, bit, ((~~item(row, bytes) >> bit) & 1) === 0);
+        }
     }
 }
 

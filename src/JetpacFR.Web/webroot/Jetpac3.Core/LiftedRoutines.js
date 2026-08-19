@@ -4,8 +4,9 @@ import { record_type, lambda_type, unit_type, list_type, int32_type, string_type
 import { Alu_add16, Alu_add8, Alu_dec8, Alu_sbc16, Alu_sub8, Flags__get_zero, RegisterFile__Wz, RegisterFile__Ix, RegisterFile__SetWz_Z524259A4, Alu_and8, Alu_inc8, Alu_Direction, Alu_fastRotateCircular8, Machine__Push16_Z524259A4, Machine__Read_Z524259A4, RegisterFile__Exx, Machine__ReadImm16, Machine__Pop16, RegisterFile__SetPc_Z524259A4, Machine__Branch_Z524259A4, Flags__get_carry, Machine__Flags, Machine__ReadImm, Alu_cmp8, Machine__SetFlags_2901ED1A, RegisterFile__Set_33BF5693, RegisterFile__Set_ZC22B834, Machine__PassTime_Z524259A4, R8, RegisterFile__Get_Z600F6D11, R16, RegisterFile__Get_Z61FD1070, Machine__Write_Z37302880, Machine__Fetch, Machine__get_Regs, RegisterFile__Pc, Machine_$reflection } from "../Jetpac2.Core/Machine.js";
 import { ExecutionMode, ExecutionMode_$reflection } from "./Explorer.js";
 import { printf, toFail } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { contains, tryPick, ofArray } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { numberHash } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { ofArray } from "../fable_modules/fable-library-js.5.13.0/List.js";
+import { item, setItem, fill } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { defaultOf, disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
 
 /**
  * The converted `screenClear` routine (0x71B8 / 0x71C6): idiomatic F# replacing
@@ -645,17 +646,37 @@ export const LiftedRoutines_tableLookup64E6Routine = new LiftedRoutine("table-lo
 
 export const LiftedRoutines_registry = ofArray([LiftedRoutines_screenClearRoutine, LiftedRoutines_screenClear71CFRoutine, LiftedRoutines_screenStepRoutine, LiftedRoutines_tableLookup64E6Routine]);
 
+const LiftedRoutines_hookTable = (() => {
+    const table = fill(new Array(65536), 0, 65536, null);
+    const enumerator = getEnumerator(LiftedRoutines_registry);
+    try {
+        while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
+            const routine = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
+            const enumerator_1 = getEnumerator(routine.EntryAddresses);
+            try {
+                while (enumerator_1["System.Collections.IEnumerator.MoveNext"]()) {
+                    const addr = enumerator_1["System.Collections.Generic.IEnumerator`1.get_Current"]() | 0;
+                    setItem(table, addr, routine.Execute);
+                }
+            }
+            finally {
+                disposeSafe(enumerator_1);
+            }
+        }
+    }
+    finally {
+        disposeSafe(enumerator);
+    }
+    return table;
+})();
+
 export function LiftedRoutines_registryHook(address) {
-    return tryPick((routine) => {
-        if (contains(address, routine.EntryAddresses, {
-            Equals: (x, y) => (x === y),
-            GetHashCode: (x) => (numberHash(x) | 0),
-        })) {
-            return routine.Execute;
-        }
-        else {
-            return undefined;
-        }
-    }, LiftedRoutines_registry);
+    const f = item(address & 65535, LiftedRoutines_hookTable);
+    if (f === defaultOf()) {
+        return undefined;
+    }
+    else {
+        return f;
+    }
 }
 

@@ -70,6 +70,8 @@ type MainWindow() as self =
   let mutable session: TraceSession option = None
   let mutable bootTask: System.Threading.Tasks.Task<TraceSession> option = None
   let mutable manualBoot: ManualBoot option = None
+  let mutable ceGame: CEGame option = None
+  let mutable engineCE = false
   let mutable currentGame: GameManifest option = None
   let mutable gamesList: GameManifest list = []
   let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
@@ -166,6 +168,19 @@ type MainWindow() as self =
       bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
         TraceSession(m.Rom, m.Tzx, 4_000_000)))
       statusText.Text <- sprintf "booting %s to game entry (first run, slow)..." m.Name
+    | None when m.Boot = "program" ->
+      // A raw Z80 image: seed the entry cache from the bin, then boot the
+      // port session warm (the cache is keyed on the image file).
+      match m.ProgramBin, m.ProgramAddress with
+      | Some bin, Some addr ->
+        try
+          ProgramEntry.seed bin addr
+          bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
+            TraceSession(bin, bin, 4_000_000)))
+          statusText.Text <- sprintf "booting %s (program image at 0x%04X)..." m.Name addr
+        with ex ->
+          statusText.Text <- sprintf "cannot load %s's program image: %s" m.Name ex.Message
+      | _ -> statusText.Text <- sprintf "%s: manifest is missing program.bin/address" m.Name
     | None ->
       manualBoot <- Some(ManualBoot(m.Rom, m.Tzx))
       manualTimer.Start()
@@ -196,6 +211,8 @@ type MainWindow() as self =
   let validateQueueBtn = Button(Content = "Validate queue")
   let rewindSlider = Slider(Minimum = 0.0, Maximum = 0.0, Value = 0.0, Width = 260.0)
   let gameCombo = ComboBox(Width = 130.0, VerticalAlignment = VerticalAlignment.Center)
+  let engineCombo = ComboBox(Width = 92.0, VerticalAlignment = VerticalAlignment.Center)
+  let parityLabel = TextBlock(Text = "", VerticalAlignment = VerticalAlignment.Center, Foreground = normal)
   let setEntryBtn = Button(Content = "Set as game entry")
   let exportScriptBtn = Button(Content = "Export script")
   let timeLabel = TextBlock(Text = "00:00", VerticalAlignment = VerticalAlignment.Center)
@@ -304,10 +321,14 @@ type MainWindow() as self =
 
   // ---- view refresh ------------------------------------------------------
   let presentGame () =
-    match session with
-    | Some s ->
-      gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), s.ScreenBuffer, 320 * 4, 0)
-    | None -> ()
+    match ceGame with
+    | Some c ->
+      gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), c.ScreenBuffer, 320 * 4, 0)
+    | None ->
+      match session with
+      | Some s ->
+        gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), s.ScreenBuffer, 320 * 4, 0)
+      | None -> ()
 
   /// Static linear disassembly of port memory around `pc`, shown when the
   /// emulator stops (e.g. "no code at 0xNNNN"). The row at the error address
@@ -334,31 +355,42 @@ type MainWindow() as self =
         rows.Add { Tag = tag; Brush = (if isErr then red else normal); IsCurrent = isErr }
         addr <- (addr + insn.Length) &&& 0xFFFF
   /// MM:SS of accumulated play time at 50 fps (frames / 50).
-  let updateTimeLabel (s: TraceSession) =
-    let totalSeconds = s.Frame / 50
+  let updateTimeLabel (frames: int) =
+    let totalSeconds = frames / 50
     timeLabel.Text <- sprintf "%02d:%02d" (totalSeconds / 60) (totalSeconds % 60)
 
   let renderFrame () =
-    match session with
-    | Some s ->
+    match ceGame with
+    | Some c ->
       try
-        let frameStart, _ = s.RunFrame()
+        let frameStart, _ = c.RunFrame()
         presentGame ()
-        Audio.Play(s.DrainBeeperSamples(frameStart))
-        if s.ReplayFinished then
-          // Replay reached the recording's end: stop and hand back to Play.
-          replaying <- false
-          running <- false
-          frameTimer.Stop()
-          statusText.Text <- "replay finished - press Play to take over"
+        Audio.Play(c.DrainBeeperSamples(frameStart))
       with ex ->
         running <- false
-        replaying <- false
         frameTimer.Stop()
-        let pc = s.Regs.Pc()
-        statusText.Text <- sprintf "emulator error at 0x%04X: %s" pc ex.Message
-        showErrorDisasm pc
-    | None -> ()
+        statusText.Text <- sprintf "CE engine error: %s" ex.Message
+    | None ->
+      match session with
+      | Some s ->
+        try
+          let frameStart, _ = s.RunFrame()
+          presentGame ()
+          Audio.Play(s.DrainBeeperSamples(frameStart))
+          if s.ReplayFinished then
+            // Replay reached the recording's end: stop and hand back to Play.
+            replaying <- false
+            running <- false
+            frameTimer.Stop()
+            statusText.Text <- "replay finished - press Play to take over"
+        with ex ->
+          running <- false
+          replaying <- false
+          frameTimer.Stop()
+          let pc = s.Regs.Pc()
+          statusText.Text <- sprintf "emulator error at 0x%04X: %s" pc ex.Message
+          showErrorDisasm pc
+      | None -> ()
 
   let currentSelfModified () : bool[] =
     match loaded with
@@ -768,6 +800,54 @@ type MainWindow() as self =
     syncSlider ()
     refreshAll ()
 
+  /// Does the game have a CE program (a compiled F# version) yet?
+  let hasCE (m: GameManifest) : bool =
+    m.Name = "Minimal"
+
+  /// Build the CE engine for a game; updates the parity display.
+  let startCE (m: GameManifest) : CEGame option =
+    if m.Name = "Minimal" then
+      let image = MinimalGame.Game.binary
+      let mem, state = MinimalGame.Game.entryState image
+      let matching, total, divergences = CEParity.check MinimalGame.Game.program image
+      let status =
+        if divergences.IsEmpty then sprintf "CE parity: %d/%d bytes match" matching total
+        else sprintf "CE parity: %d/%d - diverges at %A" matching total divergences
+      parityLabel.Text <- status
+      Some(CEGame(MinimalGame.Game.program, mem, state))
+    else
+      parityLabel.Text <- "no CE program for this game yet"
+      None
+
+  /// Switch the engine (Interpreter <-> CE); returns true when the switch
+  /// happened.
+  let switchEngine (toCE: bool) : bool =
+    if toCE then
+      match currentGame with
+      | Some g when hasCE g ->
+        if session.IsSome then pauseGame ()
+        match startCE g with
+        | Some ce ->
+          session <- None
+          ceGame <- Some ce
+          engineCE <- true
+          running <- true
+          frameTimer.Start()
+          statusText.Text <- sprintf "%s running on the CE engine (compiled F#)" g.Name
+          true
+        | None -> false
+      | _ -> false
+    else if engineCE then
+      ceGame <- None
+      engineCE <- false
+      pauseGame ()
+      match currentGame with
+      | Some g -> launchGame g
+      | None -> ()
+      true
+    else true
+
+
   let seek (delta: int) =
     cinemaPlaying <- false
     cinemaTimer.Stop()
@@ -1105,7 +1185,7 @@ type MainWindow() as self =
             replaying <- false // drag aborts the script; preview takes over
           s.RewindTo(target)
           presentGame ()
-          updateTimeLabel s
+          updateTimeLabel s.Frame
       | None -> ())
     goBtn.Click.Add(fun _ ->
       match session with
@@ -1337,17 +1417,32 @@ type MainWindow() as self =
             Rom = LocalAssets.find "48.rom"
             Tzx = LocalAssets.find "Jetpac.tzx"
             Boot = "auto"
-            Script = None } ]
+            Script = None
+            ProgramBin = None
+            ProgramAddress = None } ]
     gameCombo.ItemsSource <- gamesList
     gameCombo.DisplayMemberPath <- "Name"
+    engineCombo.Items.Add("Interpreter") |> ignore
+    engineCombo.Items.Add("CE") |> ignore
+    engineCombo.SelectedIndex <- 0
+    engineCombo.SelectionChanged.Add(fun _ ->
+      match engineCombo.SelectedIndex with
+      | 1 ->
+        if not (switchEngine true) then engineCombo.SelectedIndex <- 0
+      | _ -> switchEngine false |> ignore)
     gameCombo.SelectedIndex <- 0
     gameCombo.SelectionChanged.Add(fun _ ->
       match gameCombo.SelectedItem with
       | :? GameManifest as g ->
+        ceGame <- None
+        engineCE <- false
+        engineCombo.SelectedIndex <- 0
+        parityLabel.Text <- ""
         if session.IsSome then pauseGame ()
         session <- None
         loaded <- None
         built <- None
+        engineCombo.IsEnabled <- hasCE g
         launchGame g
       | _ -> ())
     setEntryBtn.Click.Add(fun _ ->
@@ -1375,7 +1470,7 @@ type MainWindow() as self =
           statusText.Text <- sprintf "exported %d key events to %s" s.KeyLog.Events.Count dlg.FileName
       | None -> statusText.Text <- "no game running - play first, then export")
 
-    for c in [ gameCombo :> Control; setEntryBtn :> Control; exportScriptBtn :> Control; runBtn :> Control; pauseBtn :> Control; stepFrameBtn :> Control; recordToggle :> Control; soundToggle :> Control; saveBtn :> Control; loadBtn :> Control ] do
+    for c in [ gameCombo :> FrameworkElement; engineCombo :> FrameworkElement; parityLabel :> FrameworkElement; setEntryBtn :> FrameworkElement; exportScriptBtn :> FrameworkElement; runBtn :> FrameworkElement; pauseBtn :> FrameworkElement; stepFrameBtn :> FrameworkElement; recordToggle :> FrameworkElement; soundToggle :> FrameworkElement; saveBtn :> FrameworkElement; loadBtn :> FrameworkElement ] do
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     toolbar.Children.Add sep |> ignore
@@ -1474,19 +1569,25 @@ type MainWindow() as self =
         heatImage.ToolTip <- sprintf "0x%04X  (%d executions)" pc count)
 
     self.KeyDown.Add(fun e ->
-      match session with
-      | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, true)) (keyMap e.Key)
+      match ceGame with
+      | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, true)) (keyMap e.Key)
       | None ->
-        match manualBoot with
-        | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, true)) (keyMap e.Key)
-        | None -> ())
+        match session with
+        | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, true)) (keyMap e.Key)
+        | None ->
+          match manualBoot with
+          | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, true)) (keyMap e.Key)
+          | None -> ())
     self.KeyUp.Add(fun e ->
-      match session with
-      | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, false)) (keyMap e.Key)
+      match ceGame with
+      | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, false)) (keyMap e.Key)
       | None ->
-        match manualBoot with
-        | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
-        | None -> ())
+        match session with
+        | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, false)) (keyMap e.Key)
+        | None ->
+          match manualBoot with
+          | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
+          | None -> ())
 
     // timers
     frameTimer.Tick.Add(fun _ -> if running then renderFrame ())
@@ -1516,19 +1617,27 @@ type MainWindow() as self =
     uiTimer.Tick.Add(fun _ ->
       match session with
       | None ->
-        match bootTask with
-        | Some t when t.IsCompleted ->
-          try
-            session <- Some t.Result
-            startGame ()
-          with ex ->
-            statusText.Text <- "boot failed: " + ex.Message
-        | _ -> ()
+        match ceGame with
+        | Some c ->
+          if not rewinding then
+            rewindSlider.Maximum <- 0.0
+            rewindSlider.Value <- 0.0
+          updateTimeLabel c.Frame
+          statusText.Text <- sprintf "CE engine: frame=%d tick=%.2fM" c.Frame (float c.CycleCount / 1_000_000.0)
+        | None ->
+          match bootTask with
+          | Some t when t.IsCompleted ->
+            try
+              session <- Some t.Result
+              startGame ()
+            with ex ->
+              statusText.Text <- "boot failed: " + ex.Message
+          | _ -> ()
       | Some s ->
         if not rewinding then
           rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.History.LastFrame)
           rewindSlider.Value <- float s.Frame
-        updateTimeLabel s
+        updateTimeLabel s.Frame
         if running then
           statusText.Text <-
             sprintf "frame=%d  tick=%.2fM  instr=%d/%d  distinct-pc=%d  selfmod=%d  rec=%s"

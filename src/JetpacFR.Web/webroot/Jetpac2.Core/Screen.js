@@ -82,6 +82,18 @@ export function VideoScreen__SetState_289F56A(this$, scanline, flashCounter_, fl
 }
 
 /**
+ * Re-render every visible line from current memory (rewind present):
+ * `lines` holds scanline-pass snapshots, so after a state restore the
+ * blit buffer would otherwise show the pre-restore frame until a new
+ * frame executes. Border-only lines keep their captured border color.
+ */
+export function VideoScreen__RenderAll(this$) {
+    for (let y = 0; y <= (VideoConstants_VisibleHeight - 1); y++) {
+        VideoScreen__RenderLine_Z524259A4(this$, y + VideoConstants_VSyncLines);
+    }
+}
+
+/**
  * Advance one scanline; returns true when the 312-line counter wraps
  * (the interrupt point).
  */

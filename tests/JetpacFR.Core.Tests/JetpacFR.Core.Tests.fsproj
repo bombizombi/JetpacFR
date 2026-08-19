@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\JetpacFR.Core\JetpacFR.Core.fsproj" />
+    <ProjectReference Include="..\..\games\minimal\JetpacFR.Game.Minimal.fsproj" />
   </ItemGroup>
 
 </Project>

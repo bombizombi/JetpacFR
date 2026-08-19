@@ -5,7 +5,7 @@ import { bootToEntry, AssetProvider } from "./BootWeb.js";
 import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
 import { RegisterFile__R, RegisterFile__Sp, RegisterFile__Iy, RegisterFile__Ix, R16, RegisterFile__Get_Z61FD1070, Machine__LoadState_5EF83E14, Machine__set_FrameEnd_Z524259C1, Machine__Step, RegisterFile__I, Machine__get_IrqMode, Flags__ToU8, Machine__Flags, RegisterFile__Pc, Machine__get_Iff1, Machine__get_IrqPending, Machine__get_FrameEnd, Machine__get_BeeperTrace, Machine__get_Video, Machine__SetKey_289F56A, Machine__get_Memory, Machine__get_Regs, Machine__CycleCount, Machine__AddOutHandler_Z5F57DC44, Machine__AddMemoryWriteHandler_Z3CB4FF01, Machine_$ctor } from "./Jetpac2.Core/Machine.js";
 import { RegSnapshot, TraceRecorder__RecordFrameBoundary_Z6EF827D7, TraceEntry, TraceRecorder__Record_A4DCE76, TraceRecorder__RecordSnapshot_7114161F, PortEvent, TraceRecorder__RecordPort_Z54D84C2A, MemWriteEvent, TraceRecorder__RecordWrite_Z30129C29, TraceRecorder_$ctor_Z37302880 } from "./TraceTypesWeb.js";
-import { EnsureInstalled } from "./Jetpac2.Core/Generated.js";
+import { EnsureInstalled } from "./Jetpac2.Core/Z80Table.js";
 import { op_Addition, toInt32_unchecked, compare, op_Subtraction, toInt64_unchecked, toUInt32_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
 import { class_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
 import { VideoScreen__BlitTo } from "./Jetpac2.Core/Screen.js";

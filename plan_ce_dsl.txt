@@ -1,0 +1,163 @@
+CE DSL + project-per-game (plan_ce_dsl)
+=======================================
+Goal: the F# computational-expression version of a game is the single
+source of truth. It assembles to the exact machine-code bytes (compare
+against the original binary / oracle) AND runs directly on the port
+machine without the interpreter. Games are Fable-clean library projects
+referenced by any shell (WPF today, Fable web later).
+
+Reference graph (implemented)
+-----------------------------
+  JetpacFR.Desktop (WPF shell)  -> JetpacFR.Core, Jetpac2.Core, games/*
+  games/<game>.fsproj (Fable-clean, netstandard2.0, NO System.IO/GUI)
+                                 -> Jetpac2.Core
+  Jetpac2.Core                   -> Z80Asm.fs (the CE), Z80Table.fs, Machine
+  JetpacFR.Web (Fable)           -> compiles Jetpac2.Core + game sources
+
+The game project carries only: the CE program, the assembled image, the
+entry state, and (later) the lifted routines. The GUI lives in the shell.
+
+The CE design (Z80Asm.fs, done)
+-------------------------------
+Formlet-style dual meaning: the STRUCTURE of the computation determines
+both interpretations.
+
+  type Z80Op = { Mnemonic; Bytes: byte[]; Run: Machine -> unit }
+
+  - structure -> bytes:  assemble program  = concat Bytes
+  - structure -> run:    Z80.run program m = fold Run (direct, no
+                          interpreter; linear programs)
+
+  z80 {                              // builder instance
+    yield! rawBytes                  // interpreter fallback: Step until
+    Z80.INC_A                        // PC leaves the block / frame ends,
+    Z80.LD_HL 16384                  // so raw and CE call each other
+    yield! [| 0xC9uy |]              // (CALL/JR cross the boundary freely)
+  }
+
+  Per-frame driver: Z80.makeIndex -> PC->op table; runFrame executes CE
+  ops directly by PC and falls through to Machine.Step for anything
+  outside the CE layout. Raw blocks are frame-bounded.
+
+Mixing raw bytes and CE instructions is the migration path: a game starts
+as `yield! binary`, and each instruction becomes a CE op as it is lifted.
+Both forms coexist in one program.
+
+Why monadic sequencing (not applicative): a CPU is sequential and
+stateful; the "two semantic meanings" come from interpreting the SAME op
+list twice (bytes vs behavior), like a free structure — the formlet
+analogy holds for the dual interpretation, not for applicative choice.
+
+Phase 1 (DONE): skeleton
+-------------------------
+- Z80Asm.fs: builder (Yield/YieldFrom/Combine/Delay/Zero/ReturnFrom/For/
+  While), raw-block op, ~22 starter ops (LD/JP/CALL/RET/INC/DEC/AND/XOR/
+  IN A,(n)/NOP/HALT), assemble, makeIndex, runFrame.
+- games/minimal: JetpacFR.Game.Minimal (netstandard2.0, Fable-clean),
+  the game as `z80 { yield! binary }` + assembled + runFrame + entryState
+  (image at 0x8000, PC=0x8000).
+- Manifest boot mode "program" (raw image at an address) + ProgramEntry
+  cache seeding (keyed on the image file).
+- Desktop: game combo includes Minimal; launchGame handles "program".
+- Tests (--test minimal): assemble==image, mixed raw+CE byte parity,
+  CE driver locksteps with the oracle 150 frames (mem/PC/SP/cycles),
+  and IF games/minimal/proba.bin exists, assembled==proba.bin.
+  (proba.bin is NOT in the folder yet - placeholder game is used.)
+
+Phase 2 (DONE): full op coverage, track-perfect
+-----------------------------------------------
+- tools/gen_z80table.py now fills every table slot with the full ISA:
+  main 252/256 (the 4 prefix dispatchers route in step), dd/fd/ed/cb 256/256,
+  dd_cb/fd_cb 32/32 (the complete documented set). Templates written from
+  the oracle's Z80Ops.fs semantics + the validated corpus arm patterns;
+  DD/FD non-IX slots are prefix-ignored (the base body), undefined
+  ED/DD/FD slots are 2-byte NOPs, nested prefixes are 2-byte NOPs (the
+  oracle reads one prefix only).
+- tools/gen_vocab.py emits Z80Vocab.fs: 680 named ops, each carrying its
+  assembled encoding and dispatching Run to the validated table slot
+  (runOf) — the CE op IS the table arm, track-perfect by construction.
+  Memory operands use PTR, (IX+d)/(IY+d) use IXd/IYd, BIT/RES/SET bake the
+  bit (BIT0_B ... SET7_PTR_IYd).
+- --test z80ops: all 680 ops lockstep with the oracle (memory + full
+  registers + cycles) from a [op; HALT] harness with per-kind setups.
+  It caught and fixed real semantic deltas: LD SP,IX missing PassTime 2,
+  ED IN (C)/OUT (C),0 missing arms (the y!=6 guard skipped them), EX
+  (SP),IX cycle count (now mirrors the corpus EX (SP),HL body).
+- games/minimal/proba.bin is now embedded: assembled == proba.bin
+  byte-for-byte and the CE driver locksteps with the oracle over 150
+  frames of the real program.
+
+Phase 3 (DONE): labels + two-pass assembler
+-------------------------------------------
+- Z80Op gains Label (int ref option) + Encode (int -> byte[]) option:
+  - `Z80.label ()` -> a symbolic address cell; `Z80.at cell` places it
+    (zero-width op; pass 1 records the address into the cell).
+  - `Z80.JP_LBL / JP_NZ_LBL / ... / CALL_LBL / CALL_NZ_LBL / ... / JR_LBL /
+    JR_NZ_LBL / ... / DJNZ_LBL cell` — position-aware ops: pass 2 encodes
+    absolute (JP/CALL) or relative (JR/DJNZ, displacement = target - (pc+2))
+    operands, so forward references work (pass 1 lays out the whole program
+    first).
+- assemble is two-pass; makeIndex resolves labels too (the runFrame index).
+- --test labels: byte-exact encodings for backward JP, backward JR over a
+  NOP (0xFD), forward CALL; the labeled loop locksteps with the oracle;
+  makeIndex label resolution. Caught a real bug: the JP/CALL Encode
+  closures returned only the address operand, dropping the opcode byte.
+- LD r,n became functions (LD_A n, ...), matching the 16-bit forms.
+
+Phase 4 (DONE): disassembly to CE (the reverse direction)
+----------------------------------------------------------
+- Every parameterized vocab op is now a FUNCTION (LD_A n, LD_HL nn,
+  ADD_A_IXd d, JP_nn nn, JR_e e, IN_A_n n, LD_ptr_BC nn, ...) with the
+  missing LD r,(IX+d) / LD (IX+d),r forms added (706 ops).
+- tools/gen_vocab.py also emits Z80Decode.fs: 706 rows mapping instruction
+  bytes -> CE op (Make) + F# source text (Format), with a byte mask
+  (0xFF fixed / 0x00 operand wildcard, e.g. DD CB d X) and LabelName for
+  jumps. Rows sort by fixed-byte count so the most specific wins.
+- JetpacFR.Core/Z80CE.fs: `toOps image start count` disassembles a binary
+  into CE ops (covered instructions become their ops; everything else
+  merges into raw blocks) and `toSource` emits the F# `z80 { ... }` body
+  with symbolic labels for in-range jump targets.
+- --test ce: assemble(toOps(proba.bin)) == proba.bin byte-for-byte (the
+  roundtrip contract, structural via raw-block fallback); <5% raw;
+  the generated source labels the keyboard-scan loop, emits LDIR and the
+  self-modifying `LD_ptr_BC 0x802D`.
+- Bug found by the expanded per-op test: the oracle ignores ROM-page
+  writes (0x0000-0x3FFF); the port now does too (Machine.Write).
+  Also fixed ED (nn),rr register byte order (low first).
+
+Phase 5 (DONE): GUI dual execution
+----------------------------------
+- CEGame (JetpacFR.Core): the CE engine — drives the same port Machine
+  with Z80.runFrame (CE ops by PC from the program index; raw blocks and
+  anything outside the layout fall through to the interpreter). Screen,
+  audio, keys behave exactly like the interpreter path.
+- Desktop: an Engine combo (Interpreter | CE) next to the game selector.
+  CE mode runs the minimal game's compiled-F# version through CEGame;
+  the parity label shows "CE parity: N/N bytes match" (CEParity.check:
+  assembled CE program vs the original binary, with diverging offsets).
+  The toggle is enabled only for games with a CE program.
+- --test ce: the CEGame wrapper locksteps with the oracle (30 frames).
+
+Phase 6 (DONE): Fable web
+--------------------------
+- The game lib (games/minimal) + CEGame + Z80CE compile in the Web
+  project (Fable-clean); `fable` emits CEHost.js + games/minimal/Game.js
+  with the binary embedded as a Uint8Array and imports of
+  Z80_makeIndex/Z80_runFrame/Z80_assemble.
+- CEHost.fs: a browser host (#ceScreen canvas, #ceBtn toggle, #ceStatus)
+  that builds CEGame from the minimal game, runs it via the CE driver,
+  paints the screen, plays audio, forwards keys, and shows the byte
+  parity on start. main.js calls App_start + CEHost_start.
+- Verified: dotnet build + fable compile to JS.
+
+Verification
+------------
+- --test minimal (Phase 1) + Phase 2 per-op oracle lockstep.
+- A real second binary (proba.bin): assemble == proba.bin byte-for-byte,
+  then the full pipeline (record/rewind/mine/contract/validate) as in
+  --test game2.
+
+Out of scope
+------------
+- 128K games (banked memory - hardware change, not config).
+- Self-modifying code in CE form (raw blocks already handle it).
