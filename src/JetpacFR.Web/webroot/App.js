@@ -4,7 +4,7 @@ import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp
 import { max as max_1, fill, initialize, setItem, item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
 import { tryFind, isEmpty, truncate, map as map_1, length, iterate, ofArray, singleton, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
 import { add, remove, FSharpSet__get_Count, toList as toList_1, FSharpSet__Contains, empty as empty_1 } from "./fable_modules/fable-library-js.5.13.0/Set.js";
-import { TraceSession_$ctor_28C3603C, TraceSession__get_CycleCount, TraceSession__get_Frame, EntryCache_save, EntryCache_tryLoad, TraceSession__get_WarmStart, TraceSession__DrainBeeperSamples_Z524259C1, TraceSession__RunFrame, TraceSession__get_Regs, TraceSession__get_Memory, TraceSession__get_ScreenBuffer, TraceSession__get_Recorder, TraceSession__SetKey_289F56A } from "./SessionWeb.js";
+import { TraceSession_$ctor_28C3603C, TraceSession__get_CycleCount, TraceSession__get_Frame, EntryCache_save, EntryCache_tryLoad, TraceSession__get_ReplayEventCount, TraceSession__get_WarmStart, TraceSession__DrainBeeperSamples_Z524259C1, TraceSession__RunFrame, TraceSession__get_Regs, TraceSession__get_Memory, TraceSession__get_ScreenBuffer, TraceSession__get_Recorder, TraceSession__SetKey_289F56A } from "./SessionWeb.js";
 import { TraceRecorder__set_RecordEnabled_Z1FBCCD16, TraceRecorder__get_SelfModCount, TraceRecorder__get_PerPcCount, TraceRecorder__get_Capacity, TraceRecorder__get_RecordEnabled, TraceRecorder__get_SegmentCounts, TraceQuery_nearestSnapshotBefore, TraceRecorder__get_SelfModified, TraceRecorder__Build, TraceRecorder__get_EntryCount } from "./TraceTypesWeb.js";
 import { min, max } from "./fable_modules/fable-library-js.5.13.0/Double.js";
 import { disasmBytes, disasmMemory } from "./JetpacFR.Core/Disasm.js";
@@ -1340,14 +1340,14 @@ function App_loadTrace() {
 }
 
 function App_startGame() {
-    let arg, arg_1;
+    let arg, arg_1, arg_2;
     if (App_session == null) {
     }
     else {
         const s = App_session;
         App_chkRec.checked = TraceRecorder__get_RecordEnabled(TraceSession__get_Recorder(s));
         App_running = true;
-        App_statusText.textContent = ((arg = (TraceSession__get_WarmStart(s) ? "cached entry state" : "booted to game entry"), (arg_1 = (TraceRecorder__get_RecordEnabled(TraceSession__get_Recorder(s)) ? "ON" : "OFF"), toText(printf("emulator ready (%s) - frame 0, recording %s"))(arg)(arg_1))));
+        App_statusText.textContent = ((arg = (TraceSession__get_WarmStart(s) ? "cached entry state" : "booted to game entry"), (arg_1 = (TraceRecorder__get_RecordEnabled(TraceSession__get_Recorder(s)) ? "ON" : "OFF"), (arg_2 = (TraceSession__get_ReplayEventCount(s) | 0), toText(printf("emulator ready (%s) - frame 0, recording %s, saved input %d events"))(arg)(arg_1)(arg_2)))));
     }
 }
 

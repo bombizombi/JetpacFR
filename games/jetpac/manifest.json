@@ -1,5 +1,6 @@
 {
   "name": "Jetpac",
+  "default": true,
   "rom": "../../assets/48.rom",
   "tzx": "../../assets/Jetpac.tzx",
   "boot": "auto",

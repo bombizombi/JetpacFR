@@ -69,11 +69,13 @@ type MainWindow() as self =
 
   let mutable session: TraceSession option = None
   let mutable bootTask: System.Threading.Tasks.Task<TraceSession> option = None
+  let mutable bootGameId = ""
   let mutable manualBoot: ManualBoot option = None
   let mutable ceGame: CEGame option = None
   let mutable engineCE = false
   let mutable currentGame: GameManifest option = None
   let mutable gamesList: GameManifest list = []
+  let mutable replaySavedRevision = -1
   let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
 
   /// Walk up from the app base directory to the first folder containing a
@@ -151,14 +153,41 @@ type MainWindow() as self =
   let slider = Slider()
   let cursorLabel = TextBlock()
   let statusText = TextBlock()
+  let saveReplay (force: bool) =
+    match currentGame, session with
+    | Some game, Some s when force || s.KeyLog.Revision <> replaySavedRevision ->
+      match ReplayStore.save game s.KeyLog.Events with
+      | Ok () -> replaySavedRevision <- s.KeyLog.Revision
+      | Error error -> statusText.Text <- sprintf "replay save failed for %s: %s" game.Name error
+    | _ -> ()
+
+  let loadReplay (game: GameManifest) (s: TraceSession) : bool =
+    match ReplayStore.tryLoad game with
+    | ReplayLoaded events ->
+      s.KeyLog.Replace events
+      replaySavedRevision <- s.KeyLog.Revision
+      if not (List.isEmpty events) then
+        statusText.Text <- sprintf "%s: loaded %d saved key events" game.Name events.Length
+      not (List.isEmpty events)
+    | ReplayMissing ->
+      replaySavedRevision <- s.KeyLog.Revision
+      false
+    | ReplayIgnored reason ->
+      replaySavedRevision <- s.KeyLog.Revision
+      statusText.Text <- sprintf "%s: saved replay ignored (%s)" game.Name reason
+      false
+
 
   /// Start a game from its manifest: warm cache -> fast port session; cold
   /// auto -> oracle boot (slow, first run); cold manual -> the user runs the
   /// loader in the oracle and marks the entry point.
   let launchGame (m: GameManifest) =
+    saveReplay true
     manualBoot <- None
     manualTimer.Stop()
     currentGame <- Some m
+    bootGameId <- m.GameId
+    replaySavedRevision <- -1
     match EntryCache.tryLoad m.Rom m.Tzx with
     | Some _ ->
       bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
@@ -794,6 +823,7 @@ type MainWindow() as self =
     frameTimer.Stop()
     cinemaPlaying <- false
     cinemaTimer.Stop()
+    saveReplay true
     playBtn.Content <- "Play"
     buildTraceNow ()
     clampCursor ()
@@ -922,9 +952,9 @@ type MainWindow() as self =
       running <- true
       frameTimer.Start()
       statusText.Text <-
-        sprintf "emulator ready (%s) - frame 0, recording %s"
+        sprintf "emulator ready (%s) - frame 0, recording %s, saved input %d events"
           (if s.WarmStart then "cached entry state" else "booted to game entry")
-          (if s.Recorder.RecordEnabled then "ON" else "OFF")
+          (if s.Recorder.RecordEnabled then "ON" else "OFF") s.KeyLog.Count
     | None -> ()
 
   // ---- construction ------------------------------------------------------
@@ -1172,8 +1202,13 @@ type MainWindow() as self =
     // Rewind: dragging pauses the game and previews the snapshot at the
     // slider's frame; Go commits the branch (new future starts here);
     // Replay re-runs the recorded keys from here and stops at the end.
-    rewindSlider.PreviewMouseDown.Add(fun _ -> rewinding <- true)
-    rewindSlider.PreviewMouseUp.Add(fun _ -> rewinding <- false)
+    rewindSlider.PreviewMouseDown.Add(fun _ ->
+      if session.IsSome then pauseGame ()
+      rewinding <- true
+      saveReplay true)
+    rewindSlider.PreviewMouseUp.Add(fun _ ->
+      rewinding <- false
+      saveReplay true)
     rewindSlider.ValueChanged.Add(fun args ->
       match session with
       | Some s ->
@@ -1192,6 +1227,7 @@ type MainWindow() as self =
       | Some s ->
         pauseGame ()
         s.BranchAt(s.Frame)
+        saveReplay true
         replaying <- false
         running <- true
         frameTimer.Start()
@@ -1410,10 +1446,14 @@ type MainWindow() as self =
     // game selection + manual boot + script export
     gamesList <- Manifest.discover (findGamesDir ())
     if List.isEmpty gamesList then
-      // Fallback: no games/ folder reachable from the app; the Jetpac
-      // default keeps the app usable without manifests.
+      // Fallback: no games/ folder reachable from the app; the explicit
+      // Jetpac fallback keeps the app usable without manifests.
       gamesList <-
-        [ { Name = "Jetpac"
+        [ { GameId = "jetpac"
+            ManifestPath = ""
+            GameDirectory = Directory.GetCurrentDirectory()
+            Name = "Jetpac"
+            Default = true
             Rom = LocalAssets.find "48.rom"
             Tzx = LocalAssets.find "Jetpac.tzx"
             Boot = "auto"
@@ -1422,6 +1462,14 @@ type MainWindow() as self =
             ProgramAddress = None } ]
     gameCombo.ItemsSource <- gamesList
     gameCombo.DisplayMemberPath <- "Name"
+    let startupGame =
+      match gamesList |> List.tryFind (fun g -> g.Default) with
+      | Some g -> g
+      | None ->
+        match gamesList |> List.tryFind (fun g -> g.GameId = "jetpac") with
+        | Some g -> g
+        | None -> List.head gamesList
+    let startupIndex = gamesList |> List.findIndex (fun g -> g.GameId = startupGame.GameId)
     engineCombo.Items.Add("Interpreter") |> ignore
     engineCombo.Items.Add("CE") |> ignore
     engineCombo.SelectedIndex <- 0
@@ -1430,7 +1478,7 @@ type MainWindow() as self =
       | 1 ->
         if not (switchEngine true) then engineCombo.SelectedIndex <- 0
       | _ -> switchEngine false |> ignore)
-    gameCombo.SelectedIndex <- 0
+    gameCombo.SelectedIndex <- startupIndex
     gameCombo.SelectionChanged.Add(fun _ ->
       match gameCombo.SelectedItem with
       | :? GameManifest as g ->
@@ -1628,12 +1676,26 @@ type MainWindow() as self =
           match bootTask with
           | Some t when t.IsCompleted ->
             try
-              session <- Some t.Result
+              let loadedSession = t.Result
+              session <- Some loadedSession
+              let hasSavedReplay =
+                match currentGame with
+                | Some game when game.GameId = bootGameId -> loadReplay game loadedSession
+                | _ -> false
+              if hasSavedReplay then
+                replayExtent <- max 1 loadedSession.KeyLog.EndFrame
+                loadedSession.StartReplay()
+                replaying <- true
+              else
+                replaying <- false
               startGame ()
+              if hasSavedReplay then
+                statusText.Text <- sprintf "%s: replaying %d saved key events from frame 0" currentGame.Value.Name loadedSession.KeyLog.Count
             with ex ->
               statusText.Text <- "boot failed: " + ex.Message
           | _ -> ()
       | Some s ->
+        saveReplay false
         if not rewinding then
           rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.History.LastFrame)
           rewindSlider.Value <- float s.Frame
@@ -1661,13 +1723,12 @@ type MainWindow() as self =
     uiTimer.Start()
     manualTimer.Start()
 
-    // Launch the first discovered game (the previous behavior: boot the
-    // default game on startup).
-    if not (List.isEmpty gamesList) then
-      launchGame (List.head gamesList)
+    // Launch the manifest-selected default game.
+    launchGame startupGame
 
     self.Closed.Add(fun _ ->
       running <- false
+      saveReplay true
       frameTimer.Stop()
       cinemaTimer.Stop()
       manualTimer.Stop()

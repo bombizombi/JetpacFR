@@ -1,16 +1,20 @@
 
-import { item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { toBase64String, fromBase64String, printf, toText, format } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { equalsWith, choose, item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
+import { join, split, isNullOrWhiteSpace, toBase64String, fromBase64String, printf, toText, format } from "./fable_modules/fable-library-js.5.13.0/String.js";
 import { bootToEntry, AssetProvider } from "./BootWeb.js";
 import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
+import { FSharpRef, Record } from "./fable_modules/fable-library-js.5.13.0/Types.js";
+import { class_type, record_type, bool_type, int32_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { ofArray, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
+import { clear, defaultOf } from "./fable_modules/fable-library-js.5.13.0/Util.js";
+import { tryParse } from "./fable_modules/fable-library-js.5.13.0/Int32.js";
+import { tryParse as tryParse_1 } from "./fable_modules/fable-library-js.5.13.0/Boolean.js";
+import { toList, map } from "./fable_modules/fable-library-js.5.13.0/Seq.js";
 import { RegisterFile__R, RegisterFile__Sp, RegisterFile__Iy, RegisterFile__Ix, R16, RegisterFile__Get_Z61FD1070, Machine__LoadState_5EF83E14, Machine__set_FrameEnd_Z524259C1, Machine__Step, RegisterFile__I, Machine__get_IrqMode, Flags__ToU8, Machine__Flags, RegisterFile__Pc, Machine__get_Iff1, Machine__get_IrqPending, Machine__get_FrameEnd, Machine__get_BeeperTrace, Machine__get_Video, Machine__SetKey_289F56A, Machine__get_Memory, Machine__get_Regs, Machine__CycleCount, Machine__AddOutHandler_Z5F57DC44, Machine__AddMemoryWriteHandler_Z3CB4FF01, Machine_$ctor } from "./Jetpac2.Core/Machine.js";
 import { RegSnapshot, TraceRecorder__RecordFrameBoundary_Z6EF827D7, TraceEntry, TraceRecorder__Record_A4DCE76, TraceRecorder__RecordSnapshot_7114161F, PortEvent, TraceRecorder__RecordPort_Z54D84C2A, MemWriteEvent, TraceRecorder__RecordWrite_Z30129C29, TraceRecorder_$ctor_Z37302880 } from "./TraceTypesWeb.js";
 import { EnsureInstalled } from "./Jetpac2.Core/Z80Table.js";
 import { op_Addition, toInt32_unchecked, compare, op_Subtraction, toInt64_unchecked, toUInt32_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { class_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
 import { VideoScreen__BlitTo } from "./Jetpac2.Core/Screen.js";
-import { toList } from "./fable_modules/fable-library-js.5.13.0/Seq.js";
-import { clear } from "./fable_modules/fable-library-js.5.13.0/Util.js";
 import { ToSamples } from "./Jetpac2.Core/Beeper.js";
 import { disasmMemory } from "./JetpacFR.Core/Disasm.js";
 import { min } from "./fable_modules/fable-library-js.5.13.0/Double.js";
@@ -115,12 +119,129 @@ export function EntryCache_save(romPath, tzxPath, mem, state) {
     }
 }
 
+export class ReplayKeyEvent extends Record {
+    constructor(Frame, Row, Bit, Pressed) {
+        super();
+        this.Frame = (Frame | 0);
+        this.Row = (Row | 0);
+        this.Bit = (Bit | 0);
+        this.Pressed = Pressed;
+    }
+}
+
+export function ReplayKeyEvent_$reflection() {
+    return record_type("JetpacFR.Core.ReplayKeyEvent", [], ReplayKeyEvent, () => [["Frame", int32_type], ["Row", int32_type], ["Bit", int32_type], ["Pressed", bool_type]]);
+}
+
+function ReplayCache_key(romBytes, tzxBytes) {
+    return (("jetpacfr.replay.v1.jetpac." + AssetHash_ofBytes(romBytes)) + ".") + AssetHash_ofBytes(tzxBytes);
+}
+
+const ReplayCache_storage = window.localStorage;
+
+function ReplayCache_load(romBytes, tzxBytes) {
+    try {
+        const raw = ReplayCache_storage.getItem(ReplayCache_key(romBytes, tzxBytes));
+        if (Operators_IsNull(raw)) {
+            return empty();
+        }
+        else {
+            const compact = JSON.parse(raw).events.map(e => [e.frame,e.row,e.bit,e.pressed].join(',')).join('\n');
+            return isNullOrWhiteSpace(compact) ? empty() : ofArray(choose((line) => {
+                let r, b;
+                const matchValue = line.split(",");
+                if (!equalsWith((x, y) => (x === y), matchValue, defaultOf()) && (matchValue.length === 4)) {
+                    const row = item(1, matchValue);
+                    const pressed = item(3, matchValue);
+                    const frame = item(0, matchValue);
+                    const bit = item(2, matchValue);
+                    let matchValue_1;
+                    let outArg = 0;
+                    matchValue_1 = [tryParse(frame, 511, false, 32, new FSharpRef(() => (outArg | 0), (v) => {
+                        outArg = (v | 0);
+                    })), outArg];
+                    let matchValue_2;
+                    let outArg_1 = 0;
+                    matchValue_2 = [tryParse(row, 511, false, 32, new FSharpRef(() => (outArg_1 | 0), (v_1) => {
+                        outArg_1 = (v_1 | 0);
+                    })), outArg_1];
+                    let matchValue_3;
+                    let outArg_2 = 0;
+                    matchValue_3 = [tryParse(bit, 511, false, 32, new FSharpRef(() => (outArg_2 | 0), (v_2) => {
+                        outArg_2 = (v_2 | 0);
+                    })), outArg_2];
+                    let matchValue_4;
+                    let outArg_3 = false;
+                    matchValue_4 = [tryParse_1(pressed, new FSharpRef(() => outArg_3, (v_3) => {
+                        outArg_3 = v_3;
+                    })), outArg_3];
+                    let matchResult;
+                    if (matchValue_1[0]) {
+                        if (matchValue_2[0]) {
+                            if (matchValue_3[0]) {
+                                if (matchValue_4[0]) {
+                                    if ((r = (matchValue_2[1] | 0), (b = (matchValue_3[1] | 0), ((((matchValue_1[1] >= 0) && (r >= 0)) && (r < 8)) && (b >= 0)) && (b < 5)))) {
+                                        matchResult = 0;
+                                    }
+                                    else {
+                                        matchResult = 1;
+                                    }
+                                }
+                                else {
+                                    matchResult = 1;
+                                }
+                            }
+                            else {
+                                matchResult = 1;
+                            }
+                        }
+                        else {
+                            matchResult = 1;
+                        }
+                    }
+                    else {
+                        matchResult = 1;
+                    }
+                    switch (matchResult) {
+                        case 0:
+                            return new ReplayKeyEvent(matchValue_1[1], matchValue_2[1], matchValue_3[1], matchValue_4[1]);
+                        default:
+                            return undefined;
+                    }
+                }
+                else {
+                    return undefined;
+                }
+            }, split(compact, ["\n"], undefined, 1)));
+        }
+    }
+    catch (matchValue_6) {
+        return empty();
+    }
+}
+
+function ReplayCache_save(romBytes, tzxBytes, events) {
+    try {
+        const eventText = join(",", map((e) => toText(printf("{\"frame\":%d,\"row\":%d,\"bit\":%d,\"pressed\":%b}"))(e.Frame)(e.Row)(e.Bit)(e.Pressed), events));
+        let body;
+        const arg_4 = AssetHash_ofBytes(romBytes);
+        const arg_5 = AssetHash_ofBytes(tzxBytes);
+        body = toText(printf("{\"format\":\"jetpacfr-replay\",\"version\":1,\"gameId\":\"jetpac\",\"romSha256\":\"%s\",\"tzxSha256\":\"%s\",\"events\":[%s]}"))(arg_4)(arg_5)(eventText);
+        ReplayCache_storage.setItem(ReplayCache_key(romBytes, tzxBytes), body);
+    }
+    catch (matchValue) {
+    }
+}
+
 export class TraceSession {
     constructor(romBytes, tzxBytes, capacity) {
+        this.romBytes = romBytes;
+        this.tzxBytes = tzxBytes;
         this.romPath = "rom";
         this.tzxPath = "tzx";
         this.port = Machine_$ctor();
         this.recorder = TraceRecorder_$ctor_Z37302880(capacity, 512);
+        this.replayEvents = Array.from(ReplayCache_load(this.romBytes, this.tzxBytes));
         this.frame = 0;
         this.warmStart = false;
         this.snapshotInterval = 64;
@@ -171,7 +292,13 @@ export function TraceSession__get_Memory(this$) {
     return Machine__get_Memory(this$.port);
 }
 
+export function TraceSession__get_ReplayEventCount(this$) {
+    return this$.replayEvents.length | 0;
+}
+
 export function TraceSession__SetKey_289F56A(this$, row, bit, pressed) {
+    void (this$.replayEvents.push(new ReplayKeyEvent(this$.frame, row, bit, pressed)));
+    ReplayCache_save(this$.romBytes, this$.tzxBytes, this$.replayEvents);
     Machine__SetKey_289F56A(this$.port, row, bit, pressed);
 }
 

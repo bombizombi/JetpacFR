@@ -8,8 +8,16 @@ open System.Text.Json
 /// game lives here, so adding a game is adding a folder + manifest instead
 /// of editing code.
 type GameManifest =
-  { /// Display name (game selector).
+  { /// Stable directory-derived identifier (for example `jetpac`).
+    GameId: string
+    /// Absolute path to the manifest file.
+    ManifestPath: string
+    /// Absolute directory containing the manifest and game-owned files.
+    GameDirectory: string
+    /// Display name (game selector).
     Name: string
+    /// Explicit startup default. At most one manifest should set this.
+    Default: bool
     /// Path to the 48K ROM image (tape games).
     Rom: string
     /// Path to the TZX tape (tape games).
@@ -36,7 +44,14 @@ module Manifest =
       match root.TryGetProperty k with
       | true, e when e.ValueKind = JsonValueKind.String -> e.GetString()
       | _ -> def
-    let baseDir = Path.GetDirectoryName(Path.GetFullPath path)
+    let manifestPath = Path.GetFullPath path
+    let baseDir = Path.GetDirectoryName manifestPath
+    let gameId = DirectoryInfo(baseDir).Name.ToLowerInvariant()
+    let boolv (k: string) (def: bool) =
+      match root.TryGetProperty k with
+      | true, e when e.ValueKind = JsonValueKind.True -> true
+      | true, e when e.ValueKind = JsonValueKind.False -> false
+      | _ -> def
     let resolve (p: string) = if Path.IsPathRooted p then p else Path.Combine(baseDir, p)
     let script =
       match root.TryGetProperty "script" with
@@ -55,7 +70,11 @@ module Manifest =
           | _ -> None
         bin, addr
       | _ -> None, None
-    { Name = str "name" "unnamed"
+    { GameId = gameId
+      ManifestPath = manifestPath
+      GameDirectory = baseDir
+      Name = str "name" "unnamed"
+      Default = boolv "default" false
       Rom = resolve (str "rom" "")
       Tzx = resolve (str "tzx" "")
       Boot = str "boot" "auto"
@@ -63,7 +82,7 @@ module Manifest =
       ProgramBin = programBin
       ProgramAddress = programAddress }
 
-  /// Discover `games/*/manifest.json` under `gamesDir`.
+  /// Discover `games/*/manifest.json` under `gamesDir`, in stable ID order.
   let discover (gamesDir: string) : GameManifest list =
     if not (Directory.Exists gamesDir) then []
     else
@@ -71,6 +90,7 @@ module Manifest =
       |> Array.choose (fun d ->
         let p = Path.Combine(d, "manifest.json")
         if File.Exists p then Some(load p) else None)
+      |> Array.sortBy (fun g -> g.GameId)
       |> Array.toList
 
 /// Load a raw Z80 program image (manifest boot mode "program") into the

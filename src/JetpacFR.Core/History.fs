@@ -114,17 +114,28 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
 /// Recorded keyboard events, appended in live mode and replayed by frame.
 type KeyLog() =
   let events = ResizeArray<KeyEvent>()
+  let mutable revision = 0
 
   member _.Events = events
   member _.Count = events.Count
+  member _.Revision = revision
 
-  member _.Add(e: KeyEvent) = events.Add e
+  member _.Add(e: KeyEvent) =
+    events.Add e
+    revision <- revision + 1
+
+  member _.Replace(items: KeyEvent seq) =
+    events.Clear()
+    for e in items do events.Add e
+    revision <- revision + 1
 
   /// Remove events at frames strictly after `frame` (branch point).
   member _.Truncate(frame: int) =
     let mutable keep = events.Count
     while keep > 0 && events.[keep - 1].Frame > frame do keep <- keep - 1
-    if keep < events.Count then events.RemoveRange(keep, events.Count - keep)
+    if keep < events.Count then
+      events.RemoveRange(keep, events.Count - keep)
+      revision <- revision + 1
 
   /// Events to apply for the given frame during replay (in order).
   member _.ForFrame(frame: int) : KeyEvent list =

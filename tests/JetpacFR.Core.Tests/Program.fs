@@ -594,6 +594,12 @@ let runHistory (romPath: string) (tzxPath: string) : int =
   // Preview kept everything: the script's last release lands at frame 110.
   check "preview does not truncate the key log" (session.KeyLog.EndFrame = 110)
     (sprintf "end=%d" session.KeyLog.EndFrame)
+  let restarted = TraceSession(romPath, tzxPath, 500_000)
+  restarted.KeyLog.Replace(session.KeyLog.Events)
+  restarted.StartReplay()
+  check "restarted replay uses persisted key-log extent"
+    (restarted.Replaying && restarted.ReplayEndFrame = restarted.KeyLog.EndFrame && restarted.ReplayEndFrame = 110)
+    (sprintf "replaying=%b end=%d keyEnd=%d" restarted.Replaying restarted.ReplayEndFrame restarted.KeyLog.EndFrame)
 
   // 4. Replay from the previewed frame: history truncates at 60 but the log
   // is kept as the script; the replay must end exactly at the recording's
@@ -652,6 +658,31 @@ let runManifest () : int =
       check "jetpac manifest resolves rom" (File.Exists jetpac.Rom) jetpac.Rom
       check "jetpac manifest resolves tzx" (File.Exists jetpac.Tzx) jetpac.Tzx
       check "jetpac boots automatically" (jetpac.Boot = "auto") jetpac.Boot
+      check "jetpac is explicitly marked default" jetpac.Default "default flag missing"
+      check "manifest discovery is stable by game ID" (games.Head.GameId = "jetpac") (sprintf "%A" (games |> List.map (fun g -> g.GameId)))
+      let temp = Path.Combine(Path.GetTempPath(), "jetpacfr-replay-" + Guid.NewGuid().ToString("N"))
+      Directory.CreateDirectory temp |> ignore
+      let replayGame =
+        { GameId = "replay-test"
+          ManifestPath = ""
+          GameDirectory = temp
+          Name = "Replay test"
+          Default = false
+          Rom = jetpac.Rom
+          Tzx = jetpac.Tzx
+          Boot = "auto"
+          Script = None
+          ProgramBin = None
+          ProgramAddress = None }
+      let events =
+        [ { Frame = 10; Row = 3; Bit = 0; Pressed = true }
+          { Frame = 30; Row = 3; Bit = 0; Pressed = false } ]
+      let saved = ReplayStore.save replayGame events
+      let loaded = ReplayStore.tryLoad replayGame
+      check "versioned replay round-trips" (saved = Ok () && File.Exists(ReplayStore.path replayGame) && loaded = ReplayLoaded events) (sprintf "%A / %A" saved loaded)
+      let mismatched = { replayGame with GameId = "other-game" }
+      check "replay identity rejects another game" (ReplayStore.tryLoad mismatched = ReplayIgnored "replay belongs to another game") "mismatch accepted"
+      Directory.Delete(temp, true)
     | None -> check "jetpac manifest present" false ""
     match games |> List.tryFind (fun g -> g.Name = "Minimal") with
     | Some m ->

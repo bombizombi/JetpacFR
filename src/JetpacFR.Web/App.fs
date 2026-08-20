@@ -804,9 +804,9 @@ module App =
       chkRec?checked <- s.Recorder.RecordEnabled
       running <- true
       statusText?textContent <-
-        sprintf "emulator ready (%s) - frame 0, recording %s"
+        sprintf "emulator ready (%s) - frame 0, recording %s, saved input %d events"
           (if s.WarmStart then "cached entry state" else "booted to game entry")
-          (if s.Recorder.RecordEnabled then "ON" else "OFF")
+          (if s.Recorder.RecordEnabled then "ON" else "OFF") s.ReplayEventCount
     | None -> ()
 
   // ---- construction ------------------------------------------------------

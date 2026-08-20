@@ -55,6 +55,55 @@ module EntryCache =
       storage?setItem(stateKey, state)
     with _ -> () // the cache is an optimization; quota failures must not break startup
 
+[<Struct>]
+type ReplayKeyEvent =
+  { Frame: int
+    Row: int
+    Bit: int
+    Pressed: bool }
+
+module private ReplayCache =
+  let private key (romBytes: byte[]) (tzxBytes: byte[]) =
+    "jetpacfr.replay.v1.jetpac." + AssetHash.ofBytes romBytes + "." + AssetHash.ofBytes tzxBytes
+
+  let private storage: obj = emitJsExpr () "window.localStorage"
+
+  let load (romBytes: byte[]) (tzxBytes: byte[]) : ReplayKeyEvent list =
+    try
+      let raw: obj = storage?getItem(key romBytes tzxBytes)
+      if isNull raw then []
+      else
+        let compact: string =
+          emitJsExpr (unbox<string> raw)
+            "JSON.parse($0).events.map(e => [e.frame,e.row,e.bit,e.pressed].join(',')).join('\\n')"
+        if String.IsNullOrWhiteSpace compact then []
+        else
+          compact.Split([| '\n' |], StringSplitOptions.RemoveEmptyEntries)
+          |> Array.choose (fun line ->
+            match line.Split(',') with
+            | [| frame; row; bit; pressed |] ->
+              match Int32.TryParse frame, Int32.TryParse row, Int32.TryParse bit, Boolean.TryParse pressed with
+              | (true, f), (true, r), (true, b), (true, p)
+                when f >= 0 && r >= 0 && r < 8 && b >= 0 && b < 5 ->
+                Some { Frame = f; Row = r; Bit = b; Pressed = p }
+              | _ -> None
+            | _ -> None)
+          |> Array.toList
+    with _ -> []
+
+  let save (romBytes: byte[]) (tzxBytes: byte[]) (events: seq<ReplayKeyEvent>) =
+    try
+      let eventText =
+        events
+        |> Seq.map (fun e -> sprintf "{\"frame\":%d,\"row\":%d,\"bit\":%d,\"pressed\":%b}" e.Frame e.Row e.Bit e.Pressed)
+        |> String.concat ","
+      let body =
+        sprintf
+          "{\"format\":\"jetpacfr-replay\",\"version\":1,\"gameId\":\"jetpac\",\"romSha256\":\"%s\",\"tzxSha256\":\"%s\",\"events\":[%s]}"
+          (AssetHash.ofBytes romBytes) (AssetHash.ofBytes tzxBytes) eventText
+      storage?setItem(key romBytes tzxBytes, body)
+    with _ -> ()
+
 type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
   // Web: assets arrive as byte arrays (embedded base64). EntryCache/Boot use the
   // fixed asset keys "rom"/"tzx", resolved by Boot.AssetProvider.
@@ -63,6 +112,7 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
 
   let port = Jetpac2.Core.Machine()
   let recorder = TraceRecorder(capacity, 512)
+  let replayEvents = ResizeArray<ReplayKeyEvent>(ReplayCache.load romBytes tzxBytes)
   let mutable frame = 0
   let mutable warmStart = false
   let snapshotInterval = 64
@@ -130,8 +180,12 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
   member this.CycleCount = port.CycleCount()
   member this.Regs = port.Regs
   member this.Memory = port.Memory
+  member this.ReplayEventCount = replayEvents.Count
 
-  member this.SetKey(row: int, bit: int, pressed: bool) = port.SetKey(row, bit, pressed)
+  member this.SetKey(row: int, bit: int, pressed: bool) =
+    replayEvents.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
+    ReplayCache.save romBytes tzxBytes replayEvents
+    port.SetKey(row, bit, pressed)
 
   /// Rendered frame (BGRA 320x256) from the port's video state.
   member this.ScreenBuffer = port.Video.BlitTo()

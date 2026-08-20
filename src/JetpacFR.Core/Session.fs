@@ -224,7 +224,9 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   /// replaying; RunFrame reports ReplayFinished at the recording's end.
   member this.StartReplay() =
     replayMode <- true
-    replayEndFrame <- history.LastFrame // recording end, before truncation
+    // After a process restart, history contains only the frame-0 entry
+    // anchor, while the persisted KeyLog contains the recording extent.
+    replayEndFrame <- max history.LastFrame keyLog.EndFrame
     replayFinished <- false
     history.Truncate(frame, port.Memory)
     recorder.Reset()
