@@ -244,6 +244,7 @@ type MainWindow() as self =
   let parityLabel = TextBlock(Text = "", VerticalAlignment = VerticalAlignment.Center, Foreground = normal)
   let setEntryBtn = Button(Content = "Set as game entry")
   let exportScriptBtn = Button(Content = "Export script")
+  let timelineBtn = Button(Content = "Timeline")
   let timeLabel = TextBlock(Text = "00:00", VerticalAlignment = VerticalAlignment.Center)
   let goBtn = Button(Content = "Go")
   let replayBtn = Button(Content = "Replay")
@@ -253,6 +254,7 @@ type MainWindow() as self =
   /// in lockstep with the replaying frame, so LastFrame alone would pin the
   /// thumb to the right edge instead of showing replay progress.
   let mutable replayExtent = 0
+  let mutable timelineWin: TimelineDemoWindow option = None
   let keyMap (key: Key) : (int * int) list =
     match key with
     | Key.A -> [ (1, 0) ]
@@ -837,14 +839,14 @@ type MainWindow() as self =
   /// Build the CE engine for a game; updates the parity display.
   let startCE (m: GameManifest) : CEGame option =
     if m.Name = "Minimal" then
-      let image = MinimalGame.Game.binary
+      let image = MinimalGame.Image.binary
       let mem, state = MinimalGame.Game.entryState image
-      let matching, total, divergences = CEParity.check MinimalGame.Game.program image
+      let matching, total, divergences = CEParity.check MinimalGame.Image.program image
       let status =
         if divergences.IsEmpty then sprintf "CE parity: %d/%d bytes match" matching total
         else sprintf "CE parity: %d/%d - diverges at %A" matching total divergences
       parityLabel.Text <- status
-      Some(CEGame(MinimalGame.Game.program, mem, state))
+      Some(CEGame(MinimalGame.Image.program, mem, state))
     else
       parityLabel.Text <- "no CE program for this game yet"
       None
@@ -1517,8 +1519,30 @@ type MainWindow() as self =
           System.IO.File.WriteAllText(dlg.FileName, "[\n" + body + "\n]\n")
           statusText.Text <- sprintf "exported %d key events to %s" s.KeyLog.Events.Count dlg.FileName
       | None -> statusText.Text <- "no game running - play first, then export")
+    timelineBtn.Click.Add(fun _ ->
+      try
+        match timelineWin with
+        | Some w when w.IsLoaded -> w.Activate() |> ignore
+        | _ ->
+          // Timeline length: a running replay knows its full extent up
+          // front (ReplayEndFrame), so the selector shows the whole range
+          // immediately instead of growing with the playhead; recording
+          // beyond the replay extends the max naturally.
+          let w =
+            TimelineDemoWindow(fun () ->
+              match session with
+              | Some s -> max 1L (int64 (max s.ReplayEndFrame s.Frame))
+              | None ->
+                match currentTrace () with
+                | Some t when t.FrameTicks.Length > 0 -> int64 t.FrameTicks.Length
+                | _ -> 300L)
+          w.Owner <- self
+          timelineWin <- Some w
+          w.Closed.Add(fun _ -> timelineWin <- None)
+          w.Show()
+      with ex -> statusText.Text <- sprintf "timeline demo failed: %s" ex.Message)
 
-    for c in [ gameCombo :> FrameworkElement; engineCombo :> FrameworkElement; parityLabel :> FrameworkElement; setEntryBtn :> FrameworkElement; exportScriptBtn :> FrameworkElement; runBtn :> FrameworkElement; pauseBtn :> FrameworkElement; stepFrameBtn :> FrameworkElement; recordToggle :> FrameworkElement; soundToggle :> FrameworkElement; saveBtn :> FrameworkElement; loadBtn :> FrameworkElement ] do
+    for c in [ gameCombo :> FrameworkElement; engineCombo :> FrameworkElement; parityLabel :> FrameworkElement; setEntryBtn :> FrameworkElement; exportScriptBtn :> FrameworkElement; timelineBtn :> FrameworkElement; runBtn :> FrameworkElement; pauseBtn :> FrameworkElement; stepFrameBtn :> FrameworkElement; recordToggle :> FrameworkElement; soundToggle :> FrameworkElement; saveBtn :> FrameworkElement; loadBtn :> FrameworkElement ] do
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     toolbar.Children.Add sep |> ignore

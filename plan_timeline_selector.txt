@@ -1,0 +1,56 @@
+Timeline Selector (WPF prototype)
+=================================
+Goal: a reusable WPF timeline-selection strip with two independent ranges
+("brush A", "brush B"), ported from the opus HTML design
+(dl/control_file_GUI_ideas/opus/src/components/Timeline.tsx). Only the
+selection part: two toggle buttons, start/end marker lines, per-brush tint,
+debug text readout. The web client is a separate later task.
+
+Design decisions
+----------------
+- Unit-agnostic positions: ranges are { Start: int64; End: int64 } over a
+  Length: int64 timeline. Today Length = frames of the recording; tomorrow
+  the same control selects at single-instruction precision by feeding it
+  instruction indices and a different FormatUnit. The control only maps
+  unit <-> pixel via Length and formats units through a callback, so
+  precision is a property of the data, not of the control.
+- Half-open ranges [Start, End): End - Start = length, matching the HTML
+  width math. End may equal Length (range flush with the right edge).
+- Colors from the HTML: A = sky #38BDF8, B = amber #FBBF24; range fill at
+  15% alpha, 2px full-color start/end marker lines, label chip "A" at the
+  range's bottom-left and "B" at its bottom-right (same as the HTML).
+- Interaction (mirrors the HTML tape):
+  * drag on the track = select [anchor, current] for the active brush,
+    live update during the drag (HTML commits on move), commit on release
+  * clean click (no drag) = point range (both markers coincide); the HTML
+    scrubs a playhead on click, but we have no playhead in the selection
+    strip, so a click is a point selection
+  * A/B keys switch the active brush (HTML hint "a/b = pick brush")
+  * radio-style toggle buttons in the host window drive ActiveBrush
+- No playhead, phase bands, input lanes, or saved-trace rows: out of scope
+  ("just the selection part").
+- Code-only WPF, imperative styling - matches the JetpacFR.Desktop
+  convention (App.fs has no XAML).
+
+Files
+-----
+- src/JetpacFR.Desktop/TimelineSelector.fs (new, before App.fs in fsproj)
+  - BrushId = A | B
+  - BrushRange = { Start: int64; End: int64 } with Length
+  - TimelineSelector : FrameworkElement, OnRender-drawn, mouse drag +
+    A/B keys, events RangeChanged / ActiveBrushChanged, properties
+    Length / RangeA / RangeB / ActiveBrush / UnitName / FormatUnit
+  - TimelineDemoWindow: host with two toggle buttons, mono debug readout
+    ("A start-end (len f)  B start-end (len f)"), length fed from the
+    recording's frame count (live via a 300ms timer, default 300 when no
+    session), hint line
+- src/JetpacFR.Desktop/App.fs: "Timeline" toolbar button opens a single
+  TimelineDemoWindow (activate if already open), frame getter =
+  session.Frame, else trace FrameTicks count, else 300
+
+Acceptance
+----------
+- Builds (solution + Desktop project).
+- E2E on the real surface: launch app, open demo from toolbar, drag on the
+  track -> range tint + marker lines move, debug text updates, toggle
+  brush B -> second range edits independently.

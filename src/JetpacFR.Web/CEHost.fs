@@ -72,10 +72,10 @@ module CEHost =
       let btn = Dom.byId "ceBtn"
       let status = Dom.byId "ceStatus"
       // Byte emission on start + parity vs the original image.
-      let image = MinimalGame.Game.binary
+      let image = MinimalGame.Image.binary
       let mem, state = MinimalGame.Game.entryState image
-      game <- Some(CEGame(MinimalGame.Game.program, mem, state))
-      let matching, total, divergences = CEParity.check MinimalGame.Game.program image
+      game <- Some(CEGame(MinimalGame.Image.program, mem, state))
+      let matching, total, divergences = CEParity.check MinimalGame.Image.program image
       let parity =
         if divergences.IsEmpty then sprintf "CE parity: %d/%d bytes match" matching total
         else sprintf "CE parity: %d/%d - diverges at %A" matching total divergences

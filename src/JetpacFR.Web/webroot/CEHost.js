@@ -5,7 +5,8 @@ import { CEGame__SetKey_289F56A, CEGame__get_Frame, CEGame__DrainBeeperSamples_Z
 import { item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
 import { Dom_window, Audio_Play, Dom_setInterval, Dom_byId } from "./App.js";
 import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
-import { program, binary, entryState } from "./games/minimal/Game.js";
+import { entryState } from "./games/minimal/Game.js";
+import { program, binary } from "./games/minimal/Image.js";
 import { printf, toText } from "./fable_modules/fable-library-js.5.13.0/String.js";
 
 let game = undefined;

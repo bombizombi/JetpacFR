@@ -781,8 +781,8 @@ let runGame2 () : int =
 let runMinimal () : int =
   printfn "minimal: CE DSL game project - bytes, mixed CE+raw, oracle lockstep"
     // 1. Structure -> bytes: assembling the CE program reproduces the image.
-  check "CE assemble reproduces the game image" (MinimalGame.Game.assembled = MinimalGame.Game.binary)
-    (sprintf "%d vs %d bytes" MinimalGame.Game.assembled.Length MinimalGame.Game.binary.Length)
+  check "CE assemble reproduces the game image" (MinimalGame.Image.assembled = MinimalGame.Image.binary)
+    (sprintf "%d vs %d bytes" MinimalGame.Image.assembled.Length MinimalGame.Image.binary.Length)
   // 2. Mixed raw + CE program: the two forms interleave and assemble
   // exactly (raw bytes not yet disassembled, CE ops once lifted).
   let mixed : Jetpac2.Core.Z80Op list =
@@ -799,7 +799,7 @@ let runMinimal () : int =
   // 3. Structure -> behavior: the CE frame driver on the port must
   // lockstep with the oracle (which executes the same bytes natively) over
   // 150 frames: identical memory, PC/SP, and cycle counts.
-  let mem, state = MinimalGame.Game.entryState MinimalGame.Game.binary
+  let mem, state = MinimalGame.Game.entryState MinimalGame.Image.binary
   let port = Jetpac2.Core.Machine()
   Jetpac2.Core.Z80Table.EnsureInstalled()
   port.LoadState(mem, state)
@@ -839,8 +839,8 @@ let runMinimal () : int =
   match findMinimal (DirectoryInfo AppContext.BaseDirectory) with
   | Some proba ->
     let orig = File.ReadAllBytes proba
-    check "assembled bytes match proba.bin" (MinimalGame.Game.assembled = orig)
-      (sprintf "%d vs %d bytes" MinimalGame.Game.assembled.Length orig.Length)
+    check "assembled bytes match proba.bin" (MinimalGame.Image.assembled = orig)
+      (sprintf "%d vs %d bytes" MinimalGame.Image.assembled.Length orig.Length)
   | None -> printfn "  proba.bin not present yet - placeholder game used"
   if failures.Count > 0 then 1 else 0
 
@@ -1128,7 +1128,7 @@ let runCE () : int =
     // 4. The CEGame engine wrapper (used by the Desktop/Web toggles)
     // locksteps with the oracle.
     let ceState = snd (MinimalGame.Game.entryState img)
-    let ce = JetpacFR.Core.CEGame(MinimalGame.Game.program, mem, ceState)
+    let ce = JetpacFR.Core.CEGame(MinimalGame.Image.program, mem, ceState)
     let oracle2 = Jetpac.Core.Spectrum48()
     oracle2.LoadState(mem, ceState)
     let mutable ok2 = true
