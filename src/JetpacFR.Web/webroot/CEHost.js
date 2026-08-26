@@ -1,13 +1,15 @@
 
-import { defaultOf } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { iterate, isEmpty, empty, ofArray, singleton } from "./fable_modules/fable-library-js.5.13.0/List.js";
-import { CEGame__SetKey_289F56A, CEGame__get_Frame, CEGame__DrainBeeperSamples_Z524259C1, CEGame__RunFrame, CEParity_check, CEGame_$ctor_20C827FE, CEGame__get_ScreenBuffer } from "./JetpacFR.Core/CEGame.js";
+import { equals, defaultOf } from "./fable_modules/fable-library-js.5.13.0/Util.js";
+import { iterate, isEmpty, tryHead, empty, ofArray, singleton } from "./fable_modules/fable-library-js.5.13.0/List.js";
+import { CEGame__SetKey_289F56A, CEGame__get_Frame, CEGame__DrainBeeperSamples_Z524259C1, CEGame__RunFrame, CEGame_$ctor_20C827FE, CEGame__get_ScreenBuffer } from "./JetpacFR.Core/CEGame.js";
 import { item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { Dom_window, Audio_Play, Dom_setInterval, Dom_byId } from "./App.js";
+import { Audio_Play, Dom_setInterval, Dom_window, Dom_byId } from "./App.js";
 import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
 import { entryState } from "./games/minimal/Game.js";
 import { program, binary } from "./games/minimal/Image.js";
-import { printf, toText } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { GameRegistry_parity, GameRegistry_tryFind, GameRegistry_all, GameImage, GameRegistry_register } from "./JetpacFR.Core/GameRegistry.js";
+import { toString } from "./fable_modules/fable-library-js.5.13.0/Types.js";
+import { printf, toText, substring } from "./fable_modules/fable-library-js.5.13.0/String.js";
 
 let game = undefined;
 
@@ -105,12 +107,22 @@ export function start() {
         const btn = Dom_byId("ceBtn");
         const status = Dom_byId("ceStatus");
         const patternInput = entryState(binary);
-        game = CEGame_$ctor_20C827FE(program, patternInput[0], patternInput[1]);
-        const patternInput_1 = CEParity_check(program, binary);
+        const state = patternInput[1];
+        const mem = patternInput[0];
+        GameRegistry_register(new GameImage("minimal", "Minimal", mem, 32768, program, state));
+        let search;
+        const matchValue = Dom_window.location.search;
+        search = (equals(matchValue, defaultOf()) ? "" : toString(matchValue));
+        const wanted = search.startsWith("?game=") ? substring(search, 6).toLowerCase() : "";
+        let selected;
+        const option_1 = (wanted === "") ? tryHead(GameRegistry_all()) : GameRegistry_tryFind(wanted);
+        selected = ((option_1 != null) ? option_1 : (new GameImage("minimal", "Minimal", mem, 32768, program, state)));
+        const patternInput_1 = GameRegistry_parity(selected);
         const total = patternInput_1[1] | 0;
         const matching = patternInput_1[0] | 0;
         const divergences = patternInput_1[2];
         const parity = isEmpty(divergences) ? toText(printf("CE parity: %d/%d bytes match"))(matching)(total) : toText(printf("CE parity: %d/%d - diverges at %A"))(matching)(total)(divergences);
+        game = CEGame_$ctor_20C827FE(selected.Program, selected.Memory, selected.EntryState);
         status.textContent = toText(printf("CE engine - frame 0, %s"))(parity);
         btn.onclick = ((_arg) => {
             running = !running;

@@ -11,9 +11,9 @@ import { tryGetValue, addToSet } from "../fable_modules/fable-library-js.5.13.0/
 import { defaultOf, disposeSafe, comparePrimitives, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
 import { sort } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
 import { join, printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.13.0/System.Text.js";
+import { StringBuilder__Append_Z721C83C5, StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.13.0/System.Text.js";
 import { toString, FSharpRef } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { value as value_8 } from "../fable_modules/fable-library-js.5.13.0/Option.js";
+import { value as value_6 } from "../fable_modules/fable-library-js.5.13.0/Option.js";
 
 function rawOp(bytes) {
     return new Z80Op("raw", bytes, (m) => {
@@ -120,10 +120,12 @@ export function toOps(image, start, count) {
 }
 
 /**
- * Emit the F# `z80 { ... }` body for the binary: named ops, symbolic
- * labels for in-range jump targets, raw blocks for the rest.
+ * Emit the inner lines (no enclosing braces) of the F# `z80 { ... }` body
+ * for the binary: named ops, symbolic labels for in-range jump targets,
+ * raw blocks for the rest. The composable form used by the project
+ * generator to mix code segments with marked data blocks.
  */
-export function toSource(image, start, count) {
+export function toBody(image, start, count) {
     const limit = min(start + count, image.length) | 0;
     const sites = [];
     const targets = new Set([]);
@@ -176,7 +178,6 @@ export function toSource(image, start, count) {
         disposeSafe(enumerator);
     }
     const sb = StringBuilder_$ctor();
-    StringBuilder__AppendLine_Z721C83C5(sb, "z80 {");
     let idx = 0;
     let pc_1 = start;
     while (pc_1 < limit) {
@@ -200,7 +201,7 @@ export function toSource(image, start, count) {
                     outArg_1 = v_1;
                 })), outArg_1];
                 if (matchValue_2[0]) {
-                    StringBuilder__AppendLine_Z721C83C5(sb, (arg_2 = value_8(row_1.LabelName), toText(printf("  Z80.%s %s"))(arg_2)(matchValue_2[1])));
+                    StringBuilder__AppendLine_Z721C83C5(sb, (arg_2 = value_6(row_1.LabelName), toText(printf("  Z80.%s %s"))(arg_2)(matchValue_2[1])));
                 }
                 else {
                     StringBuilder__AppendLine_Z721C83C5(sb, "  " + row_1.Format(image, pc_1));
@@ -219,6 +220,16 @@ export function toSource(image, start, count) {
             pc_1 = (rawEnd | 0);
         }
     }
+    return toString(sb);
+}
+
+/**
+ * Wrap a body in the `z80 { ... }` block (the historical toSource shape).
+ */
+export function toSource(image, start, count) {
+    const sb = StringBuilder_$ctor();
+    StringBuilder__AppendLine_Z721C83C5(sb, "z80 {");
+    StringBuilder__Append_Z721C83C5(sb, toBody(image, start, count));
     StringBuilder__AppendLine_Z721C83C5(sb, "  }");
     return toString(sb);
 }

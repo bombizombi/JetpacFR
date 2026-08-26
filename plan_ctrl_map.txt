@@ -1,0 +1,145 @@
+Control map: full-height zoomable control-file panel (plan_ctrl_map)
+====================================================================
+Goal: the control file becomes a first-class visual object in the desktop
+GUI. A vertical, full-window-height section shows the whole $0000-$FFFF
+address space color-coded by control-file structure (block kinds, comment
+coverage, execution heat) and zooms continuously from a 64K overview down
+to single instructions with their bytes and comments. It doubles as the
+primary NAVIGATION surface (click = go there) and later as the primary
+EDITING surface for blocks and range comments.
+
+Non-goals (v1)
+--------------
+- No Web/Fable port yet, but the geometry lives in JetpacFR.Core so the
+  same model can drive a canvas renderer later (same split as
+  TraceTypesWeb/TraceCodecWeb).
+- No change to control.json format. The panel consumes exactly what
+  ControlFile already stores: Blocks (Code/Data/Gap) and Comments
+  (Line/Name/Range/Exec).
+- The heatmap tab stays; this panel complements it (structure vs raw heat).
+
+Existing pieces this builds on
+------------------------------
+- TimelineSelector.fs: the house pattern for a custom-drawn
+  FrameworkElement (OnRender + DrawingContext, FormattedText, DPI-aware,
+  mouse capture, CLIEvents). ControlMap follows it.
+- App.fs MainWindow: `main` Grid with columns left/center/right;
+  `control` (in-memory ControlFile) + `controlGameDir`; `cursor` over
+  t.Entries; `refreshDisasm` (both modes); `memRowFor` linear sweep for
+  memory mode; `currentCounts()`/`heatLut` per-PC execution counts;
+  `saveControlNow` dirty-save flow.
+- ControlFile.fs: Blocks sorted by Start; upsert (empty text removes);
+  commentAt resolution order; SkoolCtl.import/export for round-tripping.
+
+Design decisions
+----------------
+1. Placement: a NEW fourth column at ROOT level (outside `main`), so it
+   spans toolbar + main + status rows = literally full window height.
+   Far RIGHT of the window (minimap convention: same side as the code it
+   indexes). Width 56px default, GridSplitter to resize up to ~200px.
+   Collapsible via a thin toggle button (remembers state in-session).
+
+2. New control `ControlMap` in JetpacFR.Desktop (FrameworkElement +
+   OnRender, modeled on TimelineSelector):
+   - Vertical address axis, $0000 at TOP, $FFFF at bottom (memory-map
+     reading order; ROM visibly pinned at top).
+   - Viewport state: mutable viewStart/viewEnd (address ints). The strip
+     ALWAYS renders [viewStart, viewEnd); the default is the full span.
+   - Events (CLIEvent): AddressClicked(addr), ViewportChanged(start, end),
+     BlockEdited(block) - MainWindow owns all behavior, the control stays
+     dumb like TimelineSelector.
+
+3. Data pipeline (Core, testable without WPF):
+   - `JetpacFR.Core/CtrlMapModel.fs`: pure functions producing a draw list
+     from (ControlFile, instrStarts: int[], execCounts: int[] option,
+     selfMod: bool[] option, viewStart, viewEnd, pixelsPerUnit).
+     Output: RenderItem list = { Y; Height; Fill; Stroke; Label option }
+     + marker positions. Unit-testable; Desktop just paints it.
+   - Instruction boundaries: bool[0x10000] "byte is an instruction start",
+     built by the SAME linear decode sweep memory-mode disassembly uses
+     (memRowFor path). Cached; invalidated when self-modified addresses
+     change or the engine/game switches. Without a session (loaded trace),
+     build once from snapshot memory at load time.
+
+4. Color coding (palette consistent with App.fs + heatLut):
+   - Block kind fill: Code = blue family, Data = orange, Gap = dark gray.
+   - Unmapped addresses between blocks = near-black (reads as "unknown").
+   - Execution heat blended UNDER block fill (log scale, same LUT idea as
+     refreshHeatmap) so hot loops glow through their block color.
+   - Self-modified (executed-then-written) = magenta tick on the left
+     edge, matching the heatmap legend wording.
+   - Comments: Line = small green tick in the left gutter; Range = green
+     bracket spanning its extent; Name = white label text (drawn only
+     when the block is tall enough, else a notch); Exec comments attach
+     to their instruction row in zoomed mode.
+   - Current PC/cursor row = bright cyan hairline (matches disasm
+     current-row highlight).
+
+5. Level-of-detail thresholds (pixelsPerByte = viewportHeight /
+   (viewEnd-viewStart)):
+   - ppb < 1/16: bands only, no text; comment DENSITY bar in the gutter
+     (comments per 256-byte page).
+   - 1/16 <= ppb < 1: bands + Name labels when they fit + block-kind
+     borders; heat visible.
+   - 1 <= ppb < 8: instruction tick marks from instrStarts; Line comments
+     as wider ticks; hovered address tooltip.
+   - ppb >= 8 ("instruction level"): every instruction start draws its
+     addr:bytes snippet + Line comment text inline (FormattedText,
+     truncated); Range brackets labeled; this is the "readable" end stop.
+   Max zoom-in capped at ppb = 32 (one byte = 32px) so scrolling stays
+   sane; max zoom-out = whole span.
+
+6. Interaction contract:
+   - Mouse wheel: zoom anchored at cursor (the address under the pointer
+     stays under the pointer). Shift+wheel or middle-drag: pan.
+   - Thumb: a translucent rectangle showing where the DISASM VIEWPORT sits
+     (derived from the rows refreshDisasm currently shows); draggable.
+   - Left click / click-drag on content: move the cursor to that address -
+     execution mode maps addr -> nearest entry (binary search on Pc via
+     FirstIndexAtPc), memory mode sets memoryCursor; then the EXISTING
+     refreshAll()/syncSlider() path runs. Drag continues to scrub (same
+     feel as the rewind slider).
+   - Hover: tooltip "0xNNNN <block name> (kind) - <comment prefix>".
+   - Editing (phase 4): right-click menu on a block: Rename / Set kind
+     (Code/Data/Gap) / Split here / Merge with next / Add range comment.
+     All go through ControlFile.upsert or direct Blocks mutation + Dirty
+     <- true; the standard "Save ctrl" flow persists. Split inserts a
+     block boundary at an INSTRUCTION START only (guard via instrStarts).
+
+7. Refresh wiring: every place that calls refreshDisasm() also calls
+   controlMap.InvalidateVisual(); cheap because painting is O(visible).
+   Control edits trigger it via the existing upsert call sites; trace
+   rebuilds via buildTraceNow completion; engine switch resets the
+   instrStarts cache.
+
+8. Sync both directions: scrolling disasmList updates the viewport thumb
+   (controlMap.SetViewport(firstRowAddr, lastRowAddr)); clicking the map
+   scrolls disasmList (already covered by refreshDisasm centering logic).
+
+Milestones
+----------
+M1 - Static paint (Core model + Desktop control, fourth column, whole-span
+     block bands + heat blend). Acceptance: launch app, panel shows Jetpac's
+     ROM band gray, RAM code blocks blue/data orange; colors match kinds in
+     games/jetpac/control.json.
+M2 - Zoom/pan/LOD. Acceptance: wheel-zoom from 64K to instruction level in
+     ~6 wheel notches; anchor stability (address under cursor fixed);
+     labels/tooltips appear/disappear per thresholds; frame stays
+     interactive while running (paint < 2ms at any zoom).
+M3 - Navigation + live sync. Acceptance: click an instruction -> disasm
+     cursor + registers + screen follow (execution mode); run the game and
+     watch the cyan PC hairline travel; scroll disasmList -> thumb moves.
+M4 - Overlays + editing. Acceptance: add a Name/range comment via context
+     menu -> visible immediately, present after Save ctrl + reload;
+     SkoolCtl import of a real ctrl shows its blocks; differential test
+     suite still passes untouched (no emulator changes).
+
+Risks / notes
+-------------
+- Linear decode of RAM with self-modifying code is approximate by nature
+  (same limitation as memory-mode disasm today); the magenta self-mod
+  marks make the uncertainty visible instead of hiding it.
+- FormattedText at high zoom is the only perf risk; mitigate with layout
+  caching per (text,size) pair like TimelineSelector's per-frame ft().
+- Do NOT reuse ListBox/virtualization for this; OnRender keeps 64K-scale
+  rendering allocation-free per frame.

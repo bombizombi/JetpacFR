@@ -1,0 +1,186 @@
+Control-file GUI: mass comments, timeline-in-main-window, memory scan (plan_control_gui)
+=======================================================================================
+Goal: the desktop app becomes the tool that BUILDS the control file. A
+per-game control file (games/<id>/control.json) gains comments + block
+names captured from live runs and from SkoolKit control files; those
+comments flow back into generated versions (vNNN fs files) as `//` lines.
+The main window hosts the TimelineSelector above the disassembly window,
+with preview buttons for ranges A/B, a comment toolbar under it, an
+execution-mode radio group, and a right-side "Scan" tab for memory
+scanning.
+
+Existing pieces this builds on
+------------------------------
+- TimelineSelector.fs: FrameworkElement, RangeA/RangeB/ActiveBrush/
+  Length properties, RangeChanged/ActiveBrushChanged CLIEvents, chip
+  drag handles. Hosted today only in TimelineDemoWindow (keep that).
+- App.fs MainWindow: session (TraceSession), currentTrace() (built or
+  loaded .jpt), cursor over t.Entries, disasmList (ListBox of DisasmRow
+  with Tag strings), refreshDisasm shows entries [cursor-20, cursor+20],
+  rewind slider previews s.RewindTo(frame) + presentGame().
+- Trace { Entries; Snapshots; Writes; FrameTicks; PerPcCount;
+  SelfModified } - Entries have Pc/Tick/Cycles; FrameTicks[i] = tick at
+  frame boundary i; Writes carry Address/Old/New per change.
+- GameProject.fs: control.json already carries blocks + activeVersion;
+  Z80CE.toBody emits the CE body. GenGame.fs --regen/--materialize.
+
+Design decisions
+----------------
+1. Control file format stays ONE file: games/<id>/control.json gains:
+     "comments": [
+       { "addr": 32768, "text": "keyboard scan", "kind": "line" },
+       { "start": 32768, "endExcl": 33024, "name": "MainLoop", "kind": "name" },
+       { "start": ..., "endExcl": ..., "text": "...", "kind": "range" },
+       { "instrIndex": 1234, "text": "first jump into RAM", "kind": "exec" }
+     ]
+   kinds: "line" (addr), "name" (region title; shown on the timeline),
+   "range" (comment over a range), "exec" (trace instruction index).
+2. SkoolKit interop (both directions, text format):
+   - import: parse `c/b/g/i/s/t/u/w <addr> [title]`, sub-blocks ignored
+     on v1, plus N/D/E directives -> comments. Hex `$NNNN` or decimal.
+   - export: emit block directives from control.json blocks (c/b/u by
+     kind), names as titles, line/range comments as N directives.
+   - static-analysis ctrl (skool2ctl.py output): same parser - it is a
+     plain list of block directives; unknown letters map to data.
+3. TimelineSelector in the main window is driven in FRAMES via Length =
+   replay extent (session.ReplayEndFrame when replaying, History.LastFrame
+   otherwise, FrameTicks.Length for a loaded trace). RangeChanged gives
+   [fStart, fEnd); preview maps frames -> machine state:
+   * replay path: s.RewindTo(fEnd-1) + presentGame() (non-destructive),
+     then restore to where the user was (RewindTo(savedFrame)).
+   * trace path (no history): find entry index via FrameTicks binary
+     search, set cursor, refreshDisasm/Regs (registers + disasm move,
+     screen can't be reconstructed without history - status says so).
+4. Disassembly modes: two ToggleButtons ("Memory" / "Execution") above
+   the list.
+   - Execution mode: current behavior (rowFor over t.Entries).
+   - Memory mode: linear sweep of s.Memory (or loaded-trace-time memory?
+     not available statically - use current port memory; document it)
+     from $4000 upward, skipping inside-instruction gaps, ~48 rows
+     around a memoryCursor. Clicking a row sets memoryCursor.
+5. Comments on rows: DisasmRow gains Comment field; template becomes a
+   horizontal StackPanel (code TextBlock + comment TextBox bound to
+   Comment). Committing writes through into the in-memory ControlFile
+   and marks dirty; save button persists JSON. Both modes share one
+   comment store keyed by ADDRESS (memory mode edits land on the same
+   address keys as execution rows' PCs).
+6. Mass-comment buttons share one text box above them:
+   [comment text box................................................]
+   [idx->cmt] [name before] [name A] [name B] [cmt A] [cmt B] [B-A] [A-B]
+   Semantics (all write into ControlFile):
+   - idx->cmt: exec-kind comment at current cursor's instruction index.
+   - name before: name-region ending at current entry's PC (start =
+     previous name end or region start), text from box.
+   - name A / cmt A: region = selector A mapped to ADDRESSES via the
+     entries executed within those frames (distinct PCs, ordered);
+     same for B. B-A / A-B: distinct PCs in B not in A (symmetric diff
+     halves) - "what did range B execute that A didn't".
+7. Engine radio group: Oracle | CE (game.fs) | Differential. Existing
+   engineCombo already implements Oracle/CE switch; re-home it as three
+   RadioButtons in the center column header (same switchEngine logic);
+   "Differential" runs Validation.run-style lockstep for the CURRENT
+   game over the selected A-range frames and reports first divergence in
+   statusText (background task like validateBtn does).
+8. Memory scan tab (new right-column tab):
+   State kept in MainWindow: scanBaseline : byte[] option, scanResults :
+   int array, scanFilters UI.
+   - Start scan: snapshot current memory as baseline; results = all
+     addresses matching include-filters; listbox filled "ADDR  XX  prev
+     cur" style rows.
+   - Filter buttons operate results <- results AND predicate(current vs
+     baseline): changed / exact value / smaller / larger / written /
+     read(=appeared in Writes stream since baseline tick... approximate:
+     use trace Writes between then and now; for v1 'written' = changed,
+     'read' omitted unless cheap) - keep: changed, exact, smaller,
+     larger, written(changed), unchanged, executed(pc has PerPcCount>0).
+   - Options: width 8/16-bit, include ROM ($<0x4000), include screen
+     ($4000-$5AFF), code-only / non-code-only (from control.json blocks'
+     kind=code coverage).
+9. Version regeneration integration: GenGame --regen already reads
+   blocks; extend emission to prepend comments as F# `//` lines at their
+   addresses (line/name/range), so the compiled game.fs carries the
+   knowledge. Names become section headers (`// ---- MainLoop ----`).
+
+Phases
+------
+Phase 1: ControlFile model + persistence (JetpacFR.Core/ControlFile.fs)
+  - Types: ControlComment kinds, ControlFile { Blocks; Comments; ... },
+    load/save games/<id>/control.json (back-compat: missing fields
+    default), merge semantics (upsert by key).
+  - SkoolKit import/export (parse ctrl text; emit ctrl text).
+  - Tests: roundtrip json; skool import sample; export shape.
+
+Phase 2: timeline in main window + previews
+  - Embed TimelineSelector in center column top (above stripRow? NO -
+    replace stripRow position: timeline directly above disasmList, strip
+    stays under slider). Length from session/trace extent; wire
+    RangeChanged to update A/B labels near preview buttons.
+  - Preview A/B buttons: RewindTo-based screen restore (see D3).
+  - Keep TimelineDemoWindow untouched (toolbar button still opens it).
+
+Phase 3: disassembly modes + inline comments
+  - Mode toggle buttons; Memory mode sweep renderer around memCursor.
+  - DisasmRow.Comment + editable TextBox in row template; commit ->
+    upsert comment (kind=line, addr=row pc/address), mark dirty, show
+    "*" in title; Save Ctrl-file button + auto-save on close prompt.
+  - Comment display: rows show stored comment text (dim color).
+
+Phase 4: mass-comment toolbar
+  - Shared text box + 8 buttons wired to ControlFile ops (D6); feedback
+    via statusText; dirty flag; save persists.
+
+Phase 5: engine radio (oracle/CE/differential)
+  - RadioButtons replacing engineCombo items; differential mode = run
+    Validation.run over min 300 frames of current selection start,
+    report divergence count + first divergence in theaterText.
+
+Phase 6: memory scan tab
+  - Scan state machine + filters + options; listbox rows double-click
+    jumps (memory mode: centers memCursor; execution mode: jumps to
+    FirstIndexAtPc); context: "add comment" button applies shared text
+    to selected address(es).
+
+Phase 7: regen integration
+  - GenGame --regen emits comments as // lines (D9); watchgame loop
+    unchanged.
+
+Out of scope (this plan)
+------------------------
+- Web client parity (later).
+- Undo/redo of comment edits (single-step safety = dirty flag + save).
+- Read/write access tracking beyond trace Writes (needs recorder work).
+
+Implementation status (DONE, with deviations)
+---------------------------------------------
+- ControlFile.fs: comments (line/name/range/exec) + JSON roundtrip +
+  SkoolCtl import/export. Import handles block directives (c/b/g/i/s/t/
+  u/w, hex+decimal), N/D/E-style comments; blocks closed at successors;
+  sub-blocks/loops/@ directives skipped but their addresses harvested.
+- App.fs: timeline embedded above the code window with Preview A/B
+  (RewindTo preview + snap-back; trace-only fallback jumps the cursor);
+  ctrl file buttons (Save / Import json|ctl / Export skool .ctl /
+  New); Memory vs Execution mode toggles (memory = linear sweep around
+  memCursor, executed bytes tinted cyan); rows show `; comment` text
+  from commentAt (exact line wins, else narrowest covering range/name).
+- Mass-comment toolbar: shared commentBox + idx->cmt, name-before,
+  name/comment A and B (frames -> distinct PCs via ControlFile.pcsInFrames),
+  A-only/B-only via diffPcs. Engine radios: Oracle / game.fs (CE) /
+  Both + compare (background Validation.run, first divergence reported).
+  The old engineCombo remains for the CE toggle plumbing; radios drive it.
+- Scan tab: Start snapshot -> candidate universe per options (8/16-bit,
+  include ROM, include screen, all/code-only/non-code-only from control
+  blocks); filters changed/unchanged/exact/smaller/larger/written
+  (trace Writes since baseline frame)/executed (PerPcCount>0); results
+  listbox jumps (execution: FirstIndexAtPc; memory mode: centers sweep)
+  and comments selected address.
+- GenGame --regen weaves comments into versions as // lines: names =
+  section headers, line/range comments at their addresses.
+- Verified: --test control (20 checks) green; --test all 120 ok;
+  E2E regen emits `// $8000: program entry...` and name headers;
+  desktop UI automation confirmed every new widget present and live
+  (New ctrl -> status message, idx->cmt feedback, scan start 49152
+  candidates, changed-filter narrows correctly on a paused machine).
+- Deviations: inline per-row comment EDITING is display-only in v1
+  (comments are added through the toolbar/scan buttons or by editing
+  control.json); row click-to-type lands with the web client. The old
+  TimelineDemoWindow test host is untouched.

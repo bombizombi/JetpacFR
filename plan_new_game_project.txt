@@ -1,0 +1,182 @@
+New game analysis project (plan_new_game_project)
+==================================================
+Goal: a repeatable workflow for starting a NEW game under analysis:
+create games/<id>/, import the game file (tape / sna / raw bin), generate
+the first `z80 { ... }` CE program (v0 = just the bytes), then iterate:
+mark blocks in a control file, regenerate the next version, compare,
+compile ONLY the active version - while every older version stays on disk
+for diffing. Both shells (WPF desktop, Fable web) must be able to run any
+active version.
+
+What already exists (no new machinery needed for these parts)
+-------------------------------------------------------------
+- Folder-per-game: games/*/manifest.json, discovered by Manifest.discover;
+  "adding a game is adding a folder + manifest instead of editing code".
+- Boot modes: "auto"/"manual" (tape, ManualBoot + "Set as game entry"),
+  "program" (raw image at an address, ProgramEntry.seed).
+- Binary -> CE source: Z80CE.toSource image start count emits the F#
+  `z80 { ... }` body (covered instructions as vocab ops, symbolic labels
+  lblN for in-range jump targets, everything else as `yield! [| 0x..uy |]`
+  raw blocks). Z80CE.toOps is its structural twin.
+- Safety gate: CEParity.check program image -> assembled-vs-original byte
+  parity; CEGame runs the program on the port Machine (Phase 5).
+- Template project: games/minimal (netstandard2.0, Fable-clean,
+  Image.fs + Game.fs, references Jetpac2.Core). Web compiles it via
+  fable into webroot/games/minimal/*.js; desktop references the fsproj.
+
+Design decisions
+----------------
+1. Versions live as immutable artifacts; ONE compiled file is derived.
+   - games/<id>/versions/v000_init.fs, v001_*.fs, ... never referenced by
+     any fsproj. Generated once, never edited (regression-comparable by
+     plain diff).
+   - games/<id>/CeProgram.fs is the ONLY file in the Compile list. It is
+     produced by copying the ACTIVE version (chosen below). Rationale:
+     "compile the newest by timestamp" breaks on git checkout (mtimes
+     change, order ambiguous); an explicit selector keeps builds
+     deterministic and makes "which version am I running" answerable.
+2. The selector lives in the control file, not in a build flag:
+   games/<id>/control.json:
+     {
+       "image":   "original.bin",
+       "start":   16384,          // image load address ($4000)
+       "endExcl": 65536,          // or smaller if the game is shorter
+       "entry":   { "pc": "..." , "source": "tape-entry|sna|reset" },
+       "activeVersion": 3,
+       "blocks": [ { "start": 16384, "endExcl": 16640,
+                     "name": "loader_stub", "kind": "code" }, ... ]
+     }
+   kinds: "code" (disassemble to ops), "data" (keep raw, emit as labeled
+   raw block), "gap" (skip entirely - unmapped padding), later "lifted"
+   (replaced by hand-written F#, see Out of scope).
+3. Generation is a pure function: (original.bin, control.json) ->
+   versions/vNNN.fs. v0 ignores `blocks` (whole span, default kind
+   "code", Z80CE.toSource output verbatim). From v1 on, block kinds
+   steer emission: data/gap blocks become single labeled raw blocks
+   instead of instruction walks, giving readable chunk boundaries at the
+   exact addresses the user marked.
+4. Where the generator lives: a new console mode in the existing test
+   host (--gen-game <dir>), NOT a new project. Precedent: --test
+   minimal/ce/z80ops flags already drive JetpacFR.Core pipelines from a
+   command line; the generator needs nothing but Z80CE + File IO.
+5. Web is the primary iteration loop; desktop is the verification loop.
+   - Web: rebuild game JS + refresh browser = seconds, no app lifecycle.
+     dotnet watch is unnecessary complexity here: a plain script
+     (tools/watchgame.ps1) running `dotnet fable src/JetpacFR.Web` +
+     vite dev server covers it; F# changes require re-running fable, the
+     browser reloads static JS from webroot.
+   - Desktop: F# has NO hot reload (dotnet watch hot-reload is C#-only),
+     and the CE program is baked into a static-initialized module - so a
+     WPF restart after rebuild is unavoidable and accepted. The custom
+     build step IS possible: an MSBuild BeforeBuild target in
+     JetpacFR.Desktop.fsproj (or the game fsproj) that materializes
+     CeProgram.fs from control.json before compilation. That makes
+     `dotnet build` correct-by-construction without remembering scripts.
+6. Generalizing the desktop wiring is prerequisite: App.fs startCE/hasCE
+   hardcode `m.Name = "Minimal"` and reference MinimalGame.Image
+   directly. New games cannot ship through that path. Replace with a
+   per-game image module contract (see Phase 4): each game project
+   exposes `Image.binary : byte[]`, `Image.program : Z80Op list`,
+   `Game.entryState`, `Game.runFrame` - the same three members minimal
+   already has - and shells pick them up through a small registry added
+   to the game project (a module list, since .NET reflection-free
+   discovery across ProjectReferences is not worth it at this scale).
+
+Phases
+------
+Phase 1: ingest + scaffold (CLI)
+  - --gen-game <gamesDir>/<id> --from <file> [--address N]:
+    * .tzx  -> copy rom/tzx refs, write manifest (boot "auto"), instruct
+      the user to boot + "Set as game entry"; entry snapshot exported to
+      games/<id>/entry.state (existing SaveState format).
+    * .bin/.sna -> normalize to original.bin (48K image, zero-filled
+      below `start`) + entry.state (SNA: registers from the header;
+      bin: ProgramEntry-style reset state). manifest boot "program".
+  - Writes control.json skeleton (start/end detected from the image's
+    non-zero extent, clamped to [address, 0x10000]) and versions/.
+  - v000_init.fs emitted immediately (Z80CE.toSource over the whole
+    span), activeVersion = 0.
+
+Phase 2: version materialization
+  - Generator regenerates versions/vNNN_<tag>.fs from control.json +
+    original.bin (block kinds respected from v1 on).
+  - Materializer: control.json activeVersion -> games/<id>/CeProgram.fs
+    (copy + header comment stating version + generation time).
+  - MSBuild target `MaterializeCeProgram` (BeforeBuild) in the game
+    fsproj calling the generator host with --materialize, so BOTH shells
+    get the mechanism for free; web build script calls the same thing.
+
+Phase 3: web fast loop
+  - tools/watchgame.ps1: materialize -> dotnet fable src/JetpacFR.Web ->
+    done (vite dev serves webroot; browser refresh runs the new version).
+  - CEHost.fs generalized from hardcoded MinimalGame to the game
+    registry (query-string ?game=<id> selects; parity line unchanged).
+
+Phase 4: desktop loop + registry
+  - Game registry: each games/<id> fsproj exposes module
+    <Id>Game.Registry with `images : (string * ImageBundle) list`
+    (ImageBundle = binary + program + entryState + runFrame). Desktop
+    references all game fsprojs (it already references minimal).
+  - App.fs: hasCE/startCE switch from Name-check to registry lookup by
+    GameId; engine combo enabled whenever the manifest's game has an
+    ImageBundle. Restart-to-apply stays (documented in the hint bar).
+
+Phase 5: comparison affordances
+  - --diff-game <dir> <a> <b>: assemble both versions, CEParity-style
+    byte diff vs original.bin + op-count/raw-ratio stats (the --test ce
+    "<5% raw" metric per version). Output text table; no GUI yet.
+
+Verification
+------------
+- Roundtrip gate stays absolute: for EVERY version, assemble(program) ==
+  original.bin byte-for-byte within [start, endExcl); enforced by the
+  generator itself (it refuses to write a version that fails parity).
+- --test ce extended: iterate games/* with control.json, run CEGame
+  lockstep vs oracle for N frames on the active version of each.
+- Manual smoke per shell: web (?game=<id>) and desktop engine toggle run
+  the new game's active version; switching activeVersion + rebuild shows
+  the new behavior in both.
+
+Out of scope (this plan)
+------------------------
+- Lifting blocks to hand-written F# (LiftedRoutines flow) - the control
+  file reserves the "lifted" kind but generation of lifted bodies is a
+  separate workflow (prompt.md pipeline).
+- Editing blocks in the GUI (timeline selector integration): the control
+  file is authored by hand/text first; wiring TimelineSelector brush
+  ranges to block edits comes after the CLI loop is proven.
+- 128K/banked games (unchanged constraint from plan_ce_dsl).
+
+Implementation status (DONE, with deviations)
+---------------------------------------------
+- Z80CE.toBody extracted (toSource = braces around toBody; --test ce green).
+- GameProject.fs: control.json load/validate (block overlap + span
+  checks), loadImage (64K layout), activeVersionPath, materialize.
+- GameRegistry.fs: GameImage record { GameId; Name; Memory (full 64K,
+  Machine.LoadState blits from 0); BaseAddress; Program; EntryState }
+  + register/all/tryFind/parity. DEVIATION from Phase 4 as planned:
+  games/<id> fsprojs are netstandard2.0 and reference ONLY Jetpac2.Core
+  (Fable-clean), so they cannot see JetpacFR.Core where the registry
+  lives - registration happens in the SHELLS instead (one block per
+  game project the shell references). Registry compiles in Web via a
+  <Compile Include> of GameRegistry.fs.
+- GenGame.fs (tests host): --gen-game / --regen / --materialize /
+  --diff-game, dispatched before the regression harness in main.
+  .sna PC is popped off the stack (the 48K format has no header PC);
+  extent = last non-zero byte + 1. Parity gate refuses bad versions;
+  regen bumps activeVersion by JSON rewrite (key order preserved).
+- MSBuild target added to games/minimal fsproj, gated on
+  CeProgramDir property (set it: dotnet build -p:CeProgramDir=games/minimal),
+  so plain builds never depend on the test host being built.
+- watchgame.ps1: one-shot materialize+fable mode and -Watch polling loop.
+- Desktop App.fs: hasCE/startCE via GameRegistry.tryFind(GameId);
+  minimal registered at startup. Web CEHost.fs: registers minimal,
+  ?game=<id> query selects, parity via GameRegistry.parity.
+- Verified: --test all (100 ok), web CE engine runs with parity
+  "397/397 bytes match" (browser-driven), desktop launches; E2E
+  gen-game -> mark data block -> regen v001 -> materialize -> diff-game
+  all PARITY OK.
+- Known sharp edge: --diff-game currently re-derives ops from the span
+  rather than parsing the version text; both versions share derivation,
+  so the comparison is only meaningful once versions diverge in source
+  (fine for now; real per-version parse comes with the GUI editor).

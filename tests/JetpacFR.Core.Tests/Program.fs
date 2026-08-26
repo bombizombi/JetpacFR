@@ -1091,6 +1091,147 @@ let runIntegration () : int =
     (sprintf "before=%d after=%d" decodedBeforeReset dynamicCache.Count)
   if failures.Count > 0 then 1 else 0
 
+let runControl () : int =
+  printfn "control: json roundtrip + skool ctrl import/export"
+  // 1. JSON roundtrip preserves everything.
+  let cf : JetpacFR.Core.ControlFile =
+    { ImageFile = "original.bin"
+      Start = 0x8000
+      EndExcl = 0x809B
+      EntryPc = 0x8000
+      ActiveVersion = 2
+      Blocks =
+        [ { Start = 0x8000; EndExcl = 0x8023; Name = "main"; Kind = Code }
+          { Start = 0x8023; EndExcl = 0x8026; Name = "table"; Kind = Data } ]
+      Comments =
+        [ { Kind = Line; Addr = 0x8005; EndExcl = 0; InstrIndex = -1; Text = "keyboard scan" }
+          { Kind = Name; Addr = 0x8000; EndExcl = 0x8023; InstrIndex = -1; Text = "MainLoop" }
+          { Kind = Range; Addr = 0x8010; EndExcl = 0x8020; InstrIndex = -1; Text = "sprite update" }
+          { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = 1234; Text = "first jump into RAM" } ]
+      Dirty = true }
+  let rt = JetpacFR.Core.ControlFile.fromJson (JetpacFR.Core.ControlFile.toJson cf)
+  check "json roundtrip: blocks" (rt.Blocks = cf.Blocks) (sprintf "%A" rt.Blocks)
+  check "json roundtrip: comments" (rt.Comments = cf.Comments) (sprintf "%A" rt.Comments)
+  check "json roundtrip: scalars"
+    (rt.Start = cf.Start && rt.EndExcl = cf.EndExcl && rt.ActiveVersion = cf.ActiveVersion
+     && rt.EntryPc = cf.EntryPc && rt.ImageFile = cf.ImageFile)
+    (JetpacFR.Core.ControlFile.toJson rt)
+  check "roundtrip clears dirty flag" (not rt.Dirty) ""
+  // 2. commentAt: exact line wins, else covering name/range.
+  let at a = JetpacFR.Core.ControlFile.commentAt cf a
+  check "commentAt exact line" (at 0x8005 = Some "keyboard scan") (sprintf "%A" (at 0x8005))
+  check "commentAt falls back to range" (at 0x8015 = Some "sprite update") (sprintf "%A" (at 0x8015))
+  check "commentAt none" (at 0x8090 = None) (sprintf "%A" (at 0x8090))
+  // 3. upsert replaces by key; empty text deletes.
+  let cf2 =
+    JetpacFR.Core.ControlFile.upsert cf { Kind = Line; Addr = 0x8005; EndExcl = 0; InstrIndex = -1; Text = "rewritten" }
+  check "upsert replaces same key" ((cf2.Comments |> List.filter (fun m -> m.Kind = Line)).Length = 1) ""
+  check "upsert new text" (JetpacFR.Core.ControlFile.commentAt cf2 0x8005 = Some "rewritten") ""
+  let cf3 = JetpacFR.Core.ControlFile.upsert cf2 { Kind = Line; Addr = 0x8005; EndExcl = 0; InstrIndex = -1; Text = "" }
+  // Removing the line comment at 0x8005: the address still shows the
+  // covering Name "MainLoop" (0x8000-0x8023), not the removed text.
+  check "upsert empty text removes"
+    (JetpacFR.Core.ControlFile.commentAt cf3 0x8005 = Some "MainLoop") ""
+  // 4. SkoolKit import: block directives + N/D comments, hex and decimal.
+  let skoolText = """c $8000 Main routine
+N $8005 entry point
+b 32773 data table
+D 32773 lookup values
+t 32778 messages
+"""
+  let imported = JetpacFR.Core.SkoolCtl.import skoolText
+  check "skool: 3 blocks" (imported.Blocks.Length = 3) (sprintf "%A" imported.Blocks)
+  check "skool: first block code" (imported.Blocks.Head.Kind = Code && imported.Blocks.Head.Name = "Main routine") (sprintf "%A" imported.Blocks.Head)
+  check "skool: hex addr parsed" (imported.Blocks.Head.Start = 0x8000) (sprintf "%d" imported.Blocks.Head.Start)
+  check "skool: dec addr parsed" (imported.Blocks |> List.item 1 |> fun b -> b.Start = 32773) ""
+  check "skool: N becomes line comment"
+    (imported.Comments |> List.exists (fun m -> m.Kind = Line && m.Addr = 0x8005 && m.Text = "entry point")) ""
+  check "skool: D becomes range comment"
+    (imported.Comments |> List.exists (fun m -> m.Kind = Range && m.Addr = 32773)) ""
+  check "skool: blocks closed at successors"
+    (imported.Blocks.Head.EndExcl = 32773) (sprintf "%d" imported.Blocks.Head.EndExcl)
+  // 5. Export shape: letters + titles, re-importable.
+  let exported = JetpacFR.Core.SkoolCtl.export cf
+  check "export emits c directive" (exported.Contains("c 32768")) exported
+  check "export emits N comment" (exported.Contains("N 32773 keyboard scan")) exported
+  let reimported = JetpacFR.Core.SkoolCtl.import exported
+  check "export reimports to same block count" (reimported.Blocks.Length = cf.Blocks.Length) (sprintf "%d vs %d" reimported.Blocks.Length cf.Blocks.Length)
+  if failures.Count > 0 then 1 else 0
+
+let runCtrlMap () : int =
+  printfn "ctrlmap: LOD snippets, row classification, block edits"
+  // A small code image: LD BC,$1234 / RET at $8000.
+  let mem = Array.zeroCreate<byte> 0x10000
+  mem[0x8000] <- 0x01uy
+  mem[0x8001] <- 0x34uy
+  mem[0x8002] <- 0x12uy
+  mem[0x8003] <- 0xC9uy
+  let starts =
+    let s = Array.create 0x10000 false
+    let mutable a = 0x8000
+    while a < 0x9000 do
+      s[a] <- true
+      a <- a + max 1 (min 6 (Disasm.disasmMemory mem a).Length)
+    Some s
+  let blocks =
+    [ { Start = 0x8000; EndExcl = 0x8010; Name = "main"; Kind = Code } ]
+  let comments =
+    [ { ControlComment.Kind = Line; Addr = 0x8003; EndExcl = 0; InstrIndex = -1; Text = "back" } ]
+  let counts = Array.zeroCreate<int> 0x10000
+  counts[0x8005] <- 500
+  let render vs ve rc =
+    JetpacFR.Core.CtrlMapModel.render blocks comments starts (Some mem) counts (Array.zeroCreate<bool> 0x10000) vs ve rc
+  // 1. Instruction-level LOD: ppb >= 8 yields decoded snippets.
+  let hi = render 0x8000 0x8040 800
+  check "snippets present above threshold" (hi.Snippets.Length >= 2) (sprintf "%d" hi.Snippets.Length)
+  check "snippet first is LD BC,nn"
+    (hi.Snippets[0].Addr = 0x8000 && hi.Snippets[0].Bytes.StartsWith("01") && hi.Snippets[0].Text.Length > 0)
+    (sprintf "%A" hi.Snippets[0])
+  check "snippet carries line comment"
+    (hi.Snippets |> Array.find (fun s -> s.Addr = 0x8003) |> fun s -> s.Comment = Some "back")
+    (sprintf "%A" hi.Snippets)
+  // 2. Zoomed out: no snippets.
+  let lo = render 0x0000 0x10000 800
+  check "snippets absent below threshold" (lo.Snippets.Length = 0) ""
+  let deep = render 0x8004 0x8012 800
+  // 3. Every row classified, even when several rows share one address
+  //    (zoomed in past 1 byte/pixel - regression for a null-row crash).
+  //    Rows inside the block classify Code; rows past its end Unmapped.
+  let kindAt y = (JetpacFR.Core.CtrlMapModel.rowLo 0x8004 0x8012 800 y, deep.Rows[y].Kind)
+  check "deep zoom rows all populated"
+    (deep.Rows |> Array.forall (fun r -> r <> Unchecked.defaultof<JetpacFR.Core.CtrlMapModel.MapRow>))
+    ""
+  check "deep zoom row keeps block kind inside the block"
+    ([ for y in 0 .. 799 -> kindAt y ]
+     |> List.forall (fun (a, k) ->
+       if a < 0x8010 then k = JetpacFR.Core.CtrlMapModel.CodeR
+       else k = JetpacFR.Core.CtrlMapModel.UnmappedR))
+    (sprintf "%A" (kindAt 0, kindAt 799))
+  check "zoomed-out row shows heat"
+    ((render 0x8000 0x8010 40).Rows |> Array.exists (fun r -> r.Heat > 0))
+    ""
+  // 4. Labels appear only when their band is tall enough.
+  check "label fits when zoomed" (hi.Labels |> Array.exists (fun l -> l.Text = "main")) (sprintf "%A" hi.Labels)
+  check "no label when zoomed far out" (lo.Labels.Length = 0) (sprintf "%A" lo.Labels)
+  // 5. Range comments surface as extents clipped to the view.
+  let cf = { ImageFile = "x"; Start = 0x8000; EndExcl = 0x8010; EntryPc = 0x8000; ActiveVersion = -1
+             Blocks = blocks
+             Comments = comments @ [ { Kind = Range; Addr = 0x8006; EndExcl = 0x800A; InstrIndex = -1; Text = "sprite" } ]
+             Dirty = false }
+  let rr = JetpacFR.Core.CtrlMapModel.render cf.Blocks cf.Comments starts (Some mem) counts (Array.zeroCreate<bool> 0x10000) 0x8000 0x8010 400
+  check "range mark visible" (rr.Ranges = [| (0x8006, 0x800A) |]) (sprintf "%A" rr.Ranges)
+  // 6. Block edit ops.
+  let c0 = ControlFile.empty 0x8000 0x8020
+  let split = ControlFile.splitBlockAt c0 0x8010
+  check "split makes two blocks" (split.Blocks.Length = 2 && split.Dirty) (sprintf "%A" split.Blocks)
+  check "split names the tail" ((split.Blocks |> List.find (fun b -> b.Start = 0x8010)).Name = "block_8010") ""
+  check "split on edge is a no-op" (ControlFile.splitBlockAt c0 0x8000 = c0) ""
+  let merged = ControlFile.mergeWithNext split 0x8000
+  check "merge restores one block" (merged.Blocks.Length = 1 && merged.Blocks.Head.EndExcl = 0x8020) (sprintf "%A" merged.Blocks)
+  check "rename sets name" ((ControlFile.renameBlockAt c0 0x8015 "loop").Blocks.Head.Name = "loop") ""
+  check "setKind persists kind" ((ControlFile.setKindAt c0 0x8015 Data).Blocks.Head.Kind = Data) ""
+  if failures.Count > 0 then 1 else 0
+
 let runCE () : int =
   printfn "ce: binary -> CE ops (roundtrip) + F# source"
   let rec findMinimal (d: DirectoryInfo) =
@@ -1113,7 +1254,7 @@ let runCE () : int =
     let rebuilt = Jetpac2.Core.Z80.assemble ops
     check "roundtrip: assemble(toOps(binary)) == binary" (rebuilt = img)
       (sprintf "%d vs %d bytes" rebuilt.Length img.Length)
-    // 2. Coverage: proba.bin decodes almost entirely to real ops.
+
     let rawBytes = ops |> List.filter (fun o -> o.Mnemonic = "raw") |> List.sumBy (fun o -> o.Bytes.Length)
     check "proba.bin decodes to real ops (raw < 5%)"
       (rawBytes < img.Length / 20)
@@ -1152,8 +1293,8 @@ let runCE () : int =
     src.Split('\n') |> Array.truncate 24 |> Array.iter (printfn "  %s")
     if failures.Count > 0 then 1 else 0
 
-[<EntryPoint>]
-let main argv =
+/// The historical regression harness.
+let mainTests argv =
   try
     let tests =
       match Array.toList argv with
@@ -1179,11 +1320,13 @@ let main argv =
       | "labels" -> runLabels ()
       | "integration" -> runIntegration ()
       | "ce" -> runCE ()
+      | "control" -> runControl ()
+      | "ctrlmap" -> runCtrlMap ()
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
         + runHistory rom tzx + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
-        + runLabels () + runIntegration () + runCE ()
+        + runLabels () + runIntegration () + runCE () + runControl () + runCtrlMap ()
       | other ->
         eprintfn "unknown test: %s" other
         1
@@ -1202,3 +1345,11 @@ let main argv =
   with ex ->
     eprintfn "harness crashed: %s" ex.Message
     1
+
+/// Dispatch: game-project commands vs the regression harness.
+[<EntryPoint>]
+let main argv =
+  match Array.toList argv with
+  | cmd :: _ when cmd = "--gen-game" || cmd = "--regen" || cmd = "--materialize" || cmd = "--diff-game" ->
+    GenGame.run (Array.toList argv)
+  | _ -> mainTests argv

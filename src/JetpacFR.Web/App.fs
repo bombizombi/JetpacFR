@@ -1129,6 +1129,515 @@ module App =
     Dom.window?addEventListener("keyup", fun (e: obj) ->
       setKeyFor (string (e?key)) false)
 
+    let storageKey = "jetpacfr.control.minimal"
+    let mutable control: ControlFile option = None
+    let saveControlLocal () =
+      match control with
+      | Some c ->
+        let local: obj = Dom.window?localStorage
+        emitJsExpr (local, storageKey, ControlFile.toJson c) "$0.setItem($1, $2)" |> ignore
+        control <- Some { c with Dirty = false }
+      | None -> ()
+
+    // ---- timeline selector + control map (desktop GUI parity) --------------
+    // Canvas ports of TimelineSelector + ControlMap. The web session keeps
+    // no frame-snapshot history, so "preview" sweeps the trace cursor over
+    // the selection instead of replaying screen frames.
+
+    let tlCanvas = Dom.byId "canvasTimeline"
+    let tlCtx: obj = tlCanvas?getContext("2d")
+    let mutable tlLen = 300
+    let mutable rangeA = (0, 150)
+    let mutable rangeB = (150, 300)
+    let mutable brushA = true
+    let mutable tlDragAnchor: int option = None
+    let mutable tlChipDrag: bool option = None // Some true = A's chip
+    let mutable tlStartX = 0.0
+    let mutable tlMoved = false
+    let mutable chipRectA = (0.0, 0.0, 0.0, 0.0)
+    let mutable chipRectB = (0.0, 0.0, 0.0, 0.0)
+    let brushAColor = "#38BDF8"
+    let brushBColor = "#FBBF24"
+
+    let tlFrameCount () =
+      match currentTrace () with
+      | Some t when t.FrameTicks.Length > 0 -> t.FrameTicks.Length
+      | _ -> 300
+
+    /// First trace entry at or after frame `f` (FrameTicks binary search).
+    let entryAtFrame (f: int) : int =
+      match currentTrace () with
+      | Some t when t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
+        let last = t.FrameTicks.[t.FrameTicks.Length - 1]
+        let tick =
+          if f <= 0 then 0u
+          elif f >= t.FrameTicks.Length then last
+          else t.FrameTicks.[f]
+        let mutable lo = 0
+        let mutable hi = t.Entries.Length - 1
+        let mutable res = t.Entries.Length - 1
+        while lo <= hi do
+          let mid = (lo + hi) / 2
+          if t.Entries.[mid].Tick >= tick then (res <- mid; hi <- mid - 1)
+          else lo <- mid + 1
+        res
+      | _ -> 0
+
+    let tlNiceStep (length: int) : int =
+      let nice = [| 1.0; 2.0; 2.5; 5.0 |]
+      let rec niceCeil (v: float) base10 =
+        let m = v / base10
+        match nice |> Array.tryFind (fun n -> n >= m - 1e-9) with
+        | Some n -> n * base10
+        | None ->
+          if base10 >= 1e9 then v
+          else niceCeil v (base10 * 10.0)
+      let l = float length
+      let mutable step = niceCeil (l / 4.0) 1.0
+      while System.Math.Floor(l / step) + 1.0 > 4.0 do step <- niceCeil (step * 1.01) 1.0
+      while System.Math.Floor(l / step) + 1.0 < 3.0 && step > 1.0 do step <- niceCeil (step / 2.02) 1.0
+      max 1 (int (System.Math.Ceiling step))
+
+    let tlRender () =
+      let w: float = unbox tlCanvas?width
+      let h: float = unbox tlCanvas?height
+      tlCtx?fillStyle <- "#101016"
+      tlCtx?fillRect(0.0, 0.0, w, h)
+      tlCtx?strokeStyle <- "#3A3F4C"
+      tlCtx?strokeRect(0.5, 0.5, w - 1.0, h - 1.0)
+      let labelZone = 13.0
+      let top = 2.0
+      let bottom = h - labelZone - 2.0
+      let len = max 1 tlLen
+      let drawBrush (which: bool) ((rs, re): int * int) =
+        let color = if which then brushAColor else brushBColor
+        let x0 = min w (max 0.0 (float rs / float len * w))
+        let x1 = min w (max 0.0 (float re / float len * w))
+        // tinted range: hex + 26 alpha
+        tlCtx?fillStyle <- (if which then "rgba(56,189,248,0.15)" else "rgba(251,191,36,0.15)")
+        tlCtx?fillRect(min x0 x1, top, max 2.0 (abs (x1 - x0)), bottom - top)
+        tlCtx?strokeStyle <- color
+        tlCtx?lineWidth <- 2.0
+        tlCtx?beginPath()
+        tlCtx?moveTo(x0, top)
+        tlCtx?lineTo(x0, bottom)
+        tlCtx?moveTo(x1, top)
+        tlCtx?lineTo(x1, bottom)
+        tlCtx?stroke()
+        // label chip: A bottom-left, B bottom-right
+        let label = if which then "A" else "B"
+        let chipW = 14.0
+        let chipH = 12.0
+        let chipX = if which then min x0 (max 0.0 (w - chipW)) else max 0.0 (min (x1 - chipW) (w - chipW))
+        let chipY = bottom - chipH
+        tlCtx?fillStyle <- color
+        tlCtx?fillRect(chipX, chipY, chipW, chipH)
+        tlCtx?fillStyle <- "#020617"
+        tlCtx?font <- "bold 9px Consolas"
+        tlCtx?fillText(label, chipX + 4.0, chipY + 9.5)
+        if which then chipRectA <- (chipX, chipY, chipW, chipH) else chipRectB <- (chipX, chipY, chipW, chipH)
+      drawBrush true rangeA
+      drawBrush false rangeB
+      // ruler
+      let step = tlNiceStep len
+      tlCtx?strokeStyle <- "#8A8A92"
+      tlCtx?lineWidth <- 1.0
+      tlCtx?fillStyle <- "#8A8A92"
+      tlCtx?font <- "8px Consolas"
+      let mutable t = 0
+      while t <= len do
+        let x = float t / float len * w
+        tlCtx?beginPath()
+        tlCtx?moveTo(x, bottom - 3.0)
+        tlCtx?lineTo(x, bottom + 1.0)
+        tlCtx?stroke()
+        tlCtx?fillText(string t, min (max 2.0 (x - 8.0)) (w - 20.0), h - 4.0)
+        t <- t + step
+
+    let tlSetRange (which: bool) (r: int * int) =
+      if which then rangeA <- r else rangeB <- r
+      tlRender ()
+
+    let tlUnitAt (x: float) =
+      let w: float = unbox tlCanvas?width
+      let clamped = min (max x 0.0) w
+      int (System.Math.Round(clamped / w * float (max 1 tlLen)))
+
+    let tlX (e: obj) =
+      let rect: obj = tlCanvas?getBoundingClientRect()
+      (unbox<float> e?clientX - unbox<float> rect?left) * (unbox<float> tlCanvas?width / unbox<float> rect?width)
+
+    let inChip (r: float * float * float * float) (x: float) (y: float) =
+      let (rx, ry, rw, rh) = r
+      x >= rx - 3.0 && x <= rx + rw + 3.0 && y >= ry - 3.0 && y <= ry + rh + 3.0
+
+    let tlY (e: obj) =
+      let rect: obj = tlCanvas?getBoundingClientRect()
+      unbox<float> e?clientY - unbox<float> rect?top
+
+    tlCanvas?addEventListener("mousedown", fun e ->
+      let x = tlX e
+      let y = tlY e
+      tlStartX <- x
+      tlMoved <- false
+      if inChip chipRectA x y then tlChipDrag <- Some true
+      elif inChip chipRectB x y then tlChipDrag <- Some false
+      else
+        tlChipDrag <- None
+        tlDragAnchor <- Some (tlUnitAt x)
+        // scrub immediately to the pressed frame
+        cursor <- entryAtFrame (tlUnitAt x)
+        refreshAll ()
+        syncSlider ())
+    tlCanvas?addEventListener("mousemove", fun e ->
+      let x = tlX e
+      match tlChipDrag, tlDragAnchor with
+      | Some which, _ ->
+        if abs (x - tlStartX) > 3.0 then
+          let u = tlUnitAt x
+          match which with
+          | true ->
+            let (rs, re) = rangeA
+            tlSetRange true (min u re, re)
+          | false ->
+            let (rs, re) = rangeB
+            tlSetRange false (rs, max rs u)
+      | None, Some anchor ->
+        if abs (x - tlStartX) > 3.0 then
+          tlMoved <- true
+          let u = tlUnitAt x
+          tlSetRange brushA (min anchor u, max anchor u)
+        // scrub on every move, both directions
+        cursor <- entryAtFrame (tlUnitAt x)
+        refreshAll ()
+        syncSlider ()
+      | _ -> ())
+    Dom.window?addEventListener("mouseup", fun _ ->
+      match tlDragAnchor with
+      | Some anchor when not tlMoved ->
+        // clean click: point range
+        tlSetRange brushA (anchor, anchor)
+      | _ -> ()
+      tlDragAnchor <- None
+      tlChipDrag <- None)
+
+    let brushStyle () =
+      let a = Dom.byId "btnBrushA"
+      let b = Dom.byId "btnBrushB"
+      a?className <- (if brushA then "brush-btn active-brush-a" else "brush-btn")
+      b?className <- (if brushA then "brush-btn" else "brush-btn active-brush-b")
+    (Dom.byId "btnBrushA")?addEventListener("click", fun _ -> brushA <- true; brushStyle ())
+    (Dom.byId "btnBrushB")?addEventListener("click", fun _ -> brushA <- false; brushStyle ())
+    Dom.window?addEventListener("keydown", fun e ->
+      let k = string e?key
+      if k = "a" || k = "A" then (brushA <- true; brushStyle ())
+      elif k = "b" || k = "B" then (brushA <- false; brushStyle ()))
+
+    // Preview = sweep the trace cursor over the selection in exactly 1s
+    // (50 ticks x 20 ms). The web session has no frame-snapshot history,
+    // so this animates the instruction cursor, not the screen.
+    let mutable previewFrom = 0
+    let mutable previewSpan = 0
+    let mutable previewTicks = 0
+    let mutable previewActive = false
+    let rangeOf (which: bool) = if which then rangeA else rangeB
+    let previewRange (which: bool) =
+      let fStart, fEnd = rangeOf which
+      let label = if which then "A" else "B"
+      let n = tlFrameCount ()
+      if fEnd - 1 < n && fEnd - 1 >= 0 then
+        pauseGame ()
+        previewFrom <- max 0 fStart
+        previewSpan <- max 0 (fEnd - 1 - previewFrom)
+        previewTicks <- 0
+        previewActive <- true
+        cursor <- entryAtFrame previewFrom
+        refreshAll ()
+        syncSlider ()
+        statusText?textContent <- sprintf "preview %s: frames %d..%d over 1s (cursor sweep)" label fStart fEnd
+      else
+        statusText?textContent <- sprintf "preview %s: range outside the recording (%d frames)" label n
+    (Dom.byId "btnPreviewA")?addEventListener("click", fun _ -> previewRange true)
+    (Dom.byId "btnPreviewB")?addEventListener("click", fun _ -> previewRange false)
+    Dom.setInterval
+      (fun () ->
+        if previewActive then
+          previewTicks <- previewTicks + 1
+          let frac = min previewTicks 50
+          cursor <- entryAtFrame (previewFrom + previewSpan * frac / 50)
+          refreshAll ()
+          syncSlider ()
+          if previewTicks >= 50 then previewActive <- false)
+      20
+    |> ignore
+
+    // ---- control map --------------------------------------------------------
+    let cmCanvas = Dom.byId "canvasCtrlMap"
+    let cmCtx: obj = cmCanvas?getContext("2d")
+    let mutable cmViewStart = 0
+    let mutable cmViewEnd = 0x10000
+    let mutable instrStartsCache: bool[] option = None
+    let mutable instrStartsAt = 0.0
+    let mutable cmCursorAddr = -1
+    let mutable cmDragAddr: int option = None
+    let mutable cmDisasmLo = -1
+    let mutable cmDisasmHi = -1
+    let cmMinSpan () = max 32 (int (unbox<float> cmCanvas?height / 32.0))
+    let cmClamp () =
+      let span = max (cmMinSpan ()) (cmViewEnd - cmViewStart)
+      cmViewStart <- max 0 (min (0x10000 - span) cmViewStart)
+      cmViewEnd <- cmViewStart + span
+
+    let cmInstrStarts () : bool[] option =
+      match session with
+      | None -> None
+      | Some s ->
+        let now: float = emitJsExpr () "Date.now()"
+        if instrStartsCache.IsNone || now - instrStartsAt > 1000.0 then
+          let st = Array.create 0x10000 false
+          let mutable a = 0
+          while a < 0x10000 do
+            st.[a] <- true
+            let len = (Disasm.disasmMemory s.Memory a).Length
+            a <- a + (if len < 1 then 1 else min 8 len)
+          instrStartsCache <- Some st
+          instrStartsAt <- now
+        instrStartsCache
+
+    let cmCounts () =
+      match loaded with
+      | Some t -> t.PerPcCount
+      | None ->
+        match session with
+        | Some s -> s.Recorder.PerPcCount
+        | None -> Array.zeroCreate<int> 0x10000
+    let cmSelfMod () =
+      match loaded with
+      | Some t -> t.SelfModified
+      | None ->
+        match session with
+        | Some s -> s.Recorder.SelfModified
+        | None -> Array.zeroCreate<bool> 0x10000
+
+    let cmAddrY (addr: int) =
+      float (unbox<float> cmCanvas?height) * float (addr - cmViewStart) / float (max 1 (cmViewEnd - cmViewStart))
+
+    let cmRender () =
+      let w: float = unbox cmCanvas?width
+      let h: float = unbox cmCanvas?height
+      // keep the backing store in step with the CSS box
+      let cw: float = unbox cmCanvas?clientWidth
+      let ch: float = unbox cmCanvas?clientHeight
+      if cw > 0.0 && int cw <> int w then cmCanvas?width <- int cw
+      if ch > 0.0 && int ch <> int h then cmCanvas?height <- int ch
+      let w: float = unbox cmCanvas?width
+      let h: float = unbox cmCanvas?height
+      cmCtx?fillStyle <- "#0A0A10"
+      cmCtx?fillRect(0.0, 0.0, w, h)
+      let blocks = match control with Some c -> c.Blocks | None -> []
+      let comments = match control with Some c -> c.Comments | None -> []
+      let rowCount = max 1 (int (Math.Ceiling h))
+      let m =
+        JetpacFR.Core.CtrlMapModel.render blocks comments (cmInstrStarts ()) (session |> Option.map (fun s -> s.Memory))
+          (cmCounts ()) (cmSelfMod ()) cmViewStart cmViewEnd rowCount
+      let baseColor =
+        function
+        | JetpacFR.Core.CtrlMapModel.CodeR -> (0x2E, 0x7D, 0xD1)
+        | JetpacFR.Core.CtrlMapModel.DataR -> (0xC8, 0x8A, 0x2E)
+        | JetpacFR.Core.CtrlMapModel.GapR -> (0x3A, 0x3F, 0x4C)
+        | JetpacFR.Core.CtrlMapModel.MixedR -> (0x55, 0x51, 0x6B)
+        | JetpacFR.Core.CtrlMapModel.UnmappedR -> (0x0A, 0x0A, 0x10)
+      let heatLutI =
+        [| (0x08, 0x08, 0x0C); (0x0A, 0x1E, 0x4A); (0x0A, 0x3A, 0x5E); (0x0A, 0x5C, 0x6A);
+           (0x12, 0x86, 0x5E); (0x3A, 0xA8, 0x3C); (0x96, 0xB8, 0x2C); (0xD8, 0xA0, 0x22);
+           (0xE8, 0x66, 0x18); (0xF0, 0x38, 0x28) |]
+      let rowColor kind heat =
+        let (br, bgc, bb) = baseColor kind
+        if heat <= 0 then sprintf "rgb(%d,%d,%d)" br bgc bb
+        else
+          let (hr, hg, hb) = heatLutI.[min 9 heat]
+          let t = 0.15 + 0.65 * float heat / 9.0
+          let mix x y = int (Math.Round(float x + (float y - float x) * t))
+          sprintf "rgb(%d,%d,%d)" (mix br hr) (mix bgc hg) (mix bb hb)
+      if m.Rows.Length > 0 then
+        let rowH = h / float m.Rows.Length
+        let mutable y = 0
+        while y < m.Rows.Length do
+          let r = m.Rows.[y]
+          let col = rowColor r.Kind r.Heat
+          let mutable y2 = y + 1
+          while y2 < m.Rows.Length && m.Rows.[y2].Kind = r.Kind && m.Rows.[y2].Heat = r.Heat do
+            y2 <- y2 + 1
+          cmCtx?fillStyle <- col
+          cmCtx?fillRect(0.0, float y * rowH, w, float (y2 - y) * rowH + 0.5)
+          for yy in y .. y2 - 1 do
+            let ry = float yy * rowH
+            if m.Rows.[yy].SelfMod then
+              cmCtx?fillStyle <- "#F030F0"
+              cmCtx?fillRect(0.0, ry, 2.0, 1.0)
+            if m.Rows.[yy].Comment then
+              cmCtx?fillStyle <- "#4EE060"
+              cmCtx?fillRect(2.0, ry, 2.0, 1.0)
+          y <- y2
+        for (a, b) in m.Ranges do
+          let y0 = JetpacFR.Core.CtrlMapModel.addrY m.ViewStart m.ViewEnd m.Rows.Length a
+          let y1 = JetpacFR.Core.CtrlMapModel.addrY m.ViewStart m.ViewEnd m.Rows.Length b
+          cmCtx?fillStyle <- "rgba(78,224,96,0.19)"
+          cmCtx?fillRect(0.0, y0 * rowH, w, (y1 - y0) * rowH)
+        cmCtx?fillStyle <- "#E8E8EC"
+        cmCtx?font <- "9px Consolas"
+        for lbl in m.Labels do
+          let y = JetpacFR.Core.CtrlMapModel.addrY m.ViewStart m.ViewEnd m.Rows.Length lbl.Addr
+          cmCtx?fillText(lbl.Text, 5.0, y * rowH + 9.0)
+      // disassembly viewport thumb
+      if cmDisasmLo >= 0 && cmDisasmHi > cmDisasmLo then
+        cmCtx?strokeStyle <- "rgba(255,255,255,0.5)"
+        cmCtx?lineWidth <- 1.0
+        cmCtx?strokeRect(1.0, cmAddrY cmDisasmLo, w - 2.0, max 3.0 (cmAddrY cmDisasmHi - cmAddrY cmDisasmLo))
+      // cursor hairline
+      if cmCursorAddr >= 0 && cmCursorAddr >= cmViewStart && cmCursorAddr < cmViewEnd then
+        cmCtx?strokeStyle <- "#4ED0E0"
+        cmCtx?beginPath()
+        cmCtx?moveTo(0.0, cmAddrY cmCursorAddr)
+        cmCtx?lineTo(w, cmAddrY cmCursorAddr)
+        cmCtx?stroke()
+      // view readout
+      cmCtx?fillStyle <- "#6A6A74"
+      cmCtx?font <- "8px Consolas"
+      cmCtx?fillText(sprintf "%04X-%04X" cmViewStart cmViewEnd, 2.0, 8.0)
+
+    let cmCenterOn (addr: int) =
+      let span = cmViewEnd - cmViewStart
+      cmViewStart <- addr - span / 2
+      cmClamp ()
+      cmRender ()
+
+    let cmXy (e: obj) =
+      let rect: obj = cmCanvas?getBoundingClientRect()
+      (unbox<float> e?clientX - unbox<float> rect?left, unbox<float> e?clientY - unbox<float> rect?top)
+
+    let cmAddrAt (y: float) =
+      let h: float = unbox cmCanvas?height
+      cmViewStart
+      + int (min (y / h * float (cmViewEnd - cmViewStart)) (float (cmViewEnd - cmViewStart - 1)))
+
+    let cmNavigate (addr: int) =
+      match currentTrace () with
+      | Some t when t.Entries.Length > 0 && addr < t.FirstIndexAtPc.Length && t.FirstIndexAtPc.[addr] >= 0 ->
+        cursor <- t.FirstIndexAtPc.[addr]
+        refreshAll ()
+        syncSlider ()
+      | _ -> ()
+
+    cmCanvas?addEventListener("mousedown", fun e ->
+      let (x, y) = cmXy e
+      let addr = cmAddrAt y
+      cmDragAddr <- Some addr
+      cmNavigate addr)
+    cmCanvas?addEventListener("mousemove", fun e ->
+      let (x, y) = cmXy e
+      match cmDragAddr with
+      | Some _ ->
+        let addr = cmAddrAt y
+        cmDragAddr <- Some addr
+        cmNavigate addr
+      | None ->
+        let addr = cmAddrAt y
+        let blockTxt =
+          match control with
+          | Some c ->
+            ControlFile.blockAt c addr
+            |> Option.map (fun b -> sprintf " %s (%A)" b.Name b.Kind)
+            |> Option.defaultValue " <unmapped>"
+          | None -> ""
+        let counts = cmCounts ()
+        let n = if addr < counts.Length then counts.[addr] else 0
+        cmCanvas?title <- sprintf "0x%04X%s (%d executions)" addr blockTxt n)
+    Dom.window?addEventListener("mouseup", fun _ -> cmDragAddr <- None)
+    cmCanvas?addEventListener("wheel", fun e ->
+      e?preventDefault()
+      let delta: float = unbox e?deltaY
+      let (_, y) = cmXy e
+      let h: float = unbox cmCanvas?height
+      let frac = min 1.0 (max 0.0 (y / max 1.0 h))
+      let oldSpan = cmViewEnd - cmViewStart
+      let anchor = cmViewStart + int (frac * float oldSpan)
+      let factor = Math.Pow(1.15, -delta / 100.0)
+      let newSpan = max (cmMinSpan ()) (min 0x10000 (int (float oldSpan / factor)))
+      cmViewStart <- anchor - int (frac * float newSpan)
+      cmViewEnd <- cmViewStart + newSpan
+      cmClamp ()
+      cmRender ())
+    cmCanvas?addEventListener("contextmenu", fun e ->
+      e?preventDefault()
+      let (_, y) = cmXy e
+      let addr = cmAddrAt y
+      match control with
+      | None -> statusText?textContent <- "no control file - click New first"
+      | Some _ ->
+        let menu = Dom.byId "ctrlMenu"
+        Dom.clear menu
+        let addItem (txt: string) (act: ControlFile -> ControlFile) =
+          let item = Dom.el "div"
+          item?textContent <- txt
+          item?addEventListener("click", fun _ ->
+            match control with
+            | Some c ->
+              control <- Some (act c)
+              saveControlLocal ()
+              refreshDisasm ()
+              cmRender ()
+              statusText?textContent <- sprintf "%s @ %04X" txt addr
+            | None -> ()
+            menu?style?display <- "none")
+          Dom.append menu item |> ignore
+        addItem "kind: code" (fun c -> ControlFile.setKindAt c addr Code)
+        addItem "kind: data" (fun c -> ControlFile.setKindAt c addr Data)
+        addItem "kind: gap" (fun c -> ControlFile.setKindAt c addr Gap)
+        Dom.append menu (Dom.el "hr") |> ignore
+        let split = Dom.el "div"
+        split?textContent <- "split block here"
+        split?addEventListener("click", fun _ ->
+          match control with
+          | Some c ->
+            let canSplit =
+              match instrStartsCache with
+              | Some s -> addr < s.Length && s.[addr]
+              | None -> true
+            if canSplit then
+              control <- Some (ControlFile.splitBlockAt c addr)
+              saveControlLocal ()
+              cmRender ()
+              statusText?textContent <- sprintf "block split at %04X" addr
+            else statusText?textContent <- sprintf "%04X is not an instruction start" addr
+          | None -> ()
+          menu?style?display <- "none")
+        Dom.append menu split |> ignore
+        addItem "merge into next block" (fun c -> ControlFile.mergeWithNext c addr)
+        addItem "rename block..." (fun c ->
+          let name: string = unbox (Dom.window?prompt("block name", ""))
+          if isNull (box name) || name.Trim().Length = 0 then c
+          else ControlFile.renameBlockAt c addr (name.Trim()))
+        addItem "line comment..." (fun c ->
+          let txt: string = unbox (Dom.window?prompt(sprintf "comment at %04X" addr, ""))
+          if isNull (box txt) then c
+          else ControlFile.upsert c { Kind = Line; Addr = addr; EndExcl = 0; InstrIndex = -1; Text = txt })
+        addItem "range over block..." (fun c ->
+          let txt: string = unbox (Dom.window?prompt("comment text for the whole block", ""))
+          if isNull (box txt) then c
+          else
+            match ControlFile.blockAt c addr with
+            | Some b -> ControlFile.upsert c { Kind = Range; Addr = b.Start; EndExcl = b.EndExcl; InstrIndex = -1; Text = txt }
+            | None -> c)
+        menu?style?left <- sprintf "%dpx" (int (unbox<float> e?clientX))
+        menu?style?top <- sprintf "%dpx" (int (unbox<float> e?clientY))
+        menu?style?display <- "block")
+    Dom.window?addEventListener("mousedown", fun e ->
+      let menu = Dom.byId "ctrlMenu"
+      if menu?style?display = "block" && not (isNull e?target) && not (obj.ReferenceEquals(e?target, menu)) then
+        let inside: bool = emitJsExpr (e?target, menu) "$0.closest && $0.closest('#ctrlMenu') != null"
+        if not inside then menu?style?display <- "none")
+
     // boot (blocking; cold only if the embedded seed is unusable)
     statusText?textContent <- "booting emulator to game entry..."
     Dom.setTimeout
@@ -1143,3 +1652,67 @@ module App =
           syncSlider ()
         with ex ->
           statusText?textContent <- "boot failed: " + ex.Message) 30
+
+    // keep the timeline extent in step with the recording
+    Dom.setInterval
+      (fun () ->
+        let n = tlFrameCount ()
+        if n <> tlLen then
+          tlLen <- n
+          tlRender ()) 100
+    |> ignore
+
+    // control file persistence: localStorage is the primary store (the
+    // site is statically hosted, so there is no server to write to);
+    // download/import round-trip the desktop's games/<id>/control.json.
+    (Dom.byId "btnCtrlNew")?addEventListener("click", fun _ ->
+      control <- Some (ControlFile.empty 0x4000 0x10000)
+      cmRender ()
+      statusText?textContent <- "empty control file created over $4000-$FFFF")
+    (Dom.byId "btnCtrlSave")?addEventListener("click", fun _ ->
+      match control with
+      | Some c when c.Dirty ->
+        saveControlLocal ()
+        statusText?textContent <- "control saved to browser storage"
+      | Some _ -> statusText?textContent <- "control unchanged"
+      | None -> statusText?textContent <- "no control file - click New first")
+    (Dom.byId "btnCtrlDl")?addEventListener("click", fun _ ->
+      match control with
+      | Some c ->
+        let json = ControlFile.toJson c
+        let blob: obj = emitJsExpr json "new Blob([$0], { type: 'application/json' })"
+        let url: string = emitJsExpr blob "URL.createObjectURL($0)"
+        let a = Dom.el "a"
+        a?href <- url
+        a?download <- "control.json"
+        emitJsExpr a "$0.click()" |> ignore
+        statusText?textContent <- "control.json downloaded"
+      | None -> statusText?textContent <- "no control file - click New first")
+    (Dom.byId "btnCtrlImport")?addEventListener("click", fun _ ->
+      emitJsExpr () "document.getElementById('ctrlFileInput').click()" |> ignore)
+    (Dom.byId "ctrlFileInput")?addEventListener("change", fun e ->
+      let file: obj = emitJsExpr e "$0.target.files[0]"
+      if not (isNull file) then
+        let reader: obj = emitJsExpr () "new FileReader()"
+        reader?onload <- fun _ ->
+          let text: string = unbox reader?result
+          try
+            control <- Some (ControlFile.fromJson text)
+            cmRender ()
+            statusText?textContent <- "control file imported"
+          with ex -> statusText?textContent <- "import failed: " + ex.Message
+        emitJsExpr (reader, file) "$0.readAsText($1)" |> ignore)
+    // initial load: browser storage first, then a served control.json
+    let local: obj = Dom.window?localStorage
+    let applyFetched (txt: obj) =
+      if not (isNull txt) && control.IsNone then
+        control <- Some (ControlFile.fromJson (string txt))
+        cmRender ()
+        statusText?textContent <- "control file loaded from games/minimal/control.json"
+    match emitJsExpr (local, storageKey) "$0.getItem($1)" with
+    | null ->
+      let p: obj = emitJsExpr () "fetch('games/minimal/control.json').then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null })"
+      emitJsExpr (p, applyFetched) "$0.then($1)" |> ignore
+    | stored ->
+      control <- Some (ControlFile.fromJson (string stored))
+      cmRender ()

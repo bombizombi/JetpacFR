@@ -67,6 +67,7 @@ type TimelineSelector() as self =
 
   let rangeChanged = Event<BrushId * BrushRange>()
   let activeChanged = Event<BrushId>()
+  let scrubbed = Event<int64>()
 
   let sky = Color.FromRgb(0x38uy, 0xBDuy, 0xF8uy)
   let amber = Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy)
@@ -109,6 +110,9 @@ type TimelineSelector() as self =
 
   [<CLIEvent>]
   member _.ActiveBrushChanged = activeChanged.Publish
+
+  [<CLIEvent>]
+  member _.Scrubbed = scrubbed.Publish
 
   member this.Length
     with get () = length
@@ -164,13 +168,16 @@ type TimelineSelector() as self =
     dragStartX <- x
     dragAnchor <- this.UnitAt x
     dragMoved <- false
+    scrubbed.Trigger(dragAnchor)
     this.CaptureMouse() |> ignore
 
   member private this.UpdateDrag(x: float) =
     if dragging then
       let u = this.UnitAt x
-      // >3px of travel turns a press into a drag (the HTML uses the same
-      // guard so a stray click cannot nuke an existing range).
+      // scrub fires on every move, before the range guard below: the host
+      // shows the frame under the cursor even before the >3px travel turns
+      // the press into a real drag.
+      scrubbed.Trigger u
       if Math.Abs(x - dragStartX) > 3.0 then
         dragMoved <- true
         this.SetRange(active, { Start = min dragAnchor u; End = max dragAnchor u })
@@ -199,6 +206,7 @@ type TimelineSelector() as self =
       chipDrag <- Some b
       chipStartX <- p.X
       dragging <- false
+      scrubbed.Trigger(this.UnitAt p.X)
       this.CaptureMouse() |> ignore
       true
     | None -> false
@@ -208,8 +216,9 @@ type TimelineSelector() as self =
   /// a plain click on the chip (and the cursor-at-press synthesized move)
   /// from touching the range.
   member private this.UpdateChipDrag(x: float) =
+    let u = this.UnitAt x
+    scrubbed.Trigger u
     if Math.Abs(x - chipStartX) > 3.0 then
-      let u = this.UnitAt x
       match chipDrag with
       | Some A ->
         let r = rangeA

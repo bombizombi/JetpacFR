@@ -92,6 +92,71 @@
         flex-direction: column;
         flex-shrink: 0;
       }
+      #timelineRow { display: flex; }
+      #canvasTimeline { width: 100%; height: 56px; cursor: crosshair; }
+      #tlBtnRow { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+      #tlBtnRow button {
+        background: var(--panel);
+        color: var(--dim);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .brush-btn.active-brush-a {
+        background: #38BDF8;
+        color: #020617;
+        border-color: #38BDF8;
+        font-weight: bold;
+      }
+      .brush-btn.active-brush-b {
+        background: #FBBF24;
+        color: #020617;
+        border-color: #FBBF24;
+        font-weight: bold;
+      }
+      #tlHint { margin-left: 8px; }
+      #ctrlMapCol {
+        width: 84px;
+        border-left: 1px solid var(--hi);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+      }
+      #ctrlMapBtns { display: flex; gap: 2px; padding: 3px; }
+      #ctrlMapBtns button {
+        flex: 1;
+        background: var(--panel);
+        color: var(--dim);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        padding: 2px 0;
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      #ctrlMapBtns button:hover { background: var(--hi); }
+      #canvasCtrlMap { flex: 1; width: 100%; cursor: crosshair; }
+      #ctrlMenu {
+        position: fixed;
+        display: none;
+        background: var(--panel);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        z-index: 100;
+        min-width: 210px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      }
+      #ctrlMenu div {
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--normal);
+      }
+      #ctrlMenu div:hover { background: var(--hi); }
+      #ctrlMenu hr { border: none; border-top: 1px solid var(--hi); margin: 2px 0; }
       #tabbar { display: flex; border-bottom: 1px solid var(--hi); }
       .tab-btn {
         flex: 1;
@@ -187,6 +252,16 @@
       </div>
 
       <div id="center">
+        <div id="timelineRow">
+          <canvas id="canvasTimeline" width="600" height="56"></canvas>
+        </div>
+        <div id="tlBtnRow">
+          <button id="btnBrushA" class="brush-btn active-brush-a">Brush A</button>
+          <button id="btnBrushB" class="brush-btn">Brush B</button>
+          <button id="btnPreviewA">Preview A</button>
+          <button id="btnPreviewB">Preview B</button>
+          <span id="tlHint" class="hint">drag = range for the active brush &middot; click = point &middot; A/B keys switch</span>
+        </div>
         <div id="stripRow">
           <canvas id="canvasStrip" width="512" height="24"></canvas>
           <input type="range" id="slider" min="0" max="0" value="0" disabled />
@@ -236,7 +311,24 @@
           <div id="theaterText"></div>
         </div>
       </div>
+
+
+
+      <div id="ctrlMapCol">
+        <div id="ctrlMapBtns">
+          <button id="btnCtrlNew" title="create an empty control file">New</button>
+          <button id="btnCtrlSave" title="save into the browser (localStorage)">Save</button>
+          <button id="btnCtrlDl" title="download control.json">Dl</button>
+          <button id="btnCtrlImport" title="import control.json">Imp</button>
+          <input type="file" id="ctrlFileInput" accept=".json" style="display:none" />
+        </div>
+        <canvas id="canvasCtrlMap" width="76" height="600"></canvas>
+      </div>
     </div>
+
+    <div id="status">booting...</div>
+    <div id="ctrlMenu"></div>
+
 
     <div id="trayRow">
       <span id="trayTitle">Lift queue:</span>
@@ -245,7 +337,6 @@
       <button id="btnClearTray">Clear</button>
     </div>
 
-    <div id="status">booting...</div>
 
     <script type="module" src="/main.js"></script>
     <script>

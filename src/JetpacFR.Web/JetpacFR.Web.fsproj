@@ -44,6 +44,7 @@
     <Compile Include="../JetpacFR.Core/Disasm.fs" />
     <Compile Include="../JetpacFR.Core/Z80CE.fs" />
     <Compile Include="../JetpacFR.Core/CEGame.fs" />
+    <Compile Include="../JetpacFR.Core/GameRegistry.fs" />
     <Compile Include="../../games/minimal/Image.fs" />
     <Compile Include="../../games/minimal/Game.fs" />
     <Compile Include="SessionWeb.fs" />
@@ -52,6 +53,10 @@
     <Compile Include="../JetpacFR.Core/Prompt.fs" />
     <Compile Include="../JetpacFR.Core/Validation.fs" />
     <Compile Include="TraceCodecWeb.fs" />
+    <!-- Control-file model shim + the pure control-map geometry (shared
+         with the desktop's ControlMap panel) -->
+    <Compile Include="ControlTypesWeb.fs" />
+    <Compile Include="../JetpacFR.Core/CtrlMapModel.fs" />
     <!-- The shell UI -->
     <Compile Include="App.fs" />
     <Compile Include="CEHost.fs" />

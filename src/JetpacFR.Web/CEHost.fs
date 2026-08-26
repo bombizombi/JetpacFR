@@ -71,14 +71,41 @@ module CEHost =
       img <- emitJsExpr (320, 256) "new ImageData($0, $1)"
       let btn = Dom.byId "ceBtn"
       let status = Dom.byId "ceStatus"
-      // Byte emission on start + parity vs the original image.
-      let image = MinimalGame.Image.binary
-      let mem, state = MinimalGame.Game.entryState image
-      game <- Some(CEGame(MinimalGame.Image.program, mem, state))
-      let matching, total, divergences = CEParity.check MinimalGame.Image.program image
+      // Byte emission on start + parity vs the original image. The game
+      // comes from the registry (?game=<id> in the URL selects; default:
+      // the first registered game). Shells register their games here;
+      // today only minimal exists.
+      let mem, state = MinimalGame.Game.entryState MinimalGame.Image.binary
+      GameRegistry.register
+        { GameId = "minimal"
+          Name = "Minimal"
+          Memory = mem
+          BaseAddress = 0x8000
+          Program = MinimalGame.Image.program
+          EntryState = state }
+      let search =
+        match Dom.window?location?search with
+        | null -> ""
+        | s -> string s
+      let wanted =
+        if search.StartsWith "?game=" then search.Substring(6).ToLowerInvariant() else ""
+      let selected =
+        match wanted with
+        | "" -> GameRegistry.all () |> List.tryHead
+        | w -> GameRegistry.tryFind w
+        |> Option.defaultWith (fun () ->
+          { GameId = "minimal"
+            Name = "Minimal"
+            Memory = mem
+            BaseAddress = 0x8000
+            Program = MinimalGame.Image.program
+            EntryState = state })
+      let image = selected.Memory
+      let matching, total, divergences = GameRegistry.parity selected
       let parity =
         if divergences.IsEmpty then sprintf "CE parity: %d/%d bytes match" matching total
         else sprintf "CE parity: %d/%d - diverges at %A" matching total divergences
+      game <- Some(CEGame(selected.Program, image, selected.EntryState))
       status?textContent <- sprintf "CE engine - frame 0, %s" parity
       btn?onclick <- fun _ ->
         running <- not running

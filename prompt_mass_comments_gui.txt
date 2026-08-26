@@ -1,0 +1,264 @@
+
+
+can you make the "a" and "b" letters on the end of the line for the selections to be dragable? so you can click and drag them to a new location?   
+
+
+
+when running the replay on the startup, for the replay, we already know the number of total frames that exist in the replay, so the timeline selector should not be increasing them as they are running, but right from the start have the maximum range for selection.  can you change it?
+
+
+
+------------- compilation of latest fs
+
+Ok, lets design a scenario where user creates a new "project for analyzing" for a new game.  My first idea is  to create a new directory, go into the application, open a new game file (sna or tape or just binary), and then generate a default z80 {} CE with just the bytes, probably in the range of $4000 to $FFFF, or however the game is actually big.
+
+then crating a control file, which marks blocks and their purpose, and after some blocks are marked, we can create a new version of the file containing the z80 computational expression block.  I am not sure if there is a way to make the compilation process flexibile so that it only takes the last version of the .fs file, but leave all other in the same directory so that they can be read and compared.
+
+since we have two versions of the project, one wpf and other web, with fable compilation, perhaps it can be more easily done in the web version?  perhaps the dotnet watch command can monitor those new files, and then have a custom script that only compiles the last one into javascript.  Also, is there a way to create this custom build step even for the WPF project, although I think WPF project would have to be restarted, without going into hot reloading assemblies.
+
+Can you just answer this last question about selective compilation for the last version of the fs file in two contexts, since I did not give any other details for the project, so you can ignore the first part.
+
+
+
+-----  gui for mass comments
+
+
+
+ok, now we need to add GUI for actually adding comments to a game decompilation project.  Each comment file is going to be for a single game only, and should be saved to a file.  Lets call it a control file.  A new control file can be created in a multiple ways:
+
+-from a current run log (the one that is automatically replayed at the start of the application)
+-load an existing ctrl file in the skoolkit format
+-static analysis ctrl file that skoolkit tool produces when using the static analysis option
+-empty comment file
+
+
+
+Control file's main purpose is to receive generated mass comments from the application, and then display those comments in a smart and usefull way when looking at the game disassembly, and also to add to the game fs file when creating or updating the game.fs file.  
+
+
+GUI.  Start with the WPF project, we will add web client later.  The game replayer should be able to select sections of the timeline, using our timeline selector control.  The control should be in the main window (but leave the test window for the control in).   When selected, we should have a preview button for each of the two selection ranges, that display the frame screen to the emulator screen.  
+
+Right now we have the main dissasembly window in the middle, but, if possible, this window should add two buttons on its top to select two modes.  one mode is the linear memory as it actually is, and the second mode is linear execution, instruction by instruction, as it actually happen. Time line selector should be just above this code window.
+
+Bellow the code window, there should be buttons for various commands to add comments with descriptive descriptions next to them.  The code window itself should be vertically scrolable, so we can fit buttons on it:
+
+Comments should be added either directly on the line, perhaps in the both disassembly variation windows, so to add single line comment, you would click on the right side of the line, behind the code and type.  For mass comments, there should be buttons for what kind of action we want to do:
+
+The buttons:
+- Put instruction index into comments
+- name the region before the current point
+- name the region in selector A
+- name the region in selector B
+- add comment for region in A
+- add comment for region in B
+- add comment for lines in B but not in A
+- add comment for lines in A but not in B
+
+The "name" should also just be a comment, but perhaps a somewhat special one that timeline selector can display on the tape.
+
+We also need radio buttons to control how the interpreter actually runs.  Options would be:  oracle only, game.fs only, both at the same time with comparison.
+
+Perhaps all the name and comment adding buttons could share the text box for actaully typing the comment, it could be above the buttons perhaps.
+
+Also, we can add a address search and select functionality that will work as follow: "Start a memory scan" button starts the procedure.  Once started, other buttons for the scan get enabled.  It also fills the listbox wih all memory addresses found. For the initial scan, this should be all memory locations.  For the next scan, we should have different options:
+-all memory locations that changed
+- exact value (with input box accepting numbers after it)
+- value changed
+- value smaller
+- value larger
+- this memory location was read from
+- this memory location was written to
+- perhaps others if you can think of any other smart and usefull thing we can do here
+
+This scan result listbox can also be used to jump to this location in the disassembly window, or to add comment for this location.
+
+-also, this scan functionality should have some configurable options, perhaps near the bottom of its section: 
+-byte 8
+-byte 16
+-include ROM
+-include screen buffer
+-only code / only non-code memory. (this will depend on the current understanding of the memory map or the control file, which is the main reason for this application, to create this control file)
+
+
+
+
+
+
+
+--- 
+
+instructions for testing
+
+
+
+
+
+ Creating a new Z80 disassembly project
+
+ Everything runs from the repo root C:\cs\Spectrum_emulator\Jetpac_FreeRange. Addresses are decimal on the CLI and in
+ control.json ($4000 = 16384, $8000 = 32768).
+
+ ### 0. One-time: build the generator host
+
+ ```
+dotnet build tests/JetpacFR.Core.Tests
+ ```
+
+ ### 1. Scaffold the project
+
+ ```
+dotnet run --project tests/JetpacFR.Core.Tests --no-build -- --gen-game games/mygame --from C:\path\to\your.bin --address
+32768 --name MyGame
+ ```
+
+ - --address = the load address your code expects (default 32768). For code meant to run at $4000, pass 16384.
+ - The directory name (mygame) becomes the project's GameId — keep it lowercase ASCII.
+
+ This creates:
+
+ +-----------------------------------+------------------------------------------------------------------------------------+
+ | File                              | Content                                                                            |
+ +-----------------------------------+------------------------------------------------------------------------------------+
+ | games/mygame/original.bin         | your image, normalized                                                             |
+ +-----------------------------------+------------------------------------------------------------------------------------+
+ | games/mygame/control.json         | span [start, endExcl) detected from last non-zero byte, entryPc = load address,    |
+ |                                   | activeVersion: 0, one whole_span code block                                        |
+ +-----------------------------------+------------------------------------------------------------------------------------+
+ | games/mygame/versions/v000_init.f | the first disassembly                                                              |
+ | s                                 |                                                                                    |
+ +-----------------------------------+------------------------------------------------------------------------------------+
+
+ (--from also accepts .sna: memory lands at $4000, entry PC popped off the stack.)
+
+ ### 2. Add a manifest so the interpreter side can boot it
+
+ Create games/mygame/manifest.json:
+
+ ```json
+{
+  "name": "MyGame",
+  "program": { "bin": "original.bin", "address": 32768 },
+  "boot": "program"
+}
+ ```
+
+ "address" must match your --address. Now the game appears in the desktop game combo and boots by loading the image at that
+ address, PC = address.
+
+ ### 3. Read the first disassembly
+
+ Open versions/v000_init.fs. Each line is one instruction of the CE DSL:
+
+ - covered instructions → named ops: Z80Vocab.LD_A 0x05, Z80Vocab.OUT_n_A 0xFE, ...
+ - jump targets → symbolic labels: Z80.at lbl3 marks the spot, Z80.JR_Z_LBL lbl3 references it (labels are local to the
+   version)
+ - undecodable bytes → merged raw blocks: yield! [| 0x..uy; ... |] (these run through the interpreter)
+
+ This file is your disassembly — it never gets edited by hand; you regenerate it.
+
+ ### 4. Mark blocks in control.json
+
+ Edit the blocks array to say what each region is:
+
+ ```json
+"blocks": [
+  { "start": 32768, "endExcl": 33024, "name": "main_loop", "kind": "code" },
+  { "start": 33024, "endExcl": 33152, "name": "screen_data", "kind": "data" },
+  { "start": 33152, "endExcl": 33280, "name": "padding", "kind": "gap" },
+  { "start": 33280, "endExcl": 33923, "name": "routines", "kind": "code" }
+]
+ ```
+
+ Rules the loader enforces:
+ - blocks must exactly tile [start, endExcl) — no holes, no overlap, no uncovered tail. Unmapped padding gets kind: "gap"
+   (emitted as one raw block with a comment), don't just leave it out.
+ - code = disassemble instruction-by-instruction; data/gap = single labeled raw block.
+ - boundaries land exactly where you mark them, so data regions stop the disassembler from garbage-decoding through tables.
+
+ ### 5. Regenerate and compare
+
+ ```
+dotnet run --project tests/JetpacFR.Core.Tests --no-build -- --regen games/mygame --tag marked-data-blocks
+dotnet run --project tests/JetpacFR.Core.Tests --no-build -- --diff-game games/mygame v000 v001
+ ```
+
+ - --regen writes versions/v001_marked-data-blocks.fs, bumps activeVersion, and materializes it to CeProgram.fs.
+ - The parity gate: before writing, the generator re-assembles the span and refuses anything that wouldn't reproduce
+   original.bin byte-for-byte. Your disassembly can't silently rot.
+ - --diff-game prints per-version status: PARITY OK, N ops, raw M% — the raw percentage is your lifting progress metric.
+
+ ### 6. Switch versions
+
+ Any old version stays on disk forever. To make an older one active again: set "activeVersion": 0 in control.json, then
+
+ ```
+dotnet run --project tests/JetpacFR.Core.Tests --no-build -- --materialize games/mygame
+ ```
+
+ ### 7. Iteration loop while marking up (optional)
+
+ ```
+powershell -File tools/watchgame.ps1 -GameDir games/mygame            # one pass: materialize + fable
+powershell -File tools/watchgame.ps1 -GameDir games/mygame -Watch     # loop on changes
+ ```
+
+ ### 8. Running THIS game under the CE engine in a shell (manual, follows the minimal template)
+
+ Shell binaries only see games compiled into them. To wire yours in:
+
+ 1. Create games/mygame/Image.fs:
+    ```fsharp
+module MyGame.Image
+open Jetpac2.Core
+open Jetpac2.Core.Z80BuilderInstance
+let program : Z80Op list = z80 {
+// <- paste the body of versions/vNNN_*.fs (the active one) here
+}
+    ```
+ 2. Create games/mygame/JetpacFR.Game.MyGame.fsproj copying games/minimal/JetpacFR.Game.Minimal.fsproj (Compile list = your
+    Image.fs; ProjectReference to src/Jetpac2.Core). Note: netstandard2.0, Jetpac2.Core only — game projects stay
+    Fable-clean.
+ 3. Reference the fsproj from src/JetpacFR.Desktop/JetpacFR.Desktop.fsproj, and add a GameRegistry.register { GameId =
+    "mygame"; Name = "MyGame"; Memory = <64K entry image>; BaseAddress = 32768; Program = MyGame.Image.program; EntryState
+    = <reset state string> } block next to the existing minimal registration in App.fs (~line 1448).
+ 4. Rebuild the desktop app; the engine toggle now works for your game whenever its GameId is registered.
+
+ ### Troubleshooting
+
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | Symptom                                   | Cause                                                                      |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | gap before block X (...)                  | blocks don't tile the span — cover the hole with a gap block               |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | parity FAILED at XXXX - refusing to write | bug in the generator's emission; report it — never hand-fix the version    |
+ |                                           | file                                                                       |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | activeVersion N has no versions/vNNN_*.fs | typo'd index or deleted version                                            |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | game doesn't appear in the combo          | missing/malformed manifest.json in games/mygame/                           |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+ | engine toggle disabled for your game      | no registry registration in the shell yet (step 8)                         |
+ +-------------------------------------------+----------------------------------------------------------------------------+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -68,9 +68,11 @@ module Z80CE =
           walk endPc (rawOp block :: acc)
     walk start []
 
-  /// Emit the F# `z80 { ... }` body for the binary: named ops, symbolic
-  /// labels for in-range jump targets, raw blocks for the rest.
-  let toSource (image: byte[]) (start: int) (count: int) : string =
+  /// Emit the inner lines (no enclosing braces) of the F# `z80 { ... }` body
+  /// for the binary: named ops, symbolic labels for in-range jump targets,
+  /// raw blocks for the rest. The composable form used by the project
+  /// generator to mix code segments with marked data blocks.
+  let toBody (image: byte[]) (start: int) (count: int) : string =
     let limit = min (start + count) image.Length
     // Pass 1: instruction boundaries + in-range jump targets.
     let sites = ResizeArray<int * Z80Decode.Row * Z80Op>()
@@ -96,7 +98,6 @@ module Z80CE =
       labels[t] <- sprintf "lbl%d" n
       n <- n + 1
     let sb = System.Text.StringBuilder()
-    sb.AppendLine "z80 {" |> ignore
     let mutable idx = 0
     let mutable pc = start
     while pc < limit do
@@ -121,5 +122,12 @@ module Z80CE =
         let hex = bytes |> Array.map (fun b -> sprintf "0x%02Xuy" b) |> String.concat "; "
         sb.AppendLine(sprintf "  yield! [| %s |]" hex) |> ignore
         pc <- rawEnd
+    sb.ToString()
+
+  /// Wrap a body in the `z80 { ... }` block (the historical toSource shape).
+  let toSource (image: byte[]) (start: int) (count: int) : string =
+    let sb = System.Text.StringBuilder()
+    sb.AppendLine "z80 {" |> ignore
+    sb.Append(toBody image start count) |> ignore
     sb.AppendLine "  }" |> ignore
     sb.ToString()

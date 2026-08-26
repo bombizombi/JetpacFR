@@ -1,8 +1,8 @@
 
-import { Exception, int32ToString, disposeSafe, getEnumerator, comparePrimitives, defaultOf, createAtom } from "./fable_modules/fable-library-js.5.13.0/Util.js";
+import { equals, round, Exception, int32ToString, disposeSafe, getEnumerator, comparePrimitives, defaultOf, createAtom } from "./fable_modules/fable-library-js.5.13.0/Util.js";
 import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
-import { max as max_1, fill, initialize, setItem, item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { tryFind, isEmpty, truncate, map as map_1, length, iterate, ofArray, singleton, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
+import { tryFind as tryFind_1, max as max_1, fill, initialize, setItem, item as item_1 } from "./fable_modules/fable-library-js.5.13.0/Array.js";
+import { tryFind, isEmpty, truncate, map as map_1, length as length_1, iterate, ofArray, singleton, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
 import { add, remove, FSharpSet__get_Count, toList as toList_1, FSharpSet__Contains, empty as empty_1 } from "./fable_modules/fable-library-js.5.13.0/Set.js";
 import { TraceSession_$ctor_28C3603C, TraceSession__get_CycleCount, TraceSession__get_Frame, EntryCache_save, EntryCache_tryLoad, TraceSession__get_ReplayEventCount, TraceSession__get_WarmStart, TraceSession__DrainBeeperSamples_Z524259C1, TraceSession__RunFrame, TraceSession__get_Regs, TraceSession__get_Memory, TraceSession__get_ScreenBuffer, TraceSession__get_Recorder, TraceSession__SetKey_289F56A } from "./SessionWeb.js";
 import { TraceRecorder__set_RecordEnabled_Z1FBCCD16, TraceRecorder__get_SelfModCount, TraceRecorder__get_PerPcCount, TraceRecorder__get_Capacity, TraceRecorder__get_RecordEnabled, TraceRecorder__get_SegmentCounts, TraceQuery_nearestSnapshotBefore, TraceRecorder__get_SelfModified, TraceRecorder__Build, TraceRecorder__get_EntryCount } from "./TraceTypesWeb.js";
@@ -16,7 +16,7 @@ import { getItemFromDict, tryGetValue } from "./fable_modules/fable-library-js.5
 import { toString, FSharpRef } from "./fable_modules/fable-library-js.5.13.0/Types.js";
 import { parse } from "./fable_modules/fable-library-js.5.13.0/Int32.js";
 import { toFloat64, fromUInt8, op_Addition, fromInt32, op_Multiply, op_Division, toInt64_unchecked, toInt32_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { value as value_17 } from "./fable_modules/fable-library-js.5.13.0/Option.js";
+import { defaultArg, value as value_28 } from "./fable_modules/fable-library-js.5.13.0/Option.js";
 import { extract } from "./JetpacFR.Core/Contract.js";
 import { generate } from "./JetpacFR.Core/Prompt.js";
 import { mine } from "./JetpacFR.Core/Miner.js";
@@ -27,6 +27,8 @@ import { LiftedRoutines_registryHook } from "./Jetpac3.Core/LiftedRoutines.js";
 import { defaultSession } from "./ScriptWeb.js";
 import { run } from "./JetpacFR.Core/Validation.js";
 import { createCancellationToken } from "./fable_modules/fable-library-js.5.13.0/Async.js";
+import { ControlFileModule_fromJson, ControlFileModule_empty, ControlComment, CommentKind, ControlFileModule_upsert, ControlFileModule_renameBlockAt, ControlFileModule_mergeWithNext, ControlFileModule_splitBlockAt, BlockKind, ControlFileModule_setKindAt, ControlFileModule_blockAt, ControlFile, ControlFileModule_toJson } from "./ControlTypesWeb.js";
+import { addrY, render } from "./JetpacFR.Core/CtrlMapModel.js";
 
 export const Dom_document = document;
 
@@ -78,7 +80,7 @@ function Audio_ensure() {
                 const n = out.length | 0;
                 for (let i = 0; i <= (n - 1); i++) {
                     if (Audio_rpos !== Audio_wpos) {
-                        setItem(out, i, item(Audio_rpos, Audio_ring));
+                        setItem(out, i, item_1(Audio_rpos, Audio_ring));
                         Audio_rpos = (((Audio_rpos + 1) % Audio_ring.length) | 0);
                     }
                     else {
@@ -96,7 +98,7 @@ export function Audio_Play(samples) {
         Audio_ensure();
         if (!Operators_IsNull(Audio_ctx)) {
             for (let idx = 0; idx <= (samples.length - 1); idx++) {
-                const s = item(idx, samples);
+                const s = item_1(idx, samples);
                 setItem(Audio_ring, Audio_wpos, s * 0.20000000298023224);
                 Audio_wpos = (((Audio_wpos + 1) % Audio_ring.length) | 0);
             }
@@ -461,10 +463,10 @@ function App_paintGame() {
         const buf = App_gameImg.data;
         for (let i = 0; i <= ((320 * 256) - 1); i++) {
             const o = (i * 4) | 0;
-            buf[o]=item(o + 2, src);
-            buf[(o + 1)]=item(o + 1, src);
-            buf[(o + 2)]=item(o, src);
-            buf[(o + 3)]=item(o + 3, src);
+            buf[o]=item_1(o + 2, src);
+            buf[(o + 1)]=item_1(o + 1, src);
+            buf[(o + 2)]=item_1(o, src);
+            buf[(o + 3)]=item_1(o + 3, src);
         }
         App_gameCtx.putImageData(App_gameImg, 0, 0);
     }
@@ -481,7 +483,7 @@ function App_showErrorDisasm(pc) {
         while ((rows.length < 48) && (addr <= (start + 128))) {
             const insn = disasmMemory(mem, addr);
             const hex = join(" ", toList(delay(() => map((i) => {
-                const arg = item((addr + i) & 65535, mem);
+                const arg = item_1((addr + i) & 65535, mem);
                 return toText(printf("%02X"))(arg);
             }, rangeDouble(0, 1, insn.Length - 1)))));
             let tag;
@@ -556,11 +558,11 @@ function App_rowFor(t, e, idx, isCurrent) {
         const bytes = new Uint8Array([e.B0, e.B1, e.B2, e.B3]);
         const insn = disasmBytes(bytes, 0);
         const hex = join(" ", toList(delay(() => map((i) => {
-            const arg_3 = item(i, bytes);
+            const arg_3 = item_1(i, bytes);
             return toText(printf("%02X"))(arg_3);
         }, rangeDouble(0, 1, ~~e.Length - 1)))));
         const tail = (e.Taken === 1) ? toText(printf("   -> %04X"))(e.Target) : (App_isBranch(e.B0) ? "   (not taken)" : "");
-        const sm = item(~~e.Pc, App_currentSelfModified()) ? "   [self-mod]" : "";
+        const sm = item_1(~~e.Pc, App_currentSelfModified()) ? "   [self-mod]" : "";
         const brush = App_isCall(e.B0) ? App_cyan : (App_isRet(e.B0) ? App_yellow : (App_isBranch(e.B0) ? App_green : App_normal));
         return [toText(printf("%07d  %04X  %-11s  %s%s%s"))(idx)(e.Pc)(hex)(insn.Text)(tail)(sm), brush];
     }
@@ -576,7 +578,7 @@ function App_refreshDisasm() {
             for (let j = -20; j <= 20; j++) {
                 const idx = (c + j) | 0;
                 if ((idx >= 0) && (idx < t.Entries.length)) {
-                    const patternInput = App_rowFor(t, item(idx, t.Entries), idx, idx === c);
+                    const patternInput = App_rowFor(t, item_1(idx, t.Entries), idx, idx === c);
                     const d = Dom_el("div");
                     d.textContent = patternInput[0];
                     d.className = ("disasm-row" + ((idx === c) ? " current" : ""));
@@ -603,8 +605,8 @@ function App_updateFlags(af) {
     const f = (af & 255) | 0;
     const bits = new Int32Array([128, 64, 32, 16, 8, 4, 2, 1]);
     for (let i = 0; i <= 7; i++) {
-        item(i, App_flagCells).textContent = (((f & item(i, bits)) !== 0) ? "1" : "0");
-        item(i, App_flagCells).style.color = (((f & item(i, bits)) !== 0) ? App_green : App_dim);
+        item_1(i, App_flagCells).textContent = (((f & item_1(i, bits)) !== 0) ? "1" : "0");
+        item_1(i, App_flagCells).style.color = (((f & item_1(i, bits)) !== 0) ? App_green : App_dim);
     }
 }
 
@@ -626,10 +628,10 @@ function App_refreshRegs() {
     }
     switch (matchResult) {
         case 0: {
-            const e = item(max(0, min(App_cursor, t_1.Entries.length - 1)), t_1.Entries);
+            const e = item_1(max(0, min(App_cursor, t_1.Entries.length - 1)), t_1.Entries);
             const snapIdx = TraceQuery_nearestSnapshotBefore(t_1.Snapshots, e.Tick) | 0;
             if (snapIdx >= 0) {
-                const s = item(snapIdx, t_1.Snapshots);
+                const s = item_1(snapIdx, t_1.Snapshots);
                 App_setReg("AF", ~~s.Af);
                 App_setReg("BC", ~~s.Bc);
                 App_setReg("DE", ~~s.De);
@@ -683,13 +685,13 @@ function App_refreshHeatmap() {
     let i = 0;
     for (let y_1 = 0; y_1 <= 255; y_1++) {
         for (let x_1 = 0; x_1 <= 255; x_1++) {
-            const c = item(i, counts) | 0;
-            const col = item((c <= 0) ? 0 : min(9, ~~(9 * (Math.log10(c) / logMax))), App_heatLut);
+            const c = item_1(i, counts) | 0;
+            const col = item_1((c <= 0) ? 0 : min(9, ~~(9 * (Math.log10(c) / logMax))), App_heatLut);
             const p = (i * 4) | 0;
             const r = parse(substring(col, 1, 2), 511, false, 32, 16) | 0;
             const g = parse(substring(col, 3, 2), 511, false, 32, 16) | 0;
             const b = parse(substring(col, 5, 2), 511, false, 32, 16) | 0;
-            if (item(i, selfMod)) {
+            if (item_1(i, selfMod)) {
                 buf[p]=(~~((b + 192) / 2) & 0xFF);
                 buf[(p + 1)]=(~~((g + 48) / 2) & 0xFF);
                 buf[(p + 2)]=(~~((r + 240) / 2) & 0xFF);
@@ -726,8 +728,8 @@ function App_segmentsOf(t) {
     const segs = new Int32Array(512);
     const arr = t.Entries;
     for (let idx = 0; idx <= (arr.length - 1); idx++) {
-        const e = item(idx, arr);
-        setItem(segs, min(511, ~~(~~e.Tick / n)), (item(min(511, ~~(~~e.Tick / n)), segs) + 1) | 0);
+        const e = item_1(idx, arr);
+        setItem(segs, min(511, ~~(~~e.Tick / n)), (item_1(min(511, ~~(~~e.Tick / n)), segs) + 1) | 0);
     }
     return segs;
 }
@@ -741,7 +743,7 @@ function App_refreshStrip() {
         const logMax = Math.log10(maxS + 1);
         const buf = App_stripImg.data;
         for (let sx = 0; sx <= (segs.length - 1); sx++) {
-            const v = Math.log10(item(sx, segs) + 1) / logMax;
+            const v = Math.log10(item_1(sx, segs) + 1) / logMax;
             const r = (60 + ~~(v * 160)) | 0;
             const g = (120 + ~~(v * 100)) | 0;
             const b = (60 + ~~(v * 60)) | 0;
@@ -776,7 +778,7 @@ function App_refreshCursorLabel() {
     }
     else {
         const c = max(0, min(App_cursor, n - 1)) | 0;
-        App_cursorLabel.textContent = ((arg_1 = ((n - 1) | 0), (arg_2 = (~~item(c, value_17(App_currentTrace()).Entries).Pc | 0), toText(printf("instr %d / %d   pc=%04X"))(c)(arg_1)(arg_2))));
+        App_cursorLabel.textContent = ((arg_1 = ((n - 1) | 0), (arg_2 = (~~item_1(c, value_28(App_currentTrace()).Entries).Pc | 0), toText(printf("instr %d / %d   pc=%04X"))(c)(arg_1)(arg_2))));
     }
 }
 
@@ -812,9 +814,9 @@ function App_getPcCycles() {
             const cyc = new BigInt64Array(65536);
             const arr = t.Entries;
             for (let idx = 0; idx <= (arr.length - 1); idx++) {
-                const e = item(idx, arr);
+                const e = item_1(idx, arr);
                 if (e.Length !== 0) {
-                    setItem(cyc, ~~e.Pc, toInt64_unchecked(op_Addition(item(~~e.Pc, cyc), toInt64_unchecked(fromUInt8(e.Cycles)))));
+                    setItem(cyc, ~~e.Pc, toInt64_unchecked(op_Addition(item_1(~~e.Pc, cyc), toInt64_unchecked(fromUInt8(e.Cycles)))));
                 }
             }
             App_pcCyclesCache = cyc;
@@ -857,7 +859,7 @@ function App_generateContract() {
                 const contract = extract(TraceSession__get_Memory(s), t, r, App_getPcCycles());
                 const prompt = generate(contract);
                 App_contractText.value = prompt;
-                App_contractLabel.textContent = ((arg_4 = (length(contract.WriteRanges) | 0), toText(printf("contract for 0x%04X  span=%04X-%04X  calls=%d  writes=%d"))(r.Entry)(r.SpanLo)(r.SpanHi)(r.CallCount)(arg_4)));
+                App_contractLabel.textContent = ((arg_4 = (length_1(contract.WriteRanges) | 0), toText(printf("contract for 0x%04X  span=%04X-%04X  calls=%d  writes=%d"))(r.Entry)(r.SpanLo)(r.SpanHi)(r.CallCount)(arg_4)));
                 break;
             }
             case 1: {
@@ -889,7 +891,7 @@ function App_maxDepth(columns) {
 function App_showRoutineDetail(r) {
     let arg_12, arg_13, arg_14;
     const loops = map_1((tupledArg) => toText(printf("%04X->%04X x%d"))(tupledArg[0])(tupledArg[1])(tupledArg[2]), truncate(5, r.LoopExtents));
-    App_routineDetail.textContent = ((arg_12 = join("; ", r.Reasons), (arg_13 = (isEmpty(loops) ? "" : ("\nloops: " + join(", ", loops))), (arg_14 = (length(r.InputSamples) | 0), toText(printf("%04X  (%s)\ncalls=%d  span=%04X-%04X\nincl=%d  excl=%d tstates\nself-modifying=%b  overlapping=%b\n%s%s\ninput samples: %d"))(r.Entry)(r.Risk)(r.CallCount)(r.SpanLo)(r.SpanHi)(r.InclusiveTStates)(r.ExclusiveTStates)(r.SelfModifying)(r.Overlapping)(arg_12)(arg_13)(arg_14)))));
+    App_routineDetail.textContent = ((arg_12 = join("; ", r.Reasons), (arg_13 = (isEmpty(loops) ? "" : ("\nloops: " + join(", ", loops))), (arg_14 = (length_1(r.InputSamples) | 0), toText(printf("%04X  (%s)\ncalls=%d  span=%04X-%04X\nincl=%d  excl=%d tstates\nself-modifying=%b  overlapping=%b\n%s%s\ninput samples: %d"))(r.Entry)(r.Risk)(r.CallCount)(r.SpanLo)(r.SpanHi)(r.InclusiveTStates)(r.ExclusiveTStates)(r.SelfModifying)(r.Overlapping)(arg_12)(arg_13)(arg_14)))));
 }
 
 function App_refreshRoutines() {
@@ -913,7 +915,7 @@ function App_refreshRoutines() {
     finally {
         disposeSafe(enumerator);
     }
-    App_routineCountLabel.textContent = ((arg_7 = (length(App_minedRoutines) | 0), toText(printf("%d routines"))(arg_7)));
+    App_routineCountLabel.textContent = ((arg_7 = (length_1(App_minedRoutines) | 0), toText(printf("%d routines"))(arg_7)));
     App_syncingRoutines = false;
 }
 
@@ -1142,7 +1144,7 @@ function App_selectRoutine(entry, jump) {
         const matchValue_1 = App_currentTrace();
         let matchResult, t_1;
         if (matchValue_1 != null) {
-            if ((t = matchValue_1, (entry < t.FirstIndexAtPc.length) && (item(entry, t.FirstIndexAtPc) >= 0))) {
+            if ((t = matchValue_1, (entry < t.FirstIndexAtPc.length) && (item_1(entry, t.FirstIndexAtPc) >= 0))) {
                 matchResult = 0;
                 t_1 = matchValue_1;
             }
@@ -1155,7 +1157,7 @@ function App_selectRoutine(entry, jump) {
         }
         switch (matchResult) {
             case 0: {
-                App_cursor = (item(entry, t_1.FirstIndexAtPc) | 0);
+                App_cursor = (item_1(entry, t_1.FirstIndexAtPc) | 0);
                 App_refreshAll();
                 App_syncSlider();
                 break;
@@ -1197,7 +1199,7 @@ function App_mineNow() {
             App_refreshRoutines();
             App_refreshTray();
             App_drawGraph();
-            App_statusText.textContent = ((arg = (length(routines) | 0), (arg_1 = (length(edges) | 0), toText(printf("mined %d routines, %d call edges (self-mod addresses: %d)"))(arg)(arg_1)(t_1.SelfModCount))));
+            App_statusText.textContent = ((arg = (length_1(routines) | 0), (arg_1 = (length_1(edges) | 0), toText(printf("mined %d routines, %d call edges (self-mod addresses: %d)"))(arg)(arg_1)(t_1.SelfModCount))));
             break;
         }
         case 1: {
@@ -1314,7 +1316,7 @@ function App_loadTrace() {
                     const t = decode(bytes);
                     App_loaded = t;
                     App_cursor = 0;
-                    App_markerPc = (~~item(0, t.Entries).Pc | 0);
+                    App_markerPc = (~~item_1(0, t.Entries).Pc | 0);
                     App_syncSlider();
                     App_refreshAll();
                     const patternInput = mine(t);
@@ -1327,7 +1329,7 @@ function App_loadTrace() {
                     App_refreshRoutines();
                     App_refreshTray();
                     App_drawGraph();
-                    App_statusText.textContent = ((arg = (t.Entries.length | 0), (arg_1 = (length(routines) | 0), toText(printf("loaded %d instructions; mined %d routines"))(arg)(arg_1))));
+                    App_statusText.textContent = ((arg = (t.Entries.length | 0), (arg_1 = (length_1(routines) | 0), toText(printf("loaded %d instructions; mined %d routines"))(arg)(arg_1))));
                 }
                 catch (ex) {
                     App_statusText.textContent = ("load failed: " + ex.message);
@@ -1431,7 +1433,7 @@ export function App_start() {
         const row_1 = Dom_el("div");
         row_1.className = "flag-row";
         const nameSpan_1 = Dom_el("span");
-        nameSpan_1.textContent = item(i, flagNames);
+        nameSpan_1.textContent = item_1(i, flagNames);
         nameSpan_1.className = "reg-name";
         const valSpan_1 = Dom_el("span");
         valSpan_1.textContent = "0";
@@ -1569,12 +1571,12 @@ export function App_start() {
                 const y = e.offsetY | 0;
                 if ((((x >= 0) && (x < 256)) && (y >= 0)) && (y < 256)) {
                     const pc = ((y << 8) | x) | 0;
-                    const idx = ((pc < t_1.FirstIndexAtPc.length) ? item(pc, t_1.FirstIndexAtPc) : -1) | 0;
+                    const idx = ((pc < t_1.FirstIndexAtPc.length) ? item_1(pc, t_1.FirstIndexAtPc) : -1) | 0;
                     if (idx >= 0) {
                         App_cursor = (idx | 0);
                         App_refreshAll();
                         App_syncSlider();
-                        App_statusText.textContent = ((arg_9 = (((pc < t_1.PerPcCount.length) ? item(pc, t_1.PerPcCount) : 0) | 0), toText(printf("jumped to 0x%04X (first of %d executions)"))(pc)(arg_9)));
+                        App_statusText.textContent = ((arg_9 = (((pc < t_1.PerPcCount.length) ? item_1(pc, t_1.PerPcCount) : 0) | 0), toText(printf("jumped to 0x%04X (first of %d executions)"))(pc)(arg_9)));
                     }
                 }
                 break;
@@ -1607,7 +1609,7 @@ export function App_start() {
             }
             switch (matchResult_1) {
                 case 0: {
-                    count = item(pc_1, t_3.PerPcCount);
+                    count = item_1(pc_1, t_3.PerPcCount);
                     break;
                 }
                 default:
@@ -1773,8 +1775,649 @@ export function App_start() {
     Dom_window.addEventListener("keyup", ((e_5) => {
         App_setKeyFor(toString(e_5.key), false);
     }));
+    let control = undefined;
+    const saveControlLocal = () => {
+        if (control == null) {
+        }
+        else {
+            const c_1 = control;
+            const local = Dom_window.localStorage;
+            local.setItem("jetpacfr.control.minimal", ControlFileModule_toJson(c_1));
+            control = (new ControlFile(c_1.ImageFile, c_1.Start, c_1.EndExcl, c_1.EntryPc, c_1.ActiveVersion, c_1.Blocks, c_1.Comments, false));
+        }
+    };
+    const tlCanvas = Dom_byId("canvasTimeline");
+    const tlCtx = tlCanvas.getContext("2d");
+    let tlLen = 300;
+    let rangeA = [0, 150];
+    let rangeB = [150, 300];
+    let brushA = true;
+    let tlDragAnchor = undefined;
+    let tlChipDrag = undefined;
+    let tlStartX = 0;
+    let tlMoved = false;
+    let chipRectA = [0, 0, 0, 0];
+    let chipRectB = [0, 0, 0, 0];
+    const tlFrameCount = () => {
+        let t_4;
+        const matchValue_6 = App_currentTrace();
+        let matchResult_2, t_5;
+        if (matchValue_6 != null) {
+            if ((t_4 = matchValue_6, t_4.FrameTicks.length > 0)) {
+                matchResult_2 = 0;
+                t_5 = matchValue_6;
+            }
+            else {
+                matchResult_2 = 1;
+            }
+        }
+        else {
+            matchResult_2 = 1;
+        }
+        switch (matchResult_2) {
+            case 0:
+                return t_5.FrameTicks.length | 0;
+            default:
+                return 300;
+        }
+    };
+    const entryAtFrame = (f) => {
+        let t_6;
+        const matchValue_7 = App_currentTrace();
+        let matchResult_3, t_7;
+        if (matchValue_7 != null) {
+            if ((t_6 = matchValue_7, (t_6.Entries.length > 0) && (t_6.FrameTicks.length > 0))) {
+                matchResult_3 = 0;
+                t_7 = matchValue_7;
+            }
+            else {
+                matchResult_3 = 1;
+            }
+        }
+        else {
+            matchResult_3 = 1;
+        }
+        switch (matchResult_3) {
+            case 0: {
+                const last = item_1(t_7.FrameTicks.length - 1, t_7.FrameTicks);
+                const tick = (f <= 0) ? 0 : ((f >= t_7.FrameTicks.length) ? last : item_1(f, t_7.FrameTicks));
+                let lo = 0;
+                let hi = t_7.Entries.length - 1;
+                let res = t_7.Entries.length - 1;
+                while (lo <= hi) {
+                    const mid = ~~((lo + hi) / 2) | 0;
+                    if (item_1(mid, t_7.Entries).Tick >= tick) {
+                        res = (mid | 0);
+                        hi = ((mid - 1) | 0);
+                    }
+                    else {
+                        lo = ((mid + 1) | 0);
+                    }
+                }
+                return res | 0;
+            }
+            default:
+                return 0;
+        }
+    };
+    const tlRender = () => {
+        const w = tlCanvas.width;
+        const h = tlCanvas.height;
+        tlCtx.fillStyle = "#101016";
+        tlCtx.fillRect(0, 0, w, h);
+        tlCtx.strokeStyle = "#3A3F4C";
+        tlCtx.strokeRect(0.5, 0.5, (w - 1), (h - 1));
+        const bottom = (h - 13) - 2;
+        const len = max(1, tlLen) | 0;
+        const drawBrush = (which, _arg_22) => {
+            const color = which ? "#38BDF8" : "#FBBF24";
+            const x0 = min(w, max(0, (_arg_22[0] / len) * w));
+            const x1 = min(w, max(0, (_arg_22[1] / len) * w));
+            tlCtx.fillStyle = (which ? "rgba(56,189,248,0.15)" : "rgba(251,191,36,0.15)");
+            tlCtx.fillRect(min(x0, x1), 2, max(2, Math.abs(x1 - x0)), (bottom - 2));
+            tlCtx.strokeStyle = color;
+            tlCtx.lineWidth = 2;
+            tlCtx.beginPath();
+            tlCtx.moveTo(x0, 2);
+            tlCtx.lineTo(x0, bottom);
+            tlCtx.moveTo(x1, 2);
+            tlCtx.lineTo(x1, bottom);
+            tlCtx.stroke();
+            const label = which ? "A" : "B";
+            const chipX = which ? min(x0, max(0, w - 14)) : max(0, min(x1 - 14, w - 14));
+            const chipY = bottom - 12;
+            tlCtx.fillStyle = color;
+            tlCtx.fillRect(chipX, chipY, 14, 12);
+            tlCtx.fillStyle = "#020617";
+            tlCtx.font = "bold 9px Consolas";
+            tlCtx.fillText(label, (chipX + 4), (chipY + 9.5));
+            if (which) {
+                chipRectA = [chipX, chipY, 14, 12];
+            }
+            else {
+                chipRectB = [chipX, chipY, 14, 12];
+            }
+        };
+        drawBrush(true, rangeA);
+        drawBrush(false, rangeB);
+        let step_1;
+        const nice = new Float64Array([1, 2, 2.5, 5]);
+        const niceCeil = (v_mut, base10_mut) => {
+            niceCeil:
+            while (true) {
+                const v = v_mut, base10 = base10_mut;
+                const m = v / base10;
+                const matchValue_8 = tryFind_1((n_2) => (n_2 >= (m - 1E-09)), nice);
+                if (matchValue_8 == null) {
+                    if (base10 >= 1000000000) {
+                        return v;
+                    }
+                    else {
+                        v_mut = v;
+                        base10_mut = (base10 * 10);
+                        continue niceCeil;
+                    }
+                }
+                else {
+                    return matchValue_8 * base10;
+                }
+                break;
+            }
+        };
+        const l = len;
+        let step = niceCeil(l / 4, 1);
+        while ((Math.floor(l / step) + 1) > 4) {
+            step = niceCeil(step * 1.01, 1);
+        }
+        while (((Math.floor(l / step) + 1) < 3) && (step > 1)) {
+            step = niceCeil(step / 2.02, 1);
+        }
+        step_1 = max(1, ~~Math.ceil(step));
+        tlCtx.strokeStyle = "#8A8A92";
+        tlCtx.lineWidth = 1;
+        tlCtx.fillStyle = "#8A8A92";
+        tlCtx.font = "8px Consolas";
+        let t_8 = 0;
+        while (t_8 <= len) {
+            const x_5 = (t_8 / len) * w;
+            tlCtx.beginPath();
+            tlCtx.moveTo(x_5, (bottom - 3));
+            tlCtx.lineTo(x_5, (bottom + 1));
+            tlCtx.stroke();
+            tlCtx.fillText(int32ToString(t_8), min(max(2, x_5 - 8), w - 20), (h - 4));
+            t_8 = ((t_8 + step_1) | 0);
+        }
+    };
+    const tlSetRange = (which_1, r_2) => {
+        if (which_1) {
+            rangeA = r_2;
+        }
+        else {
+            rangeB = r_2;
+        }
+        tlRender();
+    };
+    const tlUnitAt = (x_6) => {
+        const w_1 = tlCanvas.width;
+        return ~~round((min(max(x_6, 0), w_1) / w_1) * max(1, tlLen)) | 0;
+    };
+    const tlX = (e_6) => {
+        const rect = tlCanvas.getBoundingClientRect();
+        return (e_6.clientX - rect.left) * (tlCanvas.width / rect.width);
+    };
+    const inChip = (r_3, x_7, y_5) => {
+        const ry = r_3[1];
+        const rx = r_3[0];
+        if (((x_7 >= (rx - 3)) && (x_7 <= ((rx + r_3[2]) + 3))) && (y_5 >= (ry - 3))) {
+            return y_5 <= ((ry + r_3[3]) + 3);
+        }
+        else {
+            return false;
+        }
+    };
+    tlCanvas.addEventListener("mousedown", ((e_8) => {
+        const x_8 = tlX(e_8);
+        let y_6;
+        const rect_1 = tlCanvas.getBoundingClientRect();
+        y_6 = (e_8.clientY - rect_1.top);
+        tlStartX = x_8;
+        tlMoved = false;
+        if (inChip(chipRectA, x_8, y_6)) {
+            tlChipDrag = true;
+        }
+        else if (inChip(chipRectB, x_8, y_6)) {
+            tlChipDrag = false;
+        }
+        else {
+            tlChipDrag = undefined;
+            tlDragAnchor = tlUnitAt(x_8);
+            App_cursor = (entryAtFrame(tlUnitAt(x_8)) | 0);
+            App_refreshAll();
+            App_syncSlider();
+        }
+    }));
+    tlCanvas.addEventListener("mousemove", ((e_9) => {
+        const x_9 = tlX(e_9);
+        const tlChipDrag_1 = tlChipDrag;
+        const tlDragAnchor_1 = tlDragAnchor;
+        if (tlChipDrag_1 == null) {
+            if (tlDragAnchor_1 != null) {
+                const anchor = tlDragAnchor_1 | 0;
+                if (Math.abs(x_9 - tlStartX) > 3) {
+                    tlMoved = true;
+                    const u_1 = tlUnitAt(x_9) | 0;
+                    tlSetRange(brushA, [min(anchor, u_1), max(anchor, u_1)]);
+                }
+                App_cursor = (entryAtFrame(tlUnitAt(x_9)) | 0);
+                App_refreshAll();
+                App_syncSlider();
+            }
+        }
+        else {
+            const which_2 = tlChipDrag_1;
+            if (Math.abs(x_9 - tlStartX) > 3) {
+                const u = tlUnitAt(x_9) | 0;
+                if (which_2) {
+                    rangeA[0];
+                    const re_1 = rangeA[1] | 0;
+                    tlSetRange(true, [min(u, re_1), re_1]);
+                }
+                else {
+                    const rs_2 = rangeB[0] | 0;
+                    rangeB[1];
+                    tlSetRange(false, [rs_2, max(rs_2, u)]);
+                }
+            }
+        }
+    }));
+    Dom_window.addEventListener("mouseup", ((_arg_23) => {
+        let matchResult_4, anchor_2;
+        if (tlDragAnchor != null) {
+            if (!tlMoved) {
+                matchResult_4 = 0;
+                anchor_2 = tlDragAnchor;
+            }
+            else {
+                matchResult_4 = 1;
+            }
+        }
+        else {
+            matchResult_4 = 1;
+        }
+        switch (matchResult_4) {
+            case 0: {
+                tlSetRange(brushA, [anchor_2, anchor_2]);
+                break;
+            }
+        }
+        tlDragAnchor = undefined;
+        tlChipDrag = undefined;
+    }));
+    const brushStyle = () => {
+        const a_2 = Dom_byId("btnBrushA");
+        const b = Dom_byId("btnBrushB");
+        a_2.className = (brushA ? "brush-btn active-brush-a" : "brush-btn");
+        b.className = (brushA ? "brush-btn" : "brush-btn active-brush-b");
+    };
+    Dom_byId("btnBrushA").addEventListener("click", ((_arg_24) => {
+        brushA = true;
+        brushStyle();
+    }));
+    Dom_byId("btnBrushB").addEventListener("click", ((_arg_25) => {
+        brushA = false;
+        brushStyle();
+    }));
+    Dom_window.addEventListener("keydown", ((e_10) => {
+        const k = toString(e_10.key);
+        if ((k === "a") ? true : (k === "A")) {
+            brushA = true;
+            brushStyle();
+        }
+        else if ((k === "b") ? true : (k === "B")) {
+            brushA = false;
+            brushStyle();
+        }
+    }));
+    let previewFrom = 0;
+    let previewSpan = 0;
+    let previewTicks = 0;
+    let previewActive = false;
+    const previewRange = (which_4) => {
+        const patternInput = which_4 ? rangeA : rangeB;
+        const fStart = patternInput[0] | 0;
+        const fEnd = patternInput[1] | 0;
+        const label_1 = which_4 ? "A" : "B";
+        const n_4 = tlFrameCount() | 0;
+        if (((fEnd - 1) < n_4) && ((fEnd - 1) >= 0)) {
+            App_pauseGame();
+            previewFrom = (max(0, fStart) | 0);
+            previewSpan = (max(0, (fEnd - 1) - previewFrom) | 0);
+            previewTicks = 0;
+            previewActive = true;
+            App_cursor = (entryAtFrame(previewFrom) | 0);
+            App_refreshAll();
+            App_syncSlider();
+            App_statusText.textContent = toText(printf("preview %s: frames %d..%d over 1s (cursor sweep)"))(label_1)(fStart)(fEnd);
+        }
+        else {
+            App_statusText.textContent = toText(printf("preview %s: range outside the recording (%d frames)"))(label_1)(n_4);
+        }
+    };
+    Dom_byId("btnPreviewA").addEventListener("click", ((_arg_26) => {
+        previewRange(true);
+    }));
+    Dom_byId("btnPreviewB").addEventListener("click", ((_arg_27) => {
+        previewRange(false);
+    }));
+    Dom_setInterval(() => {
+        if (previewActive) {
+            previewTicks = ((previewTicks + 1) | 0);
+            const frac = min(previewTicks, 50) | 0;
+            App_cursor = (entryAtFrame(previewFrom + ~~((previewSpan * frac) / 50)) | 0);
+            App_refreshAll();
+            App_syncSlider();
+            if (previewTicks >= 50) {
+                previewActive = false;
+            }
+        }
+    }, 20);
+    const cmCanvas = Dom_byId("canvasCtrlMap");
+    const cmCtx = cmCanvas.getContext("2d");
+    let cmViewStart = 0;
+    let cmViewEnd = 65536;
+    let instrStartsCache = undefined;
+    let instrStartsAt = 0;
+    let cmCursorAddr = -1;
+    let cmDragAddr = undefined;
+    let cmDisasmLo = -1;
+    let cmDisasmHi = -1;
+    const cmMinSpan = () => (max(32, ~~(cmCanvas.height / 32)) | 0);
+    const cmCounts = () => {
+        if (App_loaded == null) {
+            if (App_session == null) {
+                return new Int32Array(65536);
+            }
+            else {
+                return TraceRecorder__get_PerPcCount(TraceSession__get_Recorder(App_session));
+            }
+        }
+        else {
+            return App_loaded.PerPcCount;
+        }
+    };
+    const cmAddrY = (addr) => ((cmCanvas.height * (addr - cmViewStart)) / max(1, cmViewEnd - cmViewStart));
+    const cmRender = () => {
+        let s_2, now, st, a_3, option_1, arg_42, arg_43;
+        const w_2 = cmCanvas.width;
+        const h_1 = cmCanvas.height;
+        const cw = cmCanvas.clientWidth;
+        const ch = cmCanvas.clientHeight;
+        if ((cw > 0) && (~~cw !== ~~w_2)) {
+            cmCanvas.width = ~~cw;
+        }
+        if ((ch > 0) && (~~ch !== ~~h_1)) {
+            cmCanvas.height = ~~ch;
+        }
+        const w_3 = cmCanvas.width;
+        const h_2 = cmCanvas.height;
+        cmCtx.fillStyle = "#0A0A10";
+        cmCtx.fillRect(0, 0, w_3, h_2);
+        const blocks = (control == null) ? empty() : control.Blocks;
+        const comments = (control == null) ? empty() : control.Comments;
+        const rowCount = max(1, ~~Math.ceil(h_2)) | 0;
+        const m_1 = render(blocks, comments, (App_session != null) ? ((s_2 = App_session, (now = (Date.now()), (((instrStartsCache == null) ? true : ((now - instrStartsAt) > 1000)) ? ((st = fill(new Array(65536), 0, 65536, false), (a_3 = 0, ((() => {
+            while (a_3 < 65536) {
+                setItem(st, a_3, true);
+                const len_1 = disasmMemory(TraceSession__get_Memory(s_2), a_3).Length | 0;
+                a_3 = ((a_3 + ((len_1 < 1) ? 1 : min(8, len_1))) | 0);
+            }
+        })(), (instrStartsCache = st, instrStartsAt = now))))) : undefined, instrStartsCache)))) : undefined, (option_1 = App_session, (option_1 != null) ? TraceSession__get_Memory(option_1) : undefined), cmCounts(), (App_loaded == null) ? ((App_session == null) ? fill(new Array(65536), 0, 65536, false) : TraceRecorder__get_SelfModified(TraceSession__get_Recorder(App_session))) : App_loaded.SelfModified, cmViewStart, cmViewEnd, rowCount);
+        const heatLutI = [[8, 8, 12], [10, 30, 74], [10, 58, 94], [10, 92, 106], [18, 134, 94], [58, 168, 60], [150, 184, 44], [216, 160, 34], [232, 102, 24], [240, 56, 40]];
+        if (m_1.Rows.length > 0) {
+            const rowH = h_2 / m_1.Rows.length;
+            let y_8 = 0;
+            while (y_8 < m_1.Rows.length) {
+                const r_4 = item_1(y_8, m_1.Rows);
+                let col;
+                const heat = r_4.Heat | 0;
+                let patternInput_1;
+                const _arg_28 = r_4.Kind;
+                patternInput_1 = ((_arg_28.tag === 2) ? [200, 138, 46] : ((_arg_28.tag === 3) ? [58, 63, 76] : ((_arg_28.tag === 4) ? [85, 81, 107] : ((_arg_28.tag === 0) ? [10, 10, 16] : [46, 125, 209]))));
+                const br = patternInput_1[0] | 0;
+                const bgc = patternInput_1[1] | 0;
+                const bb = patternInput_1[2] | 0;
+                if (heat <= 0) {
+                    col = toText(printf("rgb(%d,%d,%d)"))(br)(bgc)(bb);
+                }
+                else {
+                    const patternInput_2 = item_1(min(9, heat), heatLutI);
+                    const t_11 = 0.15 + ((0.65 * heat) / 9);
+                    const mix = (x_10, y_7) => (~~round(x_10 + ((y_7 - x_10) * t_11)) | 0);
+                    const arg_39 = mix(br, patternInput_2[0]) | 0;
+                    const arg_40 = mix(bgc, patternInput_2[1]) | 0;
+                    const arg_41 = mix(bb, patternInput_2[2]) | 0;
+                    col = toText(printf("rgb(%d,%d,%d)"))(arg_39)(arg_40)(arg_41);
+                }
+                let y2 = y_8 + 1;
+                while (((y2 < m_1.Rows.length) && equals(item_1(y2, m_1.Rows).Kind, r_4.Kind)) && (item_1(y2, m_1.Rows).Heat === r_4.Heat)) {
+                    y2 = ((y2 + 1) | 0);
+                }
+                cmCtx.fillStyle = col;
+                cmCtx.fillRect(0, (y_8 * rowH), w_3, (((y2 - y_8) * rowH) + 0.5));
+                for (let yy = y_8; yy <= (y2 - 1); yy++) {
+                    const ry_1 = yy * rowH;
+                    if (item_1(yy, m_1.Rows).SelfMod) {
+                        cmCtx.fillStyle = "#F030F0";
+                        cmCtx.fillRect(0, ry_1, 2, 1);
+                    }
+                    if (item_1(yy, m_1.Rows).Comment) {
+                        cmCtx.fillStyle = "#4EE060";
+                        cmCtx.fillRect(2, ry_1, 2, 1);
+                    }
+                }
+                y_8 = (y2 | 0);
+            }
+            const arr = m_1.Ranges;
+            for (let idx_1 = 0; idx_1 <= (arr.length - 1); idx_1++) {
+                const forLoopVar_2 = item_1(idx_1, arr);
+                const y0 = addrY(m_1.ViewStart, m_1.ViewEnd, m_1.Rows.length, forLoopVar_2[0]);
+                const y1 = addrY(m_1.ViewStart, m_1.ViewEnd, m_1.Rows.length, forLoopVar_2[1]);
+                cmCtx.fillStyle = "rgba(78,224,96,0.19)";
+                cmCtx.fillRect(0, (y0 * rowH), w_3, ((y1 - y0) * rowH));
+            }
+            cmCtx.fillStyle = "#E8E8EC";
+            cmCtx.font = "9px Consolas";
+            const arr_1 = m_1.Labels;
+            for (let idx_2 = 0; idx_2 <= (arr_1.length - 1); idx_2++) {
+                const lbl = item_1(idx_2, arr_1);
+                const y_9 = addrY(m_1.ViewStart, m_1.ViewEnd, m_1.Rows.length, lbl.Addr);
+                cmCtx.fillText(lbl.Text, 5, ((y_9 * rowH) + 9));
+            }
+        }
+        if ((cmDisasmLo >= 0) && (cmDisasmHi > cmDisasmLo)) {
+            cmCtx.strokeStyle = "rgba(255,255,255,0.5)";
+            cmCtx.lineWidth = 1;
+            cmCtx.strokeRect(1, cmAddrY(cmDisasmLo), (w_3 - 2), max(3, cmAddrY(cmDisasmHi) - cmAddrY(cmDisasmLo)));
+        }
+        if (((cmCursorAddr >= 0) && (cmCursorAddr >= cmViewStart)) && (cmCursorAddr < cmViewEnd)) {
+            cmCtx.strokeStyle = "#4ED0E0";
+            cmCtx.beginPath();
+            cmCtx.moveTo(0, cmAddrY(cmCursorAddr));
+            cmCtx.lineTo(w_3, cmAddrY(cmCursorAddr));
+            cmCtx.stroke();
+        }
+        cmCtx.fillStyle = "#6A6A74";
+        cmCtx.font = "8px Consolas";
+        return cmCtx.fillText(((arg_42 = (cmViewStart | 0), (arg_43 = (cmViewEnd | 0), toText(printf("%04X-%04X"))(arg_42)(arg_43)))), 2, 8);
+    };
+    const cmXy = (e_11) => {
+        const rect_2 = cmCanvas.getBoundingClientRect();
+        return [e_11.clientX - rect_2.left, e_11.clientY - rect_2.top];
+    };
+    const cmAddrAt = (y_10) => {
+        const h_3 = cmCanvas.height;
+        return (cmViewStart + ~~min((y_10 / h_3) * (cmViewEnd - cmViewStart), (cmViewEnd - cmViewStart) - 1)) | 0;
+    };
+    const cmNavigate = (addr_2) => {
+        let t_12;
+        const matchValue_10 = App_currentTrace();
+        let matchResult_5, t_13;
+        if (matchValue_10 != null) {
+            if ((t_12 = matchValue_10, ((t_12.Entries.length > 0) && (addr_2 < t_12.FirstIndexAtPc.length)) && (item_1(addr_2, t_12.FirstIndexAtPc) >= 0))) {
+                matchResult_5 = 0;
+                t_13 = matchValue_10;
+            }
+            else {
+                matchResult_5 = 1;
+            }
+        }
+        else {
+            matchResult_5 = 1;
+        }
+        switch (matchResult_5) {
+            case 0: {
+                App_cursor = (item_1(addr_2, t_13.FirstIndexAtPc) | 0);
+                App_refreshAll();
+                App_syncSlider();
+                break;
+            }
+            case 1: {
+                break;
+            }
+        }
+    };
+    cmCanvas.addEventListener("mousedown", ((e_12) => {
+        const addr_3 = cmAddrAt(cmXy(e_12)[1]) | 0;
+        cmDragAddr = addr_3;
+        cmNavigate(addr_3);
+    }));
+    cmCanvas.addEventListener("mousemove", ((e_13) => {
+        let option_3, b_2;
+        const y_12 = cmXy(e_13)[1];
+        if (cmDragAddr == null) {
+            const addr_5 = cmAddrAt(y_12) | 0;
+            const blockTxt = (control == null) ? "" : defaultArg((option_3 = ControlFileModule_blockAt(control, addr_5), (option_3 != null) ? ((b_2 = option_3, toText(printf(" %s (%A)"))(b_2.Name)(b_2.Kind))) : undefined), " <unmapped>");
+            const counts = cmCounts();
+            const n_5 = ((addr_5 < counts.length) ? item_1(addr_5, counts) : 0) | 0;
+            cmCanvas.title = toText(printf("0x%04X%s (%d executions)"))(addr_5)(blockTxt)(n_5);
+        }
+        else {
+            const addr_4 = cmAddrAt(y_12) | 0;
+            cmDragAddr = addr_4;
+            cmNavigate(addr_4);
+        }
+    }));
+    Dom_window.addEventListener("mouseup", ((_arg_29) => {
+        cmDragAddr = undefined;
+    }));
+    cmCanvas.addEventListener("wheel", ((e_14) => {
+        e_14.preventDefault();
+        const delta = e_14.deltaY;
+        const frac_1 = min(1, max(0, cmXy(e_14)[1] / max(1, cmCanvas.height)));
+        const oldSpan = (cmViewEnd - cmViewStart) | 0;
+        const anchor_3 = (cmViewStart + ~~(frac_1 * oldSpan)) | 0;
+        const factor = Math.pow(1.15, -delta / 100);
+        const newSpan = max(cmMinSpan(), min(65536, ~~(oldSpan / factor))) | 0;
+        cmViewStart = ((anchor_3 - ~~(frac_1 * newSpan)) | 0);
+        cmViewEnd = ((cmViewStart + newSpan) | 0);
+        const span = max(cmMinSpan(), cmViewEnd - cmViewStart) | 0;
+        cmViewStart = (max(0, min(65536 - span, cmViewStart)) | 0);
+        cmViewEnd = ((cmViewStart + span) | 0);
+        return cmRender();
+    }));
+    cmCanvas.addEventListener("contextmenu", ((e_15) => {
+        let arg_54, arg_55;
+        e_15.preventDefault();
+        const addr_6 = cmAddrAt(cmXy(e_15)[1]) | 0;
+        if (control != null) {
+            const menu = Dom_byId("ctrlMenu");
+            Dom_clear(menu);
+            const addItem = (txt, act) => {
+                const item = Dom_el("div");
+                item.textContent = txt;
+                item.addEventListener("click", ((_arg_30) => {
+                    if (control == null) {
+                    }
+                    else {
+                        const c_5 = control;
+                        control = act(c_5);
+                        saveControlLocal();
+                        App_refreshDisasm();
+                        cmRender();
+                        App_statusText.textContent = toText(printf("%s @ %04X"))(txt)(addr_6);
+                    }
+                    menu.style.display = "none";
+                }));
+                Dom_append(menu, item);
+            };
+            addItem("kind: code", (c_6) => ControlFileModule_setKindAt(c_6, addr_6, BlockKind.Code));
+            addItem("kind: data", (c_7) => ControlFileModule_setKindAt(c_7, addr_6, BlockKind.Data));
+            addItem("kind: gap", (c_8) => ControlFileModule_setKindAt(c_8, addr_6, BlockKind.Gap));
+            Dom_append(menu, Dom_el("hr"));
+            const split = Dom_el("div");
+            split.textContent = "split block here";
+            split.addEventListener("click", ((_arg_31) => {
+                let s_6;
+                if (control == null) {
+                }
+                else {
+                    const c_9 = control;
+                    if ((instrStartsCache == null) ? true : ((s_6 = instrStartsCache, (addr_6 < s_6.length) && item_1(addr_6, s_6)))) {
+                        control = ControlFileModule_splitBlockAt(c_9, addr_6);
+                        saveControlLocal();
+                        cmRender();
+                        App_statusText.textContent = toText(printf("block split at %04X"))(addr_6);
+                    }
+                    else {
+                        App_statusText.textContent = toText(printf("%04X is not an instruction start"))(addr_6);
+                    }
+                }
+                menu.style.display = "none";
+            }));
+            Dom_append(menu, split);
+            addItem("merge into next block", (c_10) => ControlFileModule_mergeWithNext(c_10, addr_6));
+            addItem("rename block...", (c_11) => {
+                const name_1 = Dom_window.prompt("block name", "");
+                return (Operators_IsNull(name_1) ? true : (name_1.trim().length === 0)) ? c_11 : ControlFileModule_renameBlockAt(c_11, addr_6, name_1.trim());
+            });
+            addItem("line comment...", (c_12) => {
+                const txt_1 = Dom_window.prompt(toText(printf("comment at %04X"))(addr_6), "");
+                return Operators_IsNull(txt_1) ? c_12 : ControlFileModule_upsert(c_12, new ControlComment(CommentKind.Line, addr_6, 0, -1, txt_1));
+            });
+            addItem("range over block...", (c_13) => {
+                const txt_2 = Dom_window.prompt("comment text for the whole block", "");
+                if (Operators_IsNull(txt_2)) {
+                    return c_13;
+                }
+                else {
+                    const matchValue_11 = ControlFileModule_blockAt(c_13, addr_6);
+                    if (matchValue_11 == null) {
+                        return c_13;
+                    }
+                    else {
+                        const b_3 = matchValue_11;
+                        return ControlFileModule_upsert(c_13, new ControlComment(CommentKind.Range$, b_3.Start, b_3.EndExcl, -1, txt_2));
+                    }
+                }
+            });
+            menu.style.left = ((arg_54 = (~~e_15.clientX | 0), toText(printf("%dpx"))(arg_54)));
+            menu.style.top = ((arg_55 = (~~e_15.clientY | 0), toText(printf("%dpx"))(arg_55)));
+            menu.style.display = "block";
+        }
+        else {
+            App_statusText.textContent = "no control file - click New first";
+        }
+    }));
+    Dom_window.addEventListener("mousedown", ((e_16) => {
+        const menu_1 = Dom_byId("ctrlMenu");
+        if (((menu_1.style.display === "block") && !Operators_IsNull(e_16.target)) && !(e_16.target === menu_1)) {
+            if (!(e_16.target.closest && e_16.target.closest('#ctrlMenu') != null)) {
+                menu_1.style.display = "none";
+            }
+        }
+    }));
     App_statusText.textContent = "booting emulator to game entry...";
-    return Dom_setTimeout(() => {
+    Dom_setTimeout(() => {
         try {
             App_session = TraceSession_$ctor_28C3603C(decode_1(RomB64), decode_1(TzxB64), App_capacity);
             App_startGame();
@@ -1785,5 +2428,82 @@ export function App_start() {
             App_statusText.textContent = ("boot failed: " + ex_1.message);
         }
     }, 30);
+    Dom_setInterval(() => {
+        const n_6 = tlFrameCount() | 0;
+        if (n_6 !== tlLen) {
+            tlLen = (n_6 | 0);
+            tlRender();
+        }
+    }, 100);
+    Dom_byId("btnCtrlNew").addEventListener("click", ((_arg_32) => {
+        control = ControlFileModule_empty(16384, 65536);
+        cmRender();
+        App_statusText.textContent = "empty control file created over $4000-$FFFF";
+    }));
+    Dom_byId("btnCtrlSave").addEventListener("click", ((_arg_33) => {
+        if (control == null) {
+            App_statusText.textContent = "no control file - click New first";
+        }
+        else if (control.Dirty) {
+            const c_15 = control;
+            saveControlLocal();
+            App_statusText.textContent = "control saved to browser storage";
+        }
+        else {
+            App_statusText.textContent = "control unchanged";
+        }
+    }));
+    Dom_byId("btnCtrlDl").addEventListener("click", ((_arg_34) => {
+        if (control == null) {
+            App_statusText.textContent = "no control file - click New first";
+        }
+        else {
+            const json = ControlFileModule_toJson(control);
+            const blob_2 = new Blob([json], { type: 'application/json' });
+            const url_2 = URL.createObjectURL(blob_2);
+            const a_5 = Dom_el("a");
+            a_5.href = url_2;
+            a_5.download = "control.json";
+            a_5.click();
+            App_statusText.textContent = "control.json downloaded";
+        }
+    }));
+    Dom_byId("btnCtrlImport").addEventListener("click", ((_arg_35) => {
+        document.getElementById('ctrlFileInput').click();
+    }));
+    Dom_byId("ctrlFileInput").addEventListener("change", ((e_17) => {
+        const file = e_17.target.files[0];
+        if (!Operators_IsNull(file)) {
+            const reader = new FileReader();
+            reader.onload = ((_arg_36) => {
+                const text = reader.result;
+                try {
+                    control = ControlFileModule_fromJson(text);
+                    cmRender();
+                    App_statusText.textContent = "control file imported";
+                }
+                catch (ex_2) {
+                    App_statusText.textContent = ("import failed: " + ex_2.message);
+                }
+            });
+            reader.readAsText(file);
+        }
+    }));
+    const local_1 = Dom_window.localStorage;
+    const matchValue_12 = local_1.getItem("jetpacfr.control.minimal");
+    if (equals(matchValue_12, defaultOf())) {
+        const p = fetch('games/minimal/control.json').then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null });
+        p.then((txt_3) => {
+            if (!Operators_IsNull(txt_3) && (control == null)) {
+                control = ControlFileModule_fromJson(toString(txt_3));
+                cmRender();
+                App_statusText.textContent = "control file loaded from games/minimal/control.json";
+            }
+        });
+    }
+    else {
+        control = ControlFileModule_fromJson(toString(matchValue_12));
+        cmRender();
+    }
 }
 
