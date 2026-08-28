@@ -548,11 +548,11 @@ type MainWindow() as self =
           presentGame ()
           Audio.Play(s.DrainBeeperSamples(frameStart))
           if s.ReplayFinished then
-            // Replay reached the recording's end: stop and hand back to Play.
+            // Replay reached the recording's end: stop and hand to live Run.
             replaying <- false
             running <- false
             frameTimer.Stop()
-            statusText.Text <- "replay finished - press Play to take over"
+            statusText.Text <- "replay finished - press Run to take over"
         with ex ->
           running <- false
           replaying <- false
@@ -1590,7 +1590,7 @@ type MainWindow() as self =
     runBtn.Click.Add(fun _ ->
       pauseGame ()
       match session with
-      | Some s when replaying -> s.StopReplay(); replaying <- false
+      | Some s when replaying || s.ReplayFinished -> s.StopReplay(); replaying <- false
       | _ -> ()
       running <- true
       frameTimer.Start())

@@ -9,6 +9,11 @@ type Keyboard() =
 
   member this.SetKey(row: int, bit: int, pressed: bool) = keys.[row].[bit] <- pressed
   member this.GetKey(row: int, bit: int) : bool = keys.[row].[bit]
+  /// Currently pressed cells, e.g. for a controlled teardown (replay end).
+  member this.PressedCells() : (int * int) list =
+    [ for row in 0 .. 7 do
+        for bit in 0 .. 4 do
+          if keys.[row].[bit] then row, bit ]
 
   /// Keyboard responds to any even address.
   member this.In(address: int) : int option =

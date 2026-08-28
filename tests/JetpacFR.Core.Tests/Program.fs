@@ -633,6 +633,52 @@ let runHistory (romPath: string) (tzxPath: string) : int =
 
   if failures.Count > 0 then 1 else 0
 
+/// A recording that stops mid-hold (final event = press, no release) must
+/// not leak the latched key into live control at a replay -> live handoff.
+let runReplayHandoff (romPath: string) (tzxPath: string) : int =
+  printfn "replay handoff: mid-hold ending releases all keys"
+  let framesN = 30
+  let mkScripted () =
+    let s = TraceSession(romPath, tzxPath, 500_000)
+    for f in 0 .. framesN - 1 do
+      s.RunFrame() |> ignore
+      if f = 10 then s.SetKey(3, 0, true) // pressed, never released
+    s
+  // Baseline: straight-through with no script to compare end memory later.
+  let scripted = mkScripted ()
+
+  let replayToEnd () =
+    let s = TraceSession(romPath, tzxPath, 500_000)
+    s.KeyLog.Replace(scripted.KeyLog.Events)
+    s.StartReplay()
+    let mutable guard = 0
+    while not s.ReplayFinished && guard < framesN + 10 do
+      s.RunFrame() |> ignore
+      guard <- guard + 1
+    s
+  let finished = replayToEnd ()
+  check "replay reaches recording end" (finished.ReplayFinished || finished.Frame >= framesN) ""
+  let latchAtEnd =
+    [ for r in 0 .. 7 do
+        for b in 0 .. 4 do
+          if finished.Keyboard.GetKey(r, b) then yield (r, b) ]
+  check "replay-to-end leaves no key latched" (latchAtEnd.IsEmpty)
+    (sprintf "latched=%A" latchAtEnd)
+
+  // Aborting a running replay (Run button mid-script) also hands over clean.
+  let aborted = TraceSession(romPath, tzxPath, 500_000)
+  aborted.KeyLog.Replace(scripted.KeyLog.Events)
+  aborted.StartReplay()
+  aborted.RunFrame() |> ignore
+  aborted.StopReplay()
+  let latchAbort =
+    [ for r in 0 .. 7 do
+        for b in 0 .. 4 do
+          if aborted.Keyboard.GetKey(r, b) then yield (r, b) ]
+  check "replay abort leaves no key latched" (latchAbort.IsEmpty) ""
+
+  if failures.Count > 0 then 1 else 0
+
 let runManifest () : int =
   printfn "manifest: game discovery + load"
   let rec walk (d: DirectoryInfo) =
@@ -1315,6 +1361,7 @@ let mainTests argv =
       | "manifest" -> runManifest ()
       | "minimal" -> runMinimal ()
       | "game2" -> runGame2 ()
+      | "handoff" -> runReplayHandoff rom tzx
       | "history" -> runHistory rom tzx
       | "z80ops" -> runZ80Ops ()
       | "labels" -> runLabels ()

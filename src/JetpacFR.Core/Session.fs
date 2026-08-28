@@ -90,6 +90,13 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
     let mem, text = port.SaveState()
     history.Capture(frame, mem, text, port.Keyboard.ToBytes())
 
+  /// Release every still-down matrix cell. A recording can end (or be
+  /// aborted) mid-hold, and a script-driven press without a matching
+  /// release must never leak into live control.
+  let releaseAllKeys () =
+    for row, bit in port.Keyboard.PressedCells () do
+      port.SetKey(row, bit, false)
+
   /// Put the port into the game-entry state. Warm: load the cached snapshot.
   /// Cold: boot the oracle to the entry and cache its state for next time.
   let loadEntryState () =
@@ -160,6 +167,8 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   member this.Regs = port.Regs
   member this.Memory = port.Memory
 
+  /// The live matrix, e.g. for shells/tests asserting a clean handoff.
+  member this.Keyboard = port.Keyboard
 
   /// Rendered frame (BGRA 320x256) from the port's video state.
   member this.ScreenBuffer = port.Video.BlitTo()
@@ -223,6 +232,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
   /// (events after the point are replayed). Live keys are ignored while
   /// replaying; RunFrame reports ReplayFinished at the recording's end.
   member this.StartReplay() =
+    releaseAllKeys () // user-held keys would stay latched through the whole script
     replayMode <- true
     // After a process restart, history contains only the frame-0 entry
     // anchor, while the persisted KeyLog contains the recording extent.
@@ -233,11 +243,14 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
     pendingReplayKeys <- keyLog.ForFrame(frame)
 
   /// Abort a running replay and return to live control immediately (the
-  /// frame timer's Run button mid-replay).
+  /// frame timer's Run button mid-replay). Clears ReplayFinished too: a
+  /// replay that ran to the end leaves the flag set, and live frames must
+  /// not be cut short by the stale end-of-replay check.
   member this.StopReplay() =
+    releaseAllKeys ()
     replayMode <- false
+    replayFinished <- false
     pendingReplayKeys <- []
-
   /// Execute one frame (69888 T-states plus overshoot) on the port machine,
   /// recording every instruction. In replay mode the frame's logged key
   /// events are applied before the machine runs.
@@ -337,6 +350,9 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
     captureState ()
     if replayMode then
       if frame >= replayEndFrame then
+        // The script ended mid-hold (or its final events latched a key);
+        // hand live control an all-up keyboard.
+        releaseAllKeys ()
         replayMode <- false
         pendingReplayKeys <- []
         replayFinished <- true
