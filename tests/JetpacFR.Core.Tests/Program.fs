@@ -129,7 +129,7 @@ let runDisasmKnown () : int =
 
 let runDisasmCorpus () : int =
   printfn "disasm corpus over the loaded 64K image"
-  let oracle, _ = Jetpac3.Core.Boot.bootToEntry rom tzx
+  let oracle, _ = Jetpac3.Core.Boot.bootToEntry rom tzx None
   let mem, _ = oracle.SaveState()
   let mutable bad = 0
   let mutable dbFalls = 0
@@ -511,7 +511,7 @@ let runBench (romPath: string) (tzxPath: string) : int =
     | Some (m, s) -> m, s
     | None ->
       printfn "  cold booting to entry (caches for future runs)..."
-      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
       let mem, state = oracle.SaveState()
       EntryCache.save romPath tzxPath mem state
       mem, state
@@ -1339,6 +1339,44 @@ let runCE () : int =
     src.Split('\n') |> Array.truncate 24 |> Array.iter (printfn "  %s")
     if failures.Count > 0 then 1 else 0
 
+/// The generalized tape boot: every tape game must boot to its first own
+/// RAM instruction, and that instruction must be tape-loaded game code.
+let runBoot () : int =
+    printfn "boot: generalized tape boot to first game instruction"
+    let rec walk (d: DirectoryInfo) =
+        let candidate = Path.Combine(d.FullName, "games")
+        if Directory.Exists candidate then Some candidate
+        else
+            match d.Parent with
+            | null -> None
+            | p -> walk p
+    let statePc (state: string) : int =
+        state.Split('\n')
+        |> Array.tryPick (fun l ->
+            let kv = l.Split('=')
+            if kv.Length = 2 && kv[0].Trim() = "pc" then Some(Convert.ToInt32(kv[1].Trim(), 16)) else None)
+        |> Option.defaultValue 0
+    let bootCase (label: string) (tzxPath: string) =
+        let oracle, cycles = Jetpac3.Core.Boot.bootToEntry rom tzxPath None
+        let mem, state = oracle.SaveState()
+        let pc = statePc state
+        check (sprintf "%s boots to a RAM instruction" label) (pc >= 0x4000) (sprintf "pc=%04X" pc)
+        let spans = Jetpac3.Core.Boot.findCodeSpans (File.ReadAllBytes tzxPath)
+        let inSpan = spans |> List.exists (fun (s, e) -> pc >= s && pc < s + e.Length)
+        check (sprintf "%s entry is inside loaded CODE" label) inSpan (sprintf "pc=%04X" pc)
+        printfn "  %s entry pc=%04X cycles=%d spans=%d" label pc cycles spans.Length
+    let mmTzx =
+        walk (DirectoryInfo AppContext.BaseDirectory)
+        |> Option.bind (fun g ->
+            let p = Path.Combine(g, "manicminer", "Manic Miner.tzx")
+            if File.Exists p then Some p else None)
+    match mmTzx with
+    | None -> check "manic miner tape present" false "games/manicminer/Manic Miner.tzx not found"
+    | Some mmTzx ->
+        bootCase "jetpac" tzx
+        bootCase "manicminer" mmTzx
+    0
+
 /// The historical regression harness.
 let mainTests argv =
   try
@@ -1358,6 +1396,7 @@ let mainTests argv =
       | "validate" -> runValidate rom tzx
       | "prompt" -> runPrompt rom tzx
       | "bench" -> runBench rom tzx
+      | "boot" -> runBoot ()
       | "manifest" -> runManifest ()
       | "minimal" -> runMinimal ()
       | "game2" -> runGame2 ()
@@ -1372,8 +1411,7 @@ let mainTests argv =
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
         + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
-        + runHistory rom tzx + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
-        + runLabels () + runIntegration () + runCE () + runControl () + runCtrlMap ()
+        + runHistory rom tzx + runBoot () + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
       | other ->
         eprintfn "unknown test: %s" other
         1

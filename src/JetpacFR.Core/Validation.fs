@@ -30,7 +30,7 @@ module Validation =
     match EntryCache.tryLoad romPath tzxPath with
     | Some s -> s
     | None ->
-      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
       let mem, state = oracle.SaveState()
       EntryCache.save romPath tzxPath mem state
       mem, state

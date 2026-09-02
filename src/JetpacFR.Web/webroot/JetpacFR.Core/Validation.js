@@ -52,7 +52,7 @@ export function Report_$reflection() {
 function entryState(romPath, tzxPath) {
     const matchValue = EntryCache_tryLoad(romPath, tzxPath);
     if (matchValue == null) {
-        const patternInput_1 = Spectrum48__SaveState(bootToEntry(romPath, tzxPath)[0]);
+        const patternInput_1 = Spectrum48__SaveState(bootToEntry(romPath, tzxPath, undefined)[0]);
         const state = patternInput_1[1];
         const mem = patternInput_1[0];
         EntryCache_save(romPath, tzxPath, mem, state);

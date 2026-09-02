@@ -85,7 +85,17 @@ type MainWindow() as self =
   let mutable session: TraceSession option = None
   let mutable bootTask: System.Threading.Tasks.Task<TraceSession> option = None
   let mutable bootGameId = ""
+  /// When the current bootTask was launched - drives the status-bar progress.
+  let mutable bootStartedAt = System.DateTime.UtcNow
   let mutable manualBoot: ManualBoot option = None
+  /// Latest frame snapshot from a running background boot: (screen, frame).
+  let mutable bootScreen: byte[] option = None
+  let mutable bootFrameNo = 0
+  /// Background-boot hook: keep the latest screen snapshot so the status
+  /// view can render the tape loading live.
+  let recordBootFrame (screen: byte[], frameNo: int) =
+    bootScreen <- Some screen
+    bootFrameNo <- frameNo
   let mutable ceGame: CEGame option = None
   let mutable engineCE = false
   let mutable currentGame: GameManifest option = None
@@ -170,6 +180,8 @@ type MainWindow() as self =
   let disasmList = ListBox()
   let slider = Slider()
   let cursorLabel = TextBlock()
+  /// The address the code window is centered on (memCursor or trace PC).
+  let disasmTarget = TextBlock()
   let statusText = TextBlock()
   let saveReplay (force: bool) =
     match currentGame, session with
@@ -179,7 +191,9 @@ type MainWindow() as self =
       | Error error -> statusText.Text <- sprintf "replay save failed for %s: %s" game.Name error
     | _ -> ()
 
+  let mutable replayIgnoreReason: string option = None
   let loadReplay (game: GameManifest) (s: TraceSession) : bool =
+    replayIgnoreReason <- None
     match ReplayStore.tryLoad game with
     | ReplayLoaded events ->
       s.KeyLog.Replace events
@@ -192,6 +206,7 @@ type MainWindow() as self =
       false
     | ReplayIgnored reason ->
       replaySavedRevision <- s.KeyLog.Revision
+      replayIgnoreReason <- Some reason
       statusText.Text <- sprintf "%s: saved replay ignored (%s)" game.Name reason
       false
 
@@ -201,6 +216,9 @@ type MainWindow() as self =
   /// loader in the oracle and marks the entry point.
   let launchGame (m: GameManifest) =
     saveReplay true
+    bootStartedAt <- System.DateTime.UtcNow
+    bootScreen <- None
+    bootFrameNo <- 0
     manualBoot <- None
     manualTimer.Stop()
     currentGame <- Some m
@@ -209,11 +227,11 @@ type MainWindow() as self =
     match EntryCache.tryLoad m.Rom m.Tzx with
     | Some _ ->
       bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
-        TraceSession(m.Rom, m.Tzx, 4_000_000)))
+        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame)))
       statusText.Text <- sprintf "booting %s (cached entry state)..." m.Name
     | None when m.Boot = "auto" ->
       bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
-        TraceSession(m.Rom, m.Tzx, 4_000_000)))
+        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame)))
       statusText.Text <- sprintf "booting %s to game entry (first run, slow)..." m.Name
     | None when m.Boot = "program" ->
       // A raw Z80 image: seed the entry cache from the bin, then boot the
@@ -223,12 +241,13 @@ type MainWindow() as self =
         try
           ProgramEntry.seed bin addr
           bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
-            TraceSession(bin, bin, 4_000_000)))
+            TraceSession(bin, bin, 4_000_000, onFrame = recordBootFrame)))
           statusText.Text <- sprintf "booting %s (program image at 0x%04X)..." m.Name addr
         with ex ->
           statusText.Text <- sprintf "cannot load %s's program image: %s" m.Name ex.Message
       | _ -> statusText.Text <- sprintf "%s: manifest is missing program.bin/address" m.Name
     | None ->
+      bootTask <- None
       manualBoot <- Some(ManualBoot(m.Rom, m.Tzx))
       manualTimer.Start()
       statusText.Text <-
@@ -771,7 +790,9 @@ type MainWindow() as self =
   let refreshDisasm () =
     if disasmModeMemory then
       match currentMemory () with
-      | None -> disasmList.ItemsSource <- null
+      | None ->
+        disasmList.ItemsSource <- null
+        disasmTarget.Text <- "target: ----"
       | Some mem ->
         let rows = ResizeArray<DisasmRow>()
         let mutable a = max 0 ((memCursor - 0x40) &&& 0xFFFF)
@@ -788,11 +809,16 @@ type MainWindow() as self =
           rows.Add(memRowFor mem cur)
           cur <- (cur + (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
         disasmList.ItemsSource <- rows
+        disasmTarget.Text <- sprintf "target: 0x%04X (memory view)" memCursor
     else
       match currentTrace () with
-      | None -> disasmList.ItemsSource <- null
+      | None ->
+        disasmList.ItemsSource <- null
+        disasmTarget.Text <- "target: ----"
       | Some t ->
-        if t.Entries.Length = 0 then disasmList.ItemsSource <- null
+        if t.Entries.Length = 0 then
+          disasmList.ItemsSource <- null
+          disasmTarget.Text <- "target: ----"
         else
           let c = max 0 (min cursor (t.Entries.Length - 1))
           let rows = ResizeArray<DisasmRow>()
@@ -801,6 +827,7 @@ type MainWindow() as self =
             if idx >= 0 && idx < t.Entries.Length then
               rows.Add(rowFor t t.Entries[idx] idx (idx = c))
           disasmList.ItemsSource <- rows
+          disasmTarget.Text <- sprintf "target: 0x%04X (instruction #%d)" (int t.Entries[c].Pc) c
     syncMapData ()
 
   let updateFlags (af: int) =
@@ -1424,10 +1451,9 @@ type MainWindow() as self =
     DockPanel.SetDock(modeRow, Dock.Top)
     center.Children.Add modeRow |> ignore
 
-    // 4. the code window (fills the rest)
-    center.Children.Add(disasmList) |> ignore
-
-    // 5. bottom: shared comment box + mass-comment buttons
+    // 4. bottom: shared comment box + mass-comment buttons, then the
+    //    disassembly target line (docked BEFORE the code window so the
+    //    code fills the rest of the panel width)
     let cmtBar = StackPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
     let cmtLabel =
       TextBlock(
@@ -1446,6 +1472,15 @@ type MainWindow() as self =
     cmtBar.Children.Add cmtBtnRow |> ignore
     DockPanel.SetDock(cmtBar, Dock.Bottom)
     center.Children.Add cmtBar |> ignore
+    disasmTarget.Foreground <- cyan
+    disasmTarget.FontFamily <- mono
+    disasmTarget.FontSize <- 12.0
+    disasmTarget.Margin <- Thickness(0.0, 4.0, 0.0, 4.0)
+    DockPanel.SetDock(disasmTarget, Dock.Bottom)
+    center.Children.Add disasmTarget |> ignore
+
+    // 5. the code window (fills the rest)
+    center.Children.Add(disasmList) |> ignore
 
     // right column: heatmap / functions / call graph
     let right = TabControl(Margin = Thickness(8.0), Background = panel)
@@ -2531,6 +2566,7 @@ type MainWindow() as self =
           | Some t when t.IsCompleted ->
             try
               let loadedSession = t.Result
+              bootTask <- None
               session <- Some loadedSession
               let hasSavedReplay =
                 match currentGame with
@@ -2545,9 +2581,22 @@ type MainWindow() as self =
               startGame ()
               if hasSavedReplay then
                 statusText.Text <- sprintf "%s: replaying %d saved key events from frame 0" currentGame.Value.Name loadedSession.KeyLog.Count
+              else
+                match currentGame, replayIgnoreReason with
+                | Some g, Some reason ->
+                  statusText.Text <- sprintf "%s: saved replay ignored (%s)" g.Name reason
+                | _ -> ()
             with ex ->
               statusText.Text <- "boot failed: " + ex.Message
-          | _ -> ()
+          | Some t ->
+            match bootScreen with
+            | Some buf -> gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), buf, 320 * 4, 0)
+            | None -> ()
+            let secs = int (System.DateTime.UtcNow - bootStartedAt).TotalSeconds
+            let gameName = match currentGame with Some g -> g.Name | None -> "game"
+            statusText.Text <-
+              sprintf "booting %s to game entry... %ds, tape frame %d" gameName secs bootFrameNo
+          | None -> ()
       | Some s ->
         saveReplay false
         if not rewinding then

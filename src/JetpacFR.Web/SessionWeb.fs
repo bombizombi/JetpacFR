@@ -126,13 +126,13 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
         port.LoadState(mem, state)
         warmStart <- true
       with _ ->
-        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
         let mem, state = oracle.SaveState()
         EntryCache.save romPath tzxPath mem state
         port.LoadState(mem, state)
         warmStart <- false
     | None ->
-      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
       let mem, state = oracle.SaveState()
       EntryCache.save romPath tzxPath mem state
       port.LoadState(mem, state)

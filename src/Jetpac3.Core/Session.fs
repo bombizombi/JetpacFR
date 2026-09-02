@@ -59,7 +59,7 @@ module Script =
 /// checkpoints, with differential execution.
 type Session(romPath: string, tzxPath: string) as self =
   let store = CheckpointStore(Path.Combine(Directory.GetCurrentDirectory(), "checkpoints"))
-  let oracle, _ = Boot.bootToEntry romPath tzxPath
+  let oracle, _ = Boot.bootToEntry romPath tzxPath None
   let mutable port = Jetpac2.Core.Machine()
   let mutable currentId = "entry"
   let mutable frame = 0

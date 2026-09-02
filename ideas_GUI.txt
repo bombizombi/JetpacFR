@@ -1,0 +1,43 @@
+
+
+We will need some design ideas on my ZX spectrum reverse engineering application.
+
+Right now we have a dissasembly window that can be in two modes, one is linear memory mode, where the code is presented as is in the memory, and the second mode is  the execution mode, where code instructions are listed in the order where they were executed.
+
+The program always recods a play trough for each game, and automatically replays this "movie" on startup, so we don't have to play the segment of the game.
+
+The problem I have is that the code only shows what fits on screen, and currently you can't even scroll up and down trough memory or execution log to see more code.  So, I want to be able to see the "big picture" of how code was executed, which functions were involved.
+
+Right now, I have a timeline window used for selection of two regions that can overlap, and then you can name the region, or even put comments on a logical operation between two regions.  For example, we can select a longer segment of gameplay, where no key was pressed, and then press a key for a short period, and select this region on the timeline.  Now, we can say "put a comment - player move right" on all instructions that were in region B but not in region A, and this way we get to mark code that is involved in processing of the movement to the right.  This way we can quickly figure out the regions of the code responsible for different behaviour.
+
+So, how do I get to show the big picture.  One idea is to have a global memory map window, where you can see the selected regions, but in this view it is hard to put text comments on in since there is no room.
+
+Another idea is to have a "graph view" of the selected code, where each instruction is a bubble, or a node, in this graph, and each instruction would be connected with the node executed before, and after, and branch instruction would have two exits, which would be connected to two possible next instructions. Then, this graph display could be zoomed out, where you could colapse some functions into a single bubble, and the big picture could emerge. Then those group bubbles could have a way to attach comments or a name to them, so that you could see what is going on.
+
+Perhaps this graph display could also be animated and dynamic, and nodes could be pulled and pushed around with a mouse, where they would also pull their neighbours with them, for a beautifull interactive display.
+
+Do you know of any applications that do a similar thing, or perhaps a html library that would be good for this functionallity?
+
+Also, if you have any other ideas how this GUI could be improved, please say.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

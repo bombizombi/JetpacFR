@@ -1,6 +1,8 @@
 
 import { setItem, item, fill, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
 import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { empty, singleton, collect, delay, toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
+import { rangeDouble } from "../fable_modules/fable-library-js.5.13.0/Range.js";
 
 /**
  * Port of JetpacFSharp (Jetpac.Core) Keyboard — specbolt's keyboard matrix
@@ -27,6 +29,13 @@ export function Keyboard__SetKey_289F56A(this$, row, bit, pressed) {
 
 export function Keyboard__GetKey_Z37302880(this$, row, bit) {
     return item(bit, item(row, this$.keys));
+}
+
+/**
+ * Currently pressed cells, e.g. for a controlled teardown (replay end).
+ */
+export function Keyboard__PressedCells(this$) {
+    return toList(delay(() => collect((row) => collect((bit) => (item(bit, item(row, this$.keys)) ? singleton([row, bit]) : empty()), rangeDouble(0, 1, 4)), rangeDouble(0, 1, 7))));
 }
 
 /**

@@ -377,7 +377,7 @@ export function TraceSession__RunFrame(this$) {
 export function TraceSession__loadEntryState(this$) {
     const matchValue = EntryCache_tryLoad(this$.romPath, this$.tzxPath);
     if (matchValue == null) {
-        const patternInput_3 = Spectrum48__SaveState(bootToEntry(this$.romPath, this$.tzxPath)[0]);
+        const patternInput_3 = Spectrum48__SaveState(bootToEntry(this$.romPath, this$.tzxPath, undefined)[0]);
         const state_2 = patternInput_3[1];
         const mem_2 = patternInput_3[0];
         EntryCache_save(this$.romPath, this$.tzxPath, mem_2, state_2);
@@ -392,7 +392,7 @@ export function TraceSession__loadEntryState(this$) {
             this$.warmStart = true;
         }
         catch (matchValue_1) {
-            const patternInput_1 = Spectrum48__SaveState(bootToEntry(this$.romPath, this$.tzxPath)[0]);
+            const patternInput_1 = Spectrum48__SaveState(bootToEntry(this$.romPath, this$.tzxPath, undefined)[0]);
             const state_1 = patternInput_1[1];
             const mem_1 = patternInput_1[0];
             EntryCache_save(this$.romPath, this$.tzxPath, mem_1, state_1);

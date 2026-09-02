@@ -71,7 +71,7 @@ module EntryCache =
 /// involved on a cold start (boot to the game entry, then cache the state);
 /// after that the port runs alone, so the screen, the sound and the trace all
 /// describe the same execution.
-type TraceSession(romPath: string, tzxPath: string, capacity: int) =
+type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byte[] * int -> unit) =
 
   let port = Jetpac2.Core.Machine()
   let recorder = TraceRecorder(capacity, 512)
@@ -106,13 +106,13 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int) =
         port.LoadState(mem, state)
         warmStart <- true
       with _ ->
-        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
         let mem, state = oracle.SaveState()
         EntryCache.save romPath tzxPath mem state
         port.LoadState(mem, state)
         warmStart <- false
     | None ->
-      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath
+      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
       let mem, state = oracle.SaveState()
       EntryCache.save romPath tzxPath mem state
       port.LoadState(mem, state)

@@ -1,0 +1,28 @@
+**Why it behaves that way (facts first):**
+
+- `RewindTo` is a pure lookup into `FrameHistory` — anchored snapshots (every 300 frames) + per-frame deltas. Instant, but only for frames that were **executed**: `RewindTo` rejects anything `> history.LastFrame` (`Session.fs:203`), and the slider handler silently ignores targets beyond it (`App.fs:1634`).
+- On a fresh restart, history holds **only frame 0** (the entry anchor). A replay regrows history as it executes (`RunFrame` → `captureState` each frame). Interrupt it at frame 200, and frames 201..1023 don't exist yet — so "jump to the end of the recording" has nothing to restore from. That's the design gap; the slider extent (`replayExtent`) shows the full recording, but reachability is limited to the executed prefix.
+
+Execution is fully deterministic (entry state + key log ⇒ exact state at any future frame), so "the future" is always *computable* — just not yet *stored*. That's the axis the redesign should move along. Ideas, in increasing ambition:
+
+**1. Fast-forward scrub — execute into the future on demand** *(recommended core mechanic)*
+Drag the slider past the playhead → the session fast-forwards: run frames in a bare loop (recorder off, no render/audio — the existing `else` branch of `RunFrame`'s recording path, minus replay bookkeeping), applying key-log events per frame, until the target; capture history sparsely during the jump (e.g., anchor every 32 frames so the jumped region becomes scrubbable afterward); then present. Deterministic ⇒ the arrived-at state is exactly what the replay would have produced.
+- Cost: bare-loop frames are cheap; a ~1000-frame jump ≈ a few seconds — show progress in the status bar, and make the jump retargetable/cancelable (drag again mid-jump).
+- Fits the existing model perfectly: the slider becomes "free backward, executed forward". No new persistence.
+
+**2. Auto-complete the replay at restart** *(trivial special case of 1)*
+When a session boots with a saved recording, fast-forward to `replayEndFrame` in the background right after the entry state loads. The full history then exists immediately; the whole timeline scrubs freely without any interaction. One fixed target, one progress status.
+
+**3. Persisted history on disk — the real redesign**
+Save anchors+deltas+keylog keyed by the replay fingerprint (the `CheckpointStore` precedent already exists in `Jetpac3.Core`'s `Session`). A restart then scrubs anywhere instantly, no re-execution.
+- Costs: file size (deltas ~30–60 MB/min of gameplay; a 1023-frame recording ≈ 20 s ≈ ~10–20 MB, compressible), invalidation when you branch/record a new future, and notably more machinery. Worth it only if instant restart scrubbing matters to you.
+
+**4. Hover-preview clone (non-destructive scrubbing)**
+While dragging, clone the machine state and fast-forward the *clone* to the hovered frame, rendering a preview; only the "Go" button commits a branch. Most polished interaction, most work — and repeated executions per hover unless you cache per-anchor runs. This pairs naturally with 1 underneath.
+
+Constraints any option must respect:
+- `FrameHistory.Capture` requires strictly sequential frames — the fast-forward loop satisfies that; sparse anchors during a jump are fine.
+- The budget (1.5 GB deltas) evicts the *oldest* anchors — a full ~20 s recording adds well under budget; no concern.
+- If the target exceeds `replayEndFrame`, that's live-takeover territory — the existing "Go/branch" semantics already define that boundary.
+
+My suggestion: **1 + 2** (same mechanism, one user-visible behavior), with 3 as a later phase if you want instant full-timeline scrubbing on every restart.

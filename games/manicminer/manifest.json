@@ -1,0 +1,6 @@
+{
+  "name": "Manic Miner",
+  "rom": "../../assets/48.rom",
+  "tzx": "Manic Miner.tzx",
+  "boot": "auto"
+}
