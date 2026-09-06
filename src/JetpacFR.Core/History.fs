@@ -37,11 +37,21 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
   let mutable totalDeltaBytes = 0L
   let lastMemory = Array.zeroCreate<byte> 0x10000
   let mutable lastFrame = -1
+  let mutable firstFrame = 0
 
   do
     if anchorInterval < 1 then invalidArg (nameof anchorInterval) "anchor interval must be positive"
 
   member _.LastFrame = lastFrame
+  /// Earliest frame that still restores exactly after eviction. Eviction
+  /// removes whole anchor windows, so frames between the frame-0 anchor and
+  /// the surviving watermark no longer have the deltas they need; Restore
+  /// rejects them instead of silently producing a wrong machine state.
+  /// Frame 0 itself stays exact (its anchor needs no deltas) and remains
+  /// restorable as the slider's always-reachable minimum.
+  member _.FirstFrame = firstFrame
+  member _.IsRestorable(frame: int) =
+    frame >= 0 && frame <= lastFrame && (frame = 0 || frame >= firstFrame)
   member _.AnchorCount = anchors.Count
   member _.DeltasCaptured = deltas.Count
 
@@ -64,12 +74,20 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
         totalDeltaBytes <- totalDeltaBytes + int64 (packed.Count * 4)
     Array.blit memory 0 lastMemory 0 0x10000
     lastFrame <- frame
-    // Eviction: drop the oldest anchor (and its deltas) when over budget.
-    // Frame 0's anchor is never dropped.
-    while totalDeltaBytes > budgetBytes && anchors.Count > 1 do
-      let struct (af, _) = anchors.[0]
-      deltas.RemoveAll(fun struct (f, _) -> f <= af) |> ignore
-      anchors.RemoveAt(0)
+    // Eviction: over budget, drop the second-oldest anchor af1 together with
+    // the delta window it spans (deltas up to the next anchor af2). The
+    // prefix [0, af1] still restores from the frame-0 anchor and [af2, ...]
+    // from af2; frames in between become unreachable and are rejected by
+    // Restore/Truncate via FirstFrame. The previous scheme removed
+    // anchors.[0] first, which both dropped the frame-0 anchor its own
+    // comment promised to keep and left every frame below the surviving
+    // anchor restoring from a truncated delta chain.
+    while totalDeltaBytes > budgetBytes && anchors.Count > 2 do
+      let struct (af1, _) = anchors.[1]
+      let struct (af2, _) = anchors.[2]
+      deltas.RemoveAll(fun struct (f, _) -> f > af1 && f <= af2) |> ignore
+      anchors.RemoveAt(1)
+      if firstFrame < af2 then firstFrame <- af2
       totalDeltaBytes <- deltas |> Seq.sumBy (fun struct (_, d) -> int64 d.Length * 4L)
 
   /// The state text + keyboard matrix at `frame` (exact scalars exist for
@@ -83,8 +101,8 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
   /// Restore the memory image at `frame` into `memory`; returns the state
   /// text and keyboard matrix captured at that exact frame.
   member this.Restore(frame: int, memory: byte[]) : string * byte[] =
-    if frame < 0 || frame > lastFrame then
-      invalidOp (sprintf "no history at frame %d (last=%d)" frame lastFrame)
+    if not (this.IsRestorable frame) then
+      invalidOp (sprintf "no history at frame %d (earliest=%d, last=%d)" frame firstFrame lastFrame)
     let mutable ai = anchors.Count - 1
     while ai > 0 && (let struct (af, _) = anchors.[ai] in af > frame) do ai <- ai - 1
     let struct (af, mem) = anchors.[ai]
@@ -100,9 +118,9 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
   /// Drop everything captured after `frame` (the "Go" branch point); new
   /// captures continue sequentially from the restored state. `memory` must
   /// be the restored image (the delta baseline restarts from it).
-  member _.Truncate(frame: int, memory: byte[]) =
-    if frame < 0 || frame > lastFrame then
-      invalidOp (sprintf "no history at frame %d (last=%d)" frame lastFrame)
+  member this.Truncate(frame: int, memory: byte[]) =
+    if not (this.IsRestorable frame) then
+      invalidOp (sprintf "no history at frame %d (earliest=%d, last=%d)" frame firstFrame lastFrame)
     deltas.RemoveAll(fun struct (f, _) -> f > frame) |> ignore
     scalars.RemoveAll(fun struct (f, _, _) -> f > frame) |> ignore
     while anchors.Count > 1 && (let struct (af, _) = anchors.[anchors.Count - 1] in af > frame) do
@@ -110,6 +128,21 @@ type FrameHistory(anchorInterval: int, budgetBytes: int64) =
     lastFrame <- frame
     Array.blit memory 0 lastMemory 0 0x10000
     totalDeltaBytes <- deltas |> Seq.sumBy (fun struct (_, d) -> int64 d.Length * 4L)
+
+  /// Restart the store from `frame` with a single full anchor, discarding
+  /// all prior deltas: used when the branch point lies beyond executed
+  /// history (a timeline jump into the recorded future), where there is no
+  /// executed chain left to truncate.
+  member this.Rebase(frame: int, memory: byte[], stateText: string, keys: byte[]) =
+    anchors.Clear()
+    deltas.Clear()
+    scalars.Clear()
+    anchors.Add(struct (frame, Array.copy memory))
+    scalars.Add(struct (frame, stateText, keys))
+    Array.blit memory 0 lastMemory 0 0x10000
+    firstFrame <- frame
+    lastFrame <- frame
+    totalDeltaBytes <- 0L
 
 /// Recorded keyboard events, appended in live mode and replayed by frame.
 type KeyLog() =

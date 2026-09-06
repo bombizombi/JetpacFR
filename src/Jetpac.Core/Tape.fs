@@ -261,12 +261,20 @@ type Tape() =
       nextTransition <- bitCycles
       state <- this.NextBit()
     | Tape.State.Pause ->
+      // NOTE: the toggle at Next() entry is load-bearing here - it supplies
+      // the block's final half-pulse edge the ROM loader's last LD-EDGE
+      // waits for. A "pause = silence" refinement (no toggle) was tried and
+      // broke tape loading entirely.
       nextTransition <- bitCycles
       match this.CurrentBlock() with
       | Some block ->
         numEdges <- block.PilotEdges
         state <- Tape.State.Pilot
-      | None -> ()
+      | None ->
+        // End of tape: stop scheduling. The old code stayed in Pause with a
+        // nonzero nextTransition, toggling forever and keeping Playing().
+        state <- Tape.State.Idle
+        nextTransition <- 0
     | Tape.State.Idle -> nextTransition <- 0
 
   member private this.NextBit() : Tape.State =

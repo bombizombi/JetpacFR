@@ -58,8 +58,10 @@ module Validation =
       (fallbackAddress: int) : Divergence =
     oracle.LoadState(startMem, startState)
     port.LoadState(startMem, startState)
+    // The frame-start snapshot is pre-key, so re-apply every script event up
+    // to and including the divergent frame (event f influences run f).
     for (f, row, bit, pressed) in script do
-      if f < frame then
+      if f <= frame then
         oracle.SetKey(row, bit, pressed)
         port.SetKey(row, bit, pressed)
     let z80 = oracle.DebugZ80
@@ -125,15 +127,18 @@ module Validation =
       let m, s = oracle.SaveState()
       frameStartMem <- m
       frameStartState <- s
+      // Keys land before the frame runs (event f influences run f), matching
+      // the app's replay loop; the snapshot above stays pre-key so the
+      // divergent-frame replay can re-apply them.
+      for (f, row, bit, pressed) in script do
+        if f = frame then
+          oracle.SetKey(row, bit, pressed)
+          port.SetKey(row, bit, pressed)
       oracle.RunGameFrame()
       let portEnd = port.FrameEnd
       while port.CycleCount() < portEnd do
         port.Step()
       port.FrameEnd <- port.FrameEnd + 69888L
-      for (f, row, bit, pressed) in script do
-        if f = frame then
-          oracle.SetKey(row, bit, pressed)
-          port.SetKey(row, bit, pressed)
       let z80 = oracle.DebugZ80
       let mutable memDiff = -1
       let mutable i = 0x4000

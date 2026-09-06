@@ -9,7 +9,9 @@ open Jetpac2.Core
 /// F# `z80 { ... }` body with symbolic labels for in-range jump targets.
 module Z80CE =
 
-  let private rawOp (bytes: byte[]) : Z80Op =
+  /// A raw byte block op (public: the game-project tooling reuses it when
+  /// checking the parity of emitted per-block programs).
+  let rawOp (bytes: byte[]) : Z80Op =
     { Mnemonic = "raw"
       Bytes = bytes
       Run =

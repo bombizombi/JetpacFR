@@ -69,6 +69,51 @@ module ControlFile =
     | "exec" -> Exec
     | _ -> Line
 
+  /// Runs of same-text per-line comments (the mass-comment buttons stamp one
+  /// Line entry per executed address) collapse into a single Range covering
+  /// the run, so the file stores an address and a length instead of one
+  /// repeat per instruction. Gaps up to the longest instruction length keep
+  /// a run merging - consecutive instruction starts sit a few operand bytes
+  /// apart - and an already-Range run absorbs new Line stamps of the same
+  /// text on later saves. Name and Exec entries are never touched, and a
+  /// lone comment keeps its original kind. Output order follows the input:
+  /// each merged run is emitted where the run's first member appeared.
+  let private coalesceComments (comments: ControlComment list) : ControlComment list =
+    let texty (m: ControlComment) = m.Kind = Line || m.Kind = Range
+    let asRange (m: ControlComment) =
+      { m with Kind = Range; EndExcl = max m.EndExcl (m.Addr + 1) }
+    /// Per text: the merged runs, plus the original entry when the group is
+    /// a single Line (kept as-is instead of range-ified).
+    let runsFor = System.Collections.Generic.Dictionary<string, ControlComment list * ControlComment option>()
+    for (_, entries) in comments |> List.filter texty |> List.groupBy (fun m -> m.Text) do
+      let sorted = List.sortBy (fun m -> m.Addr) entries
+      let rec runs (acc: ControlComment list) (rest: ControlComment list) =
+        match rest with
+        | [] -> List.rev acc
+        | m :: tail ->
+          let r = asRange m
+          match acc with
+          | last :: accTail when m.Addr <= last.EndExcl + 7 ->
+            runs ({ last with EndExcl = max last.EndExcl r.EndExcl } :: accTail) tail
+          | _ -> runs (r :: acc) tail
+      let loneLine =
+        match sorted with
+        | [ one ] when one.Kind = Line -> Some one
+        | _ -> None
+      runsFor.[(List.head sorted).Text] <- (runs [] sorted, loneLine)
+    let emitted = System.Collections.Generic.HashSet<string>()
+    comments
+    |> List.collect (fun m ->
+      if not (texty m) then [ m ]
+      else
+        if emitted.Contains m.Text then []
+        else
+          emitted.Add m.Text |> ignore
+          let result, loneLine = runsFor.[m.Text]
+          match loneLine with
+          | Some original -> [ original ]
+          | None -> result)
+
   /// Serialize to control.json shape (comments included). Written with an
   /// indented writer; key order is stable so diffs stay readable.
   let toJson (c: ControlFile) : string =
@@ -92,7 +137,7 @@ module ControlFile =
       w.WriteEndArray()
       if not (List.isEmpty c.Comments) then
         w.WriteStartArray("comments")
-        for m in c.Comments do
+        for m in coalesceComments c.Comments do
           w.WriteStartObject()
           w.WriteString("kind", kindToString m.Kind)
           if m.Kind = Exec then w.WriteNumber("instrIndex", m.InstrIndex)
@@ -216,6 +261,45 @@ module ControlFile =
       { c with Comments = others; Dirty = true }
     else
       { c with Comments = others @ [{ m with Text = m.Text.Trim() }]; Dirty = true }
+
+  /// Append a Line comment at `addr`. An address may carry multiple comments
+  /// (a mass-comment range plus personal notes), so this never replaces an
+  /// existing entry - only an exactly identical Line is skipped.
+  let addLine (c: ControlFile) (addr: int) (text: string) : ControlFile =
+    let trimmed = text.Trim()
+    if String.IsNullOrWhiteSpace trimmed then c
+    elif c.Comments |> List.exists (fun m -> m.Kind = Line && m.Addr = addr && m.Text = trimmed) then c
+    else
+      { c with Comments = c.Comments @ [{ Kind = Line; Addr = addr; EndExcl = 0; InstrIndex = -1; Text = trimmed }]; Dirty = true }
+
+  /// Replace the text of one existing comment, matched by its full value
+  /// (the identity once several comments share an address). An empty new
+  /// text removes the entry.
+  let replaceComment (c: ControlFile) (original: ControlComment) (newText: string) : ControlFile =
+    let trimmed = newText.Trim()
+    let mapped =
+      c.Comments
+      |> List.choose (fun m ->
+        if m = original then
+          if String.IsNullOrWhiteSpace trimmed then None
+          else Some { original with Text = trimmed }
+        else Some m)
+    { c with Comments = mapped; Dirty = true }
+
+  /// Remove one exact comment entry.
+  let removeComment (c: ControlFile) (original: ControlComment) : ControlFile =
+    { c with Comments = c.Comments |> List.filter (fun m -> m <> original); Dirty = true }
+
+  /// All comments attached to `addr`, most specific first: the address's own
+  /// Line comments (file order), then covering Ranges and Names, narrowest
+  /// span first. Exec comments are per trace index, not per address.
+  let commentsAt (c: ControlFile) (addr: int) : ControlComment list =
+    let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = addr)
+    let covering kind =
+      c.Comments
+      |> List.filter (fun m -> m.Kind = kind && m.Addr <= addr && addr < m.EndExcl)
+      |> List.sortBy (fun m -> m.EndExcl - m.Addr)
+    lines @ covering Range @ covering Name
 
   /// The comment shown on an address row: exact Line hit first, else any
   /// Name/Range covering it.
@@ -387,10 +471,7 @@ module SkoolCtl =
             | None -> ()
     // Close each block at its successor's start (SkoolKit semantics); the
     // final block ends where data understanding stops - span end.
-    let sorted =
-      blocks
-      |> List.sortBy (fun b -> b.Start)
-      |> List.map (fun b -> b)
+    let sorted = blocks |> List.sortBy (fun b -> b.Start)
     let closed =
       sorted
       |> List.mapi (fun i b ->

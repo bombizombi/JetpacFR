@@ -18,11 +18,16 @@ module Beeper =
     if trace.Length = 0 then
       samples
     else
-      // Initial level: the last transition at or before startCycle.
+      // Initial level: the last transition at or before startCycle. When the
+      // first transition is still ahead of startCycle (the normal drain
+      // case), the sounding level is the opposite of that transition's new
+      // value - transitions record the level they switch TO.
       let mutable idx = 0
       while idx + 1 < trace.Length && (fst trace.[idx + 1]) <= startCycle do
         idx <- idx + 1
-      let mutable level = snd trace.[idx]
+      let mutable level =
+        if (fst trace.[idx]) > startCycle then not (snd trace.[idx])
+        else snd trace.[idx]
       let mutable next = idx + 1
       let mutable s = 0
       while s < SamplesPerFrame do

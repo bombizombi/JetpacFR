@@ -25,6 +25,46 @@ Also, if you have any other ideas how this GUI could be improved, please say.
 
 
 
+In memory mode (perhaps something similar could be done for the execution mode as well) the code pane should be able to scroll up and down, and only show the selected code.  perhaps this code should get the background similar to the brush selected (a or b).  This should be an end result of the bigger change, where all the blocks of code that are linear should be displayed as blocks, and connected with arrows.  This should be an alternate view for the code, similar to ida pro view.   Code blocks should be determined by the optional jump instructions, end of function instructions, and if there is a jump target in the block.  Jump targets should never be inside the block.  
+
+For the GUI itself, it should be scrollable up and down, we do not need any kind of virtualization because the code itself is never that big.
+
+Can you create a plan for this?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

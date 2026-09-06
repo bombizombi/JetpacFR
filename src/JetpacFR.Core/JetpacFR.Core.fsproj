@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <Compile Include="Disasm.fs" />
+    <Compile Include="Z80Flow.fs" />
     <Compile Include="Z80CE.fs" />
     <Compile Include="GameProject.fs" />
     <Compile Include="Trace.fs" />
@@ -16,6 +17,7 @@
     <Compile Include="Contract.fs" />
     <Compile Include="Prompt.fs" />
     <Compile Include="History.fs" />
+    <Compile Include="StateTimeline.fs" />
     <Compile Include="Session.fs" />
     <Compile Include="Manifest.fs" />
     <Compile Include="ManualBoot.fs" />

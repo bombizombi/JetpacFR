@@ -97,7 +97,9 @@ module LiftedRoutines =
   let screenClearHook (addr: int) : (Machine -> unit) option =
     if addr = 0x71B8 then Some clearPixels
     elif addr = 0x71C6 then Some clearAttrs
-    elif addr >= 0x71BF && addr <= 0x71C5 then Some clearLoop
+    // 0x71C4 is the JR's operand byte, not an instruction start - it must
+    // not match, clearLoop has no arm for it.
+    elif (addr >= 0x71BF && addr <= 0x71C3) || addr = 0x71C5 then Some clearLoop
     else None
   let screenClearRoutine : LiftedRoutine =
     { Name = "screen-clear"

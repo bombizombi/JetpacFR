@@ -109,50 +109,60 @@ type ControlMap() as self =
   [<CLIEvent>]
   member _.MenuRequested = menuRequested.Publish
 
+  // Setters skip the InvalidateVisual when the value did not actually change:
+  // the App feeds most of these at 10 Hz from cached array instances, and a
+  // full re-render of the map per tick is wasted work when nothing moved.
   member _.ControlData
     with get () = controlData
     and set v =
-      controlData <- v
-      self.InvalidateVisual()
+      if not (obj.ReferenceEquals(controlData, v)) then
+        controlData <- v
+        self.InvalidateVisual()
 
   member _.ExecCounts
     with get () = execCounts
     and set v =
-      execCounts <- v
-      self.InvalidateVisual()
+      if not (obj.ReferenceEquals(execCounts, v)) then
+        execCounts <- v
+        self.InvalidateVisual()
 
   member _.SelfModified
     with get () = selfModFlags
     and set v =
-      selfModFlags <- v
-      self.InvalidateVisual()
+      if not (obj.ReferenceEquals(selfModFlags, v)) then
+        selfModFlags <- v
+        self.InvalidateVisual()
 
   member _.InstrStarts
     with get () = instrStarts
     and set v =
-      instrStarts <- v
-      self.InvalidateVisual()
+      if not (obj.ReferenceEquals(instrStarts, v)) then
+        instrStarts <- v
+        self.InvalidateVisual()
 
   member _.MemoryImage
     with get () = memImage
     and set v =
-      memImage <- v
-      self.InvalidateVisual()
+      if not (obj.ReferenceEquals(memImage, v)) then
+        memImage <- v
+        self.InvalidateVisual()
 
   /// Highlighted address (-1 hides the hairline).
   member _.CursorAddress
     with get () = cursorAddr
     and set v =
-      cursorAddr <- v
-      self.InvalidateVisual()
+      if cursorAddr <> v then
+        cursorAddr <- v
+        self.InvalidateVisual()
 
   /// Disassembly viewport extent (-1,-1 hides the thumb).
   member _.DisasmViewport
     with get () = (disasmLo, disasmHi)
     and set (lo, hi) =
-      disasmLo <- lo
-      disasmHi <- hi
-      self.InvalidateVisual()
+      if disasmLo <> lo || disasmHi <> hi then
+        disasmLo <- lo
+        disasmHi <- hi
+        self.InvalidateVisual()
 
   /// Currently visible address range.
   member _.ViewRange = (viewStart, viewEnd)

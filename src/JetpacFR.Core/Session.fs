@@ -80,15 +80,38 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
   let snapshotInterval = 64
   let history = FrameHistory(300, 1_500_000_000L)
   let keyLog = KeyLog()
+  /// Per-frame full states (the JPST timeline): appended live, or installed
+  /// wholesale from a saved recording via LoadStateTimeline.
+  let mutable stateTimeline = StateTimeline 0
+  let mutable timelineLoadedFromDisk = false
+  let mutable liveCaptured = 0
+  /// Timeline BytesUsed when this session started (loaded content); stats
+  /// report only the bytes this session added.
+  let mutable timelineBytesBaseline = 0L
+  /// Set by every timeline mutation (new captures, branch truncation, key
+  /// events) - the save path writes only when this is set.
+  let mutable timelineDirty = false
   let mutable replayMode = false
   let mutable replayEndFrame = -1
   let mutable replayFinished = false
   let mutable pendingReplayKeys: KeyEvent list = []
 
-  /// Capture the port state + keyboard matrix into the history store.
+  /// Capture the port state + keyboard matrix into the history store, and
+  /// into the timeline when the frame lies beyond it. Frames below the
+  /// timeline's horizon already have their stored state (a loaded recording,
+  /// or replay over known ground): execution re-derives nothing there.
+  /// A timeline jump into the recorded future leaves a gap against executed
+  /// history; the store rebases on a fresh anchor there (the timeline still
+  /// holds the skipped frames for seeking).
   let captureState () =
     let mem, text = port.SaveState()
-    history.Capture(frame, mem, text, port.Keyboard.ToBytes())
+    let keys = port.Keyboard.ToBytes()
+    if frame = history.LastFrame + 1 then history.Capture(frame, mem, text, keys)
+    else history.Rebase(frame, mem, text, keys)
+    if frame > stateTimeline.EndFrame then
+      stateTimeline.Capture(frame, mem, text, keys)
+      liveCaptured <- liveCaptured + 1
+      timelineDirty <- true
 
   /// Release every still-down matrix cell. A recording can end (or be
   /// aborted) mid-hold, and a script-driven press without a matching
@@ -185,11 +208,38 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     else
       keyLog.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
       port.SetKey(row, bit, pressed)
+      timelineDirty <- true // key events are part of the saved recording
 
   member this.Replaying = replayMode
   member this.ReplayEndFrame = replayEndFrame
   member this.History = history
   member this.KeyLog = keyLog
+  member this.StateTimeline = stateTimeline
+
+  /// Frames captured live by this session (loaded states don't count); the
+  /// recording stats display and save-dirty tracking are driven from it.
+  member this.LiveCapturedFrames = liveCaptured
+
+  /// Bytes the timeline gained during this session (loaded content excluded).
+  member this.TimelineSessionBytes = max 0L (stateTimeline.BytesUsed - timelineBytesBaseline)
+
+  /// Highest seekable frame: executed history or the end of the loaded
+  /// recording - whichever reaches further.
+  member this.TimelineExtent = max history.LastFrame stateTimeline.EndFrame
+
+  /// Install a recording loaded from disk (states + key script) so autoplay
+  /// and any-frame seeking work before a single frame executes here.
+  member this.LoadStateTimeline(timeline: StateTimeline, events: KeyEvent seq) =
+    stateTimeline <- timeline
+    timelineBytesBaseline <- timeline.BytesUsed
+    liveCaptured <- 0
+    timelineLoadedFromDisk <- true
+    timelineDirty <- false // identical to the file it came from
+    keyLog.Replace events
+
+  /// True when the in-memory timeline differs from what is on disk.
+  member this.TimelineDirty = timelineDirty
+  member this.ClearTimelineDirty () = timelineDirty <- false
 
   /// True when a replay reached the end of the recording in the last
   /// RunFrame; the UI pauses the frame timer and hands control back.
@@ -201,8 +251,8 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
   /// and "Replay" still has the whole script. Truncation happens only when
   /// a branch is committed (Go) or a replay starts.
   member this.RewindTo(frameNumber: int) =
-    if frameNumber < 0 || frameNumber > history.LastFrame then
-      invalidOp (sprintf "no history at frame %d (last=%d)" frameNumber history.LastFrame)
+    if not (history.IsRestorable frameNumber) then
+      invalidOp (sprintf "no history at frame %d (earliest=%d, last=%d)" frameNumber history.FirstFrame history.LastFrame)
     let buffer = Array.zeroCreate<byte> 0x10000
     let text, keys = history.Restore(frameNumber, buffer)
     port.LoadState(buffer, text)
@@ -212,33 +262,85 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     frame <- frameNumber
     port.Video.RenderAll()
 
+  /// Seek to any recorded frame - past frames restore from executed history,
+  /// future frames straight from the loaded timeline's stored state - without
+  /// executing anything. Non-destructive: history and the key log stay
+  /// intact. A running replay IS aborted: the movie does not continue from
+  /// the seeked-to frame; live control (Run) or an explicit Replay takes
+  /// over from there.
+  member this.JumpTo(frameNumber: int) =
+    if frameNumber < 0 || frameNumber > this.TimelineExtent then
+      invalidOp (sprintf "no state at frame %d (history last=%d, timeline count=%d)" frameNumber history.LastFrame stateTimeline.Count)
+    let buffer = Array.zeroCreate<byte> 0x10000
+    let text, keys =
+      if frameNumber <= history.LastFrame && history.IsRestorable frameNumber then
+        history.Restore(frameNumber, buffer)
+      else
+        stateTimeline.RestoreInto(frameNumber, buffer)
+    port.LoadState(buffer, text)
+    port.Keyboard.Load(keys)
+    replayMode <- false
+    replayFinished <- false
+    pendingReplayKeys <- []
+    frame <- frameNumber
+    port.Video.RenderAll()
+
+  /// Wipe the recording: every stored timeline state and the whole key
+  /// script. The current frame is seeded as the fresh timeline's first
+  /// state, so captures continue sequentially from frame + 1 and the machine
+  /// stays seekable where it stands. (The saved timeline.jst on disk is the
+  /// caller's to delete.)
+  member this.ResetTimeline () =
+    let fresh = StateTimeline frame
+    let mem, text = port.SaveState()
+    fresh.Capture(frame, mem, text, port.Keyboard.ToBytes())
+    stateTimeline <- fresh
+    timelineLoadedFromDisk <- false
+    liveCaptured <- 0
+    timelineBytesBaseline <- 0L
+    timelineDirty <- false // the caller deletes the file; nothing left to save
+    keyLog.Replace []
+
   /// Branch COMMIT: having previewed `frameNumber` (or reached it during a
-  /// replay), abandon the old future. History and the key log are truncated
-  /// so new captures continue from here; the trace recorder window resets
-  /// (the machine's cycle counter jumped, stale entries would break the
-  /// recorder's tick invariants).
+  /// replay or a timeline jump), abandon the old future. History and the key
+  /// log are truncated so new captures continue from here; the trace
+  /// recorder window resets (the machine's cycle counter jumped, stale
+  /// entries would break the recorder's tick invariants). A jump into the
+  /// recorded future leaves no executed history to truncate, so the store
+  /// rebases on a fresh anchor at the branch point instead; the timeline
+  /// drops the abandoned frames too.
   member this.BranchAt(frameNumber: int) =
-    if frameNumber < 0 || frameNumber > history.LastFrame then
-      invalidOp (sprintf "no history at frame %d (last=%d)" frameNumber history.LastFrame)
-    history.Truncate(frameNumber, port.Memory)
+    if history.IsRestorable frameNumber then
+      history.Truncate(frameNumber, port.Memory)
+    else
+      let mem, text = port.SaveState()
+      history.Rebase(frameNumber, mem, text, port.Keyboard.ToBytes())
     keyLog.Truncate(frameNumber)
+    stateTimeline.Truncate(frameNumber)
+    timelineDirty <- true
     recorder.Reset()
     replayMode <- false
     pendingReplayKeys <- []
     frame <- frameNumber
 
-  /// Begin scripted replay from the current (rewound) frame: history is
-  /// truncated at the branch point but the key log is KEPT as the script
+  /// Begin scripted replay from the current (rewound or jumped) frame:
+  /// history restarts from here but the key log is KEPT as the script
   /// (events after the point are replayed). Live keys are ignored while
   /// replaying; RunFrame reports ReplayFinished at the recording's end.
   member this.StartReplay() =
     releaseAllKeys () // user-held keys would stay latched through the whole script
     replayMode <- true
     // After a process restart, history contains only the frame-0 entry
-    // anchor, while the persisted KeyLog contains the recording extent.
-    replayEndFrame <- max history.LastFrame keyLog.EndFrame
+    // anchor; a loaded timeline carries the recording's true extent (the
+    // key log's last event can precede the final frames), and a live
+    // session's timeline always matches history.
+    replayEndFrame <- max (max history.LastFrame keyLog.EndFrame) stateTimeline.EndFrame
     replayFinished <- false
-    history.Truncate(frame, port.Memory)
+    if history.IsRestorable frame then
+      history.Truncate(frame, port.Memory)
+    else
+      let mem, text = port.SaveState()
+      history.Rebase(frame, mem, text, port.Keyboard.ToBytes())
     recorder.Reset()
     pendingReplayKeys <- keyLog.ForFrame(frame)
 
@@ -294,17 +396,23 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
               FlagsAfter = uint8 flagsBefore
               Taken = 1uy }
           let vinsnLen = Disasm.disasmLength port.Memory vector
+          // Capture the executed bytes BEFORE the step: an instruction that
+          // writes over itself must be recorded with the bytes it fetched.
+          let m = port.Memory
+          let vb0 = m[vector &&& 0xFFFF]
+          let vb1 = m[(vector + 1) &&& 0xFFFF]
+          let vb2 = m[(vector + 2) &&& 0xFFFF]
+          let vb3 = m[(vector + 3) &&& 0xFFFF]
           port.Step()
           let after = port.Regs.Pc()
           let cycles = int (port.CycleCount() - cyclesBefore)
           let next = (vector + vinsnLen) &&& 0xFFFF
-          let m = port.Memory
           recorder.Record
             { Pc = uint16 vector
-              B0 = m[vector &&& 0xFFFF]
-              B1 = m[(vector + 1) &&& 0xFFFF]
-              B2 = m[(vector + 2) &&& 0xFFFF]
-              B3 = m[(vector + 3) &&& 0xFFFF]
+              B0 = vb0
+              B1 = vb1
+              B2 = vb2
+              B3 = vb3
               Target = uint16 after
               Tick = uint32 cyclesBefore
               Length = uint8 vinsnLen
@@ -314,17 +422,21 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
               Taken = (if after <> next then 1uy else 0uy) }
         else
           let insnLen = Disasm.disasmLength port.Memory pc
+          let m = port.Memory
+          let b0 = m[pc &&& 0xFFFF]
+          let b1 = m[(pc + 1) &&& 0xFFFF]
+          let b2 = m[(pc + 2) &&& 0xFFFF]
+          let b3 = m[(pc + 3) &&& 0xFFFF]
           port.Step()
           let after = port.Regs.Pc()
           let cycles = int (port.CycleCount() - cyclesBefore)
           let next = (pc + insnLen) &&& 0xFFFF
-          let m = port.Memory
           recorder.Record
             { Pc = uint16 pc
-              B0 = m[pc &&& 0xFFFF]
-              B1 = m[(pc + 1) &&& 0xFFFF]
-              B2 = m[(pc + 2) &&& 0xFFFF]
-              B3 = m[(pc + 3) &&& 0xFFFF]
+              B0 = b0
+              B1 = b1
+              B2 = b2
+              B3 = b3
               Target = uint16 after
               Tick = uint32 cyclesBefore
               Length = uint8 insnLen

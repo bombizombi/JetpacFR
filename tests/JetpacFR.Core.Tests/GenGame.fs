@@ -21,11 +21,6 @@ open System.Text.Json
 open JetpacFR.Core
 
 module private Gen =
-  let entryStateText (pc: int) : string =
-    sprintf
-      "af=0000\nbc=0000\nde=0000\nhl=0000\naf2=0000\nbc2=0000\nde2=0000\nhl2=0000\nix=0000\niy=0000\nsp=FFFE\npc=%04X\ni=00\nr=00\nwz=FFFF\niff1=false\niff2=false\nim=0\nhalted=false\nborder=7\nbeeper=false\ntapeEar=false\ncycles=0\nvideoNextTime=224\nnextWrap=69664\nirq=false\n"
-      pc
-
   /// Detect the non-zero extent of an already-normalized 64K image.
   let extentOf (mem: byte[]) (start: int) : int =
     let rec lastNonZero (i: int) : int =
@@ -71,14 +66,6 @@ module private Gen =
          blocks = [ {| start = start; endExcl = endExcl; name = "whole_span"; kind = "code" |} ] |}
     let json = JsonSerializer.Serialize(control, JsonSerializerOptions(WriteIndented = true))
     File.WriteAllText(Path.Combine(dir, "control.json"), json)
-
-  let writeManifestProgram (dir: string) (name: string) : unit =
-    let manifest =
-      {| name = name
-         boot = "program"
-         program = {| bin = "original.bin"; address = "" |} |}
-    // address filled by caller (needs the numeric load address)
-    ignore manifest
 
   /// Assemble a version body against its span and refuse non-parity output.
   let checkedVersionSource (gameId: string) (mem: byte[]) (c: GameControl) (body: string) : string =
@@ -156,8 +143,10 @@ module private Pipeline =
     // lines: names become section headers, line comments attach to their
     // address, range comments open at the range start.
     let sb = Text.StringBuilder()
+    // Parse errors must propagate: silently degrading to a comment-less
+    // version hides corruption in control.json.
     let cf =
-      try Some(ControlFile.load dir) with _ -> None
+      if File.Exists (Path.Combine(dir, "control.json")) then Some(ControlFile.load dir) else None
     let commentsAt (addr: int) : ControlComment list =
       match cf with
       | Some c -> c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = addr)
@@ -191,15 +180,39 @@ module private Pipeline =
       cursor <- b.EndExcl
     if cursor < c.EndExcl then failwithf "blocks cover [%06X,%06X) but span ends at %06X - add a block or shrink endExcl" c.Start cursor c.EndExcl
     let tag' = tag |> Option.defaultWith (fun () -> sprintf "blocks%d" (List.length c.Blocks))
-    // Parity gate before writing anything.
-    let ops = Z80CE.toOps mem c.Start (c.EndExcl - c.Start)
-    let rebuilt = Jetpac2.Core.Z80.assemble ops
+    // Parity gate over what will actually be emitted: the per-block op
+    // stream concatenated exactly as the body above. A Code block boundary
+    // that splits an instruction makes the emitted stream differ from the
+    // image (the straddled bytes appear twice), which a whole-span decode
+    // cannot see; Data/Gap blocks re-emit their literal bytes.
+    let emittedOps =
+      c.Blocks
+      |> List.collect (fun b ->
+        match b.Kind with
+        | Code -> Z80CE.toOps mem b.Start (b.EndExcl - b.Start)
+        | Data | Gap -> [ Z80CE.rawOp (mem[b.Start .. b.EndExcl - 1]) ])
+    let rebuilt = Jetpac2.Core.Z80.assemble emittedOps
     let expected = mem[c.Start .. c.EndExcl - 1]
-    if rebuilt <> expected then failwith "parity failed - refusing to write"
+    if rebuilt <> expected then
+      let n = min rebuilt.Length expected.Length
+      let mutable d = -1
+      let mutable i = 0
+      while d < 0 && i < n do
+        if rebuilt[i] <> expected[i] then d <- i
+        i <- i + 1
+      failwithf
+        "%s: parity FAILED at %04X (%d vs %d bytes) - refusing to write the version"
+        gameId (c.Start + max 0 d) rebuilt.Length expected.Length
     let nextIdx =
       let vd = Path.Combine(dir, "versions")
       if Directory.Exists vd then
-        (Directory.GetFiles(vd, "v*.fs") |> Array.map (fun f -> Path.GetFileName f) |> Array.map (fun s -> s.Substring(1, 3)) |> Array.map int
+        (Directory.GetFiles(vd, "v*.fs")
+         |> Array.choose (fun f ->
+           let name = Path.GetFileName f
+           // vNNN_<tag>.fs only; other v*.fs names don't participate.
+           if name.Length >= 4 && (name.Substring(1, 3) |> Seq.forall System.Char.IsDigit) then
+             Some(int (name.Substring(1, 3)))
+           else None)
          |> fun a -> if a.Length = 0 then -1 else Array.max a) + 1
       else 0
     let file = Path.Combine(dir, "versions", sprintf "v%03d_%s.fs" nextIdx tag')
@@ -279,10 +292,28 @@ let run (argv: string list) : int =
     let mem = GameProject.loadImage dir c
     let span = c.EndExcl - c.Start
     let expected = mem[c.Start .. c.EndExcl - 1]
+    let vd = Path.Combine(dir, "versions")
+    let resolveVersion (arg: string) : string =
+      let direct = Path.Combine(vd, if arg.EndsWith ".fs" then arg else arg + ".fs")
+      if File.Exists direct then direct
+      else
+        // Prefix match: "v2" or "v002" resolves to versions/v002_*.fs.
+        let matches =
+          if Directory.Exists vd then
+            Directory.GetFiles(vd, "v*.fs")
+            |> Array.filter (fun f -> (Path.GetFileName f).StartsWith(arg, StringComparison.OrdinalIgnoreCase))
+          else [||]
+        match matches with
+        | [| single |] -> single
+        | _ -> failwithf "version '%s' not found in %s (use a vNNN prefix or file name)" arg vd
     let stats (label: string) (path: string) : unit =
       let body = File.ReadAllText path
-      // A version file IS the z80 body; rebuild ops structurally from the
-      // same span (the text was generated from these very ops).
+      // The version file is a generated z80 body (plus header). Two checks:
+      // does it still match what regeneration produces from control.json
+      // (catches hand edits and stale versions), and does the structural
+      // span decode assemble back byte-for-byte.
+      let regenBody = Z80CE.toBody mem c.Start span
+      let matchesRegen = body.Contains regenBody
       let ops = Z80CE.toOps mem c.Start span
       let asm = Jetpac2.Core.Z80.assemble ops
       let mismatches =
@@ -290,14 +321,18 @@ let run (argv: string list) : int =
             if asm[i] <> expected[i] then i ]
       let rawBytes = ops |> List.filter (fun o -> o.Mnemonic = "raw") |> List.sumBy (fun o -> o.Bytes.Length)
       let pctRaw = float rawBytes * 100.0 / float span
-      let status = if mismatches.IsEmpty && asm.Length = span then "PARITY OK" else sprintf "MISMATCH (%d bytes, first at +%d)" mismatches.Length (if mismatches.IsEmpty then -1 else mismatches.Head)
+      let status =
+        if not (mismatches.IsEmpty && asm.Length = span) then
+          sprintf "SPAN MISMATCH (%d bytes, first at +%d)" mismatches.Length (if mismatches.IsEmpty then -1 else mismatches.Head)
+        elif not matchesRegen then "DIFFERS FROM REGEN (hand-edited or stale?)"
+        else "PARITY OK"
       printfn "%-12s %s: %s, %d ops, raw %.1f%%" label (Path.GetFileName path) status ops.Length pctRaw
-    stats a (GameProject.activeVersionPath dir c |> function Some p -> p | None -> failwithf "no versions in %s" dir)
-    stats b (GameProject.activeVersionPath dir c |> function Some p -> p | None -> failwithf "no versions in %s" dir)
+    stats a (resolveVersion a)
+    stats b (resolveVersion b)
     0
   | _ ->
     eprintfn "usage:"
-    eprintfn "  --gen-game <dir> --from <bin|sna|tzx> [--address N] [--name NAME]"
+    eprintfn "  --gen-game <dir> --from <bin|sna> [--address N] [--name NAME]"
     eprintfn "  --regen <dir> [--tag TAG]"
     eprintfn "  --materialize <dir>"
     eprintfn "  --diff-game <dir> <verA> <verB>"

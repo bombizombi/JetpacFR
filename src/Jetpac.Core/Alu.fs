@@ -67,7 +67,8 @@ module Alu =
     let intermediate = (lhs &&& 0xFFFF) + (rhs &&& 0xFFFF)
     let carry = if intermediate > 0xFFFF then Flags.Carry() else Flags()
     let result = intermediate &&& 0xFFFF
-    let halfCarry = if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
+    let halfCarry =
+      if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
     let flags35 = Flags((result >>> 8) &&& 0xFF) &&& (Flags.Flag5() ||| Flags.Flag3())
     struct (result,
      (currentFlags &&& (Flags.Sign() ||| Flags.Zero() ||| Flags.Parity()))
@@ -83,7 +84,8 @@ module Alu =
     let intermediate = (lhs &&& 0xFFFF) + (rhs &&& 0xFFFF) + (if carryIn then 1 else 0)
     let carry = if intermediate > 0xFFFF then Flags.Carry() else Flags()
     let result = intermediate &&& 0xFFFF
-    let halfCarry = if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
+    let halfCarry =
+      if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF) + (if carryIn then 1 else 0)) > 0xFFF then Flags.HalfCarry() else Flags()
     let flags35 = Flags((result >>> 8) &&& 0xFF) &&& (Flags.Flag5() ||| Flags.Flag3())
     let negative = if result &&& 0x8000 <> 0 then Flags.Sign() else Flags()
     let zero = if result = 0 then Flags.Zero() else Flags()
