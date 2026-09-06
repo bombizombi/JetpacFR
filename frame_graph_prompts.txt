@@ -1,0 +1,167 @@
+
+
+
+x---  new replay format --
+
+
+New execution trace format.
+
+Right now, when loading an existing project, is there is a replay saved, it starts automatically, and when it runs to the end, you can use the slider to quickly go to any point on the timeline. And, if you start to move the slider before the timeline has finished, you can only go to the previous time points, since those in the future did not execute yet, so there is nothing to go to.  This needs to be fixed.
+
+So, the new format outline will be like this:
+
+After each frame a complete state will be saved.  Complete state means full 64 kb of memory, registers, state of border, state of keys that are pressed.  
+
+
+When recording a new keypresses/timeline, there should be an update twice every second about the size used.  Also, total time in the timeline should be visible, and also memory used per second and per minute.
+
+When saving to a file, this is all saved, in uncompressed form, but there should be a consideration that we will later add a compressed mode, where each frame state is first substracted from the previous frame and then compression is used (it can be a simple one).
+
+Do not wory about converting the old formats of save files.
+
+When loading the file, the frames and states should be loaded, but no frame should be executed, so we can also jump to the future, right from the start of the autoplay.
+
+Ask questions if you have any unclear details.
+
+
+
+
+---  flame graph ---
+
+
+
+Ok, some details first.  We have a zx spectrum z80 reverse engineering program, which can emulate and dissasemble code, and the result is a F# computational expression representing z80 code, that can then later be used to execute this game on the web, and also add new functionality to the game.
+
+This CE lives inside an F# source file, and contains all the comments added to the source.  Here is the first design problem and a decision we have to make.  How do we integrate the comments added to the disassembly code, which is initialy tied to the memory locations in the memory to the F# code, which, although it does replicate the exact memory layout of the game (it even accepts just raw bytes) it can have new code, not attached to memory (super instructions) or even have some functions replaced with a native F# implementations.
+
+The other design problem is how to do the flame graph, where, from the z80 assembly trace, you display which functions are executing, on which stack level, all on a single timeline, where we can zoom in and out, and then use the timeline to sync all other windows.
+
+Right now our program has those windows/panes:
+-screen area
+-registers
+-code 
+-time for selecting multiple regions
+-graphich for detecting sprites in memory
+
+
+
+-where the function names live?
+-where the comments live?
+
+We do not have any function renaming implemented yet, but CE does support adding labels troughout the code that can be used as jump and call targets, and for data constants and addresses.
+Comments for instructions are attached do the memory address.  Block comments are attached to memory locations, but with a length.   Both of those do not translate well to F#, since the ultimate goal is to have an implementation detached from the interpreter, or even from any memory locations. (Perhaps screen output is an exception to this goal)
+
+If super instructions are generated automatically, or even if a sub-Z80 CE is extracted automatically to a different location in the F#, then those comments could be somehow moved there too, perhaps by also including the full source of the original Z80 including memory locations, as a big F# comment, but this should not be a round tripping comment, they are still usefull even if they stay as F# comments forever.
+
+For the definition of a function, we should just look at the CALL or equivalent calls.  Some functions could also be the targets of jumps, but this should not override them being functions. We do not care about the stack depth, there should be anough vertical space on the screen. Calls should always be read out from the execution traces.  Keyboard trace recording is saved to the disk, with full state saved each frame, and when loading this file, only those states are loaded, and the we can execute requested sections from this timeline in order go draw flame graph.  Moving the slider on the timeline only displays saved screenshot, so we have instant jump to any point in the timeline.  
+
+This is also allowing us to "execute" instructions backward, since, to step one instruction backwards, we need to start from the previous frame, and just execute this one frame. This should always be almost instantenuous.
+
+Flame graph should be scrollable down to the instruction level.  Some heuristics is needed in order to have smart labeling on the blocks, perhaps a function name for a block, or some other info if there is room, or even skipping function names if there is no room.  The flame graph should be able to show us the big picture of code execution.
+
+The F# CE us the single source of truth for the code, while the trace format is the single source of truth for execution history.  CE is also saving the single instruction comments and block comments (perhaps at the location where the block start)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----- adding debugger controls: break, step over, step into, ste[ backwards
+
+
+
+
+
+----- question about compiling z80 and integrating new C80 into the emulator?  full loop?
+
+
+
+=== changing the control file format
+
+
+Move it to the shape compatibile with our F# CE, so builder would also need to be changed.
+
+
+
+
+- bug
+
+In the execution log, i have an instruction at address 7167, but if i switch to the memory view, that address is not listed, as if it does not exist.  what could cause this desync between two views?
+
+
+I added a single line comment, through the shared entry box, on a line that had a different comment from before.  what happens if you put two comments onto a single line?
+
+
+There is no way to change a comment once it is added.
+
+xxAlso, there is no right click menu on the code, can you add those last two operations to it, and also add "switch to memory view synced to this inst" command.
+
+
+xxDisplaying code in the memory locations before our current cursor is not good.  We can't have a fixed number of instructions shown before the cursor, since this will leave a gap.  we need to decode the memory all the way to the current position, or even 3-4 bytes more, and then find the current location in this list, and then erase the current instruction and everything beyond it, from the lower block i mean, so it can then fit perfectly into the second part.  If we get a desync situation, if the current location never was a start of an multi byte instruction, then we need special processing. In that case, the basic thing we can do is add text to the status text below code, where target: is now, and to this text add two more pieces of information:  -"code DESYNC detected" as a warning string, and a reason why the cursor is at the location that is (was it a jump from the raw memory view? was it a function selected from the list of functions). this might require some work on all of those sites, since we need to send this information and record it togheter with the current address.
+
+
+Why is the jst file saved on the last run, shouldn't we only save it if there were some changes to the recorded trace?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- doc
+
+## 2. Can it actually never finish?
+
+No loop is infinite — every walk advances an address pointer by at least 1 byte and is capped at 64K, and the element loops are bounded by the instruction count. But two things make it *effectively* endless:
+
+- **Cache invalidation while the machine runs.** The rebuild cache is keyed on `(s.Frame, s.Recorder.SelfModCount)` (App.fs:945-948). If the emulator is playing, recording, or cinema-scrolling while graph mode is on, every timer tick (30–100 ms) calls `refreshDisasm → buildGraph`, sees a changed epoch, and starts the whole multi-minute rebuild **again from scratch**. The app never gets a tick where the graph is considered "done", so it looks like it never finishes — it's the same enormous job restarting forever.
+- **The 1-second TTLs.** `flowBlocks` (the `splitBlocks` sweep, the O(instructions × targets) hot spot from my earlier analysis) is cached for only 1 second (App.fs:746), so any follow-up interaction a second later re-pays the sweep even when nothing changed.
+
+Your VS break at line 1008 confirms it was grinding in the per-instruction `TextBlock` creation loop — with the default 48 KB span that's ~20,000+ elements, each also paying a linear `commentAt` scan. So: finite, but minutes per build, and unbounded in wall-clock time when playback keeps re-triggering it. (That combination — pause the emulator before switching to Graph — will at least make it a one-time wait until the underlying performance issues are fixed.)
+
+## 3. Replay file format (short summary)
+
+The recorded keypresses live in **`replay.json`** in each game's directory ([Replay.fs](src/JetpacFR.Core/Replay.fs)):
+
+- **JSON, versioned object**: `{"format": "jetpacfr-replay", "version": 1, "gameId": "...", "assetFingerprint": {...}, "events": [...]}` — hand-serialized, not via a type serializer.
+- **Each event**: `{"frame":N, "row":N, "bit":N, "pressed":bool}` — frame number (50 fps), which keyboard matrix row (0–7) and bit (0–4) of the Spectrum keymap, and whether it's a press or release.
+- **Asset fingerprint**: SHA-256 hashes of the ROM, TZT/tape, and optional program image plus the program address, so a recording is never auto-replayed against different assets.
+- **Safety**: saved atomically (write `.tmp`, then move). On load, format/version/gameId/fingerprint are all validated; any mismatch → `ReplayIgnored` and the file is skipped rather than half-applied. A legacy bare event-array format is accepted as a one-time import.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

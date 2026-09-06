@@ -80,6 +80,19 @@ This scan result listbox can also be used to jump to this location in the disass
 -only code / only non-code memory. (this will depend on the current understanding of the memory map or the control file, which is the main reason for this application, to create this control file)
 
 
+-- end of comment for implementing mass commenting
+
+
+missing Brush A and Brush B buttons.
+
+Timeline selection control has buttons right next to it, on the right side. buttons labeled "Preview A" to "New ctrl".  Those buttons should be on a new line, bellow the timeline selection control. Right now, "preview A" and "Preview B" buttons just show the picture of the last frame of that selection in the screen area.  In fact, they should replay the whole selection as a movie, and this movie should last exactly 1 second.
+When click and dragging the timeline selection, the screen should emidiately display the frame screen of the point where the mouse was clicked, and also animate on each mouse move event.  This should work in both directions.  This is so we can easily see which part of the gameplay we are selecting. This should also work when clicking and dragging the "A" and "B" drawn regions of the marker lines.
+Brush A and Brush B buttons are missing.  They should be the first two buttons on the next line (where all the other buttons are, if you move them as in this instructions).  Whichever one is selected, it should be drawn in that color, (the background of the button should have the same color as its lines) as can be seen in the timeline window where the control was tested.
+
+
+
+
+
 
 
 

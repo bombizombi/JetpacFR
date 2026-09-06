@@ -116,6 +116,12 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
   let mutable frame = 0
   let mutable warmStart = false
   let snapshotInterval = 64
+  // Persisting the whole event list on every keystroke (including browser
+  // auto-repeat) serialized an ever-growing list per key event; batch the
+  // write behind a dirty flag flushed by the app's UI tick, and cap the
+  // retained window so localStorage stays bounded.
+  let mutable replayDirty = false
+  let replayCap = 10_000
 
   /// Put the port into the game-entry state. Warm: load the cached snapshot.
   /// Cold: boot the oracle to the entry and cache its state for next time.
@@ -184,8 +190,17 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
 
   member this.SetKey(row: int, bit: int, pressed: bool) =
     replayEvents.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
-    ReplayCache.save romBytes tzxBytes replayEvents
+    if replayEvents.Count > replayCap then
+      replayEvents.RemoveRange(0, replayEvents.Count - replayCap)
+    replayDirty <- true
     port.SetKey(row, bit, pressed)
+
+  /// Write the pending replay events to localStorage (called from the UI
+  /// tick, not per keystroke).
+  member this.FlushReplayCache() =
+    if replayDirty then
+      replayDirty <- false
+      ReplayCache.save romBytes tzxBytes replayEvents
 
   /// Rendered frame (BGRA 320x256) from the port's video state.
   member this.ScreenBuffer = port.Video.BlitTo()
@@ -236,17 +251,23 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
             FlagsAfter = uint8 flagsBefore
             Taken = 1uy }
         let vinsn = Disasm.disasmMemory port.Memory vector
+        // Capture the executed bytes BEFORE the step: an instruction that
+        // writes over itself must be recorded with the bytes it fetched.
+        let m = port.Memory
+        let b0 = m[vector &&& 0xFFFF]
+        let b1 = m[(vector + 1) &&& 0xFFFF]
+        let b2 = m[(vector + 2) &&& 0xFFFF]
+        let b3 = m[(vector + 3) &&& 0xFFFF]
         port.Step()
         let after = port.Regs.Pc()
         let cycles = int (port.CycleCount() - cyclesBefore)
         let next = (vector + vinsn.Length) &&& 0xFFFF
-        let m = port.Memory
         recorder.Record
           { Pc = uint16 vector
-            B0 = m[vector &&& 0xFFFF]
-            B1 = m[(vector + 1) &&& 0xFFFF]
-            B2 = m[(vector + 2) &&& 0xFFFF]
-            B3 = m[(vector + 3) &&& 0xFFFF]
+            B0 = b0
+            B1 = b1
+            B2 = b2
+            B3 = b3
             Target = uint16 after
             Tick = uint32 cyclesBefore
             Length = uint8 vinsn.Length
@@ -256,17 +277,21 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
             Taken = (if after <> next then 1uy else 0uy) }
       else
         let insn = Disasm.disasmMemory port.Memory pc
+        let m = port.Memory
+        let b0 = m[pc &&& 0xFFFF]
+        let b1 = m[(pc + 1) &&& 0xFFFF]
+        let b2 = m[(pc + 2) &&& 0xFFFF]
+        let b3 = m[(pc + 3) &&& 0xFFFF]
         port.Step()
         let after = port.Regs.Pc()
         let cycles = int (port.CycleCount() - cyclesBefore)
         let next = (pc + insn.Length) &&& 0xFFFF
-        let m = port.Memory
         recorder.Record
           { Pc = uint16 pc
-            B0 = m[pc &&& 0xFFFF]
-            B1 = m[(pc + 1) &&& 0xFFFF]
-            B2 = m[(pc + 2) &&& 0xFFFF]
-            B3 = m[(pc + 3) &&& 0xFFFF]
+            B0 = b0
+            B1 = b1
+            B2 = b2
+            B3 = b3
             Target = uint16 after
             Tick = uint32 cyclesBefore
             Length = uint8 insn.Length

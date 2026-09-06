@@ -127,12 +127,12 @@ type Spectrum48() as self =
     let nextWrap = (((f + 312L) / 312L) * 312L - 1L) * 224L
     let regsText =
       sprintf
-        "af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\n"
+        "af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nirq=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\n"
         (regs.Get R16.AF) (regs.Get R16.BC) (regs.Get R16.DE) (regs.Get R16.HL)
         (regs.Get R16.AF_) (regs.Get R16.BC_) (regs.Get R16.DE_) (regs.Get R16.HL_)
         (regs.Ix()) (regs.Iy()) (regs.Sp()) (regs.Pc()) (regs.I()) (regs.R())
         (regs.Wz())
-        z80.Iff1 z80.Iff2 z80.IrqMode z80.Halted border beeper (tape.Level())
+        z80.Iff1 z80.Iff2 z80.IrqMode z80.Halted z80.IrqPending border beeper (tape.Level())
         cycles videoNextTime nextWrap
     Array.copy memory.AddressSpace, regsText
 
@@ -176,6 +176,10 @@ type Spectrum48() as self =
     z80.Iff1 <- boolv "iff1" false
     z80.Iff2 <- boolv "iff2" false
     z80.IrqMode <- hex "im" 0
+    // The wrap fire lands exactly at frameEnd, so a frame-boundary
+    // checkpoint usually has an interrupt pending; dropping it made the
+    // restored continuation run one ISR-less frame.
+    if boolv "irq" false then z80.Interrupt()
     z80.Halted <- boolv "halted" false
     border <- hex "border" 0
     video.SetBorder border

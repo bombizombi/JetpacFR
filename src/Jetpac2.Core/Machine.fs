@@ -97,7 +97,8 @@ module Alu =
     let intermediate = (lhs &&& 0xFFFF) + (rhs &&& 0xFFFF)
     let carry = if intermediate > 0xFFFF then Flags.Carry() else Flags()
     let result = intermediate &&& 0xFFFF
-    let halfCarry = if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
+    let halfCarry =
+      if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
     let flags35 = Flags((result >>> 8) &&& 0xFF) &&& (Flags.Flag5() ||| Flags.Flag3())
     struct (result,
      (currentFlags &&& (Flags.Sign() ||| Flags.Zero() ||| Flags.Parity()))
@@ -113,7 +114,8 @@ module Alu =
     let intermediate = (lhs &&& 0xFFFF) + (rhs &&& 0xFFFF) + (if carryIn then 1 else 0)
     let carry = if intermediate > 0xFFFF then Flags.Carry() else Flags()
     let result = intermediate &&& 0xFFFF
-    let halfCarry = if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF)) > 0xFFF then Flags.HalfCarry() else Flags()
+    let halfCarry =
+      if ((lhs &&& 0xFFF) + (rhs &&& 0xFFF) + (if carryIn then 1 else 0)) > 0xFFF then Flags.HalfCarry() else Flags()
     let flags35 = Flags((result >>> 8) &&& 0xFF) &&& (Flags.Flag5() ||| Flags.Flag3())
     let negative = if result &&& 0x8000 <> 0 then Flags.Sign() else Flags()
     let zero = if result = 0 then Flags.Zero() else Flags()
@@ -434,7 +436,9 @@ type Machine() as self =
     let hooks = coHooks.[regs.Pc() &&& 0xFFFF]
     let count = hooks.Count
     let mutable i = 0
-    while i < count do
+    // A hook may remove other hooks at the same address (teardown); re-check
+    // the live count so a shrinking list cannot index out of range.
+    while i < count && i < hooks.Count do
       let (_, hook) = hooks.[i]
       let effects = hook this
       for effect in effects do this.ApplyEffect effect
@@ -608,11 +612,16 @@ type Machine() as self =
       regs.SetSp((regs.Sp() - 2) &&& 0xFFFF)
       storeRamByte (regs.Sp()) (regs.Pc() &&& 0xFF)
       storeRamByte ((regs.Sp() + 1) &&& 0xFFFF) ((regs.Pc() >>> 8) &&& 0xFF)
+      // The stack push is 3+3 T on real hardware (storeRamByte is the
+      // direct-memory shortcut, so the cycles are charged here).
+      this.PassTime 6
       match irqMode_ with
       | 0
       | 1 -> regs.SetPc 0x38
       | 2 ->
         let addr = 0xFF ||| ((regs.I() <<< 8) &&& 0xFF00)
+        // Vector fetch: another 3+3 T.
+        this.PassTime 6
         let vector = (int memory.[addr]) ||| ((int memory.[(addr + 1) &&& 0xFFFF]) <<< 8)
         regs.SetPc(vector &&& 0xFFFF)
       | _ -> failwith "Inconceivable interrupt mode"
@@ -681,6 +690,9 @@ type Machine() as self =
     iff1_ <- boolv "iff1" false
     iff2_ <- boolv "iff2" false
     irqMode_ <- hex "im" 0
+    // SaveState writes halted; restore it so a machine saved while HALTed
+    // resumes halted (cycle/R-exact roundtrip).
+    halted_ <- boolv "halted" false
     irqPending_ <- boolv "irq" false
     border <- hex "border" 0
     video.SetBorder border

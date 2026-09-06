@@ -91,6 +91,8 @@ type TimelineSelector() as self =
   let mutable active = A
   let mutable unitName = "f"
   let mutable formatUnit = fun (n: int64) -> string n
+  /// The machine's current frame; -1 hides the playhead marker.
+  let mutable playhead = -1L
 
   let mutable dragging = false
   let mutable dragStartX = 0.0
@@ -149,6 +151,14 @@ type TimelineSelector() as self =
     and set v =
       formatUnit <- v
       this.InvalidateVisual()
+
+  /// Playhead: the frame the machine is currently parked on / executing.
+  member this.Playhead
+    with get () = playhead
+    and set v =
+      if playhead <> v then
+        playhead <- v
+        this.InvalidateVisual()
 
   /// Timeline unit at a client x coordinate, clamped to [0, Length].
   member private this.UnitAt(x: float) =
@@ -261,12 +271,15 @@ type TimelineSelector() as self =
 
   override this.OnKeyDown(e: KeyEventArgs) =
     match e.Key with
-    | Key.A when active <> A ->
-      active <- A
-      activeChanged.Trigger A
-    | Key.B when active <> B ->
-      active <- B
-      activeChanged.Trigger B
+    | Key.A | Key.B ->
+      // A/B switch brushes while the timeline has focus; consume them either
+      // way: otherwise they bubble to the main window, which maps A/B onto
+      // Spectrum matrix cells and logs them into the replay key log.
+      let b = if e.Key = Key.A then A else B
+      if active <> b then
+        active <- b
+        activeChanged.Trigger b
+      e.Handled <- true
     | _ -> ()
     base.OnKeyDown e
 
@@ -315,6 +328,14 @@ type TimelineSelector() as self =
 
       drawBrush A rangeA
       drawBrush B rangeB
+
+      // playhead: bright line + top notch marking the current execution
+      // state, drawn over the tints so it reads on both
+      if playhead >= 0L then
+        let x = min w (max 0.0 (float playhead / float length * w))
+        let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
+        dc.DrawLine(playPen, Point(x, top), Point(x, bottom))
+        dc.DrawRectangle(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), null, Rect(x - 2.5, top, 5.0, 5.0))
 
       // x scale: round tick marks, 3-4 visible, labels at round units
       let step = TimelineRuler.niceTickStep length

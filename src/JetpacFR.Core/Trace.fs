@@ -126,9 +126,22 @@ type TraceRecorder(capacity: int, segmentCount: int) =
       segments[head / segmentSize] <- segments[head / segmentSize] + 1
       endTick <- entry.Tick
       head <- (head + 1) % capacity
+      // Once the ring is full the oldest entry (now at head) defines the
+      // window's start; without this refresh StartTick stays pinned to the
+      // first tick ever recorded.
+      if count = capacity then startTick <- entries[head].Tick
 
   member this.RecordSnapshot(s: RegSnapshot) =
-    if recordEnabled && snapshotCount < snapshots.Length then
+    if recordEnabled then
+      // One snapshot per 64 instructions keeps arriving long after the slot
+      // budget is gone, so when full, drop the oldest half: snapshots stay
+      // time-ordered and the nearest-before search stays valid, but register
+      // lookups near the newest entries no longer fall back to a
+      // minutes-old snapshot.
+      if snapshotCount = snapshots.Length then
+        let keep = snapshots.Length / 2
+        Array.blit snapshots (snapshots.Length - keep) snapshots 0 keep
+        snapshotCount <- keep
       snapshots[snapshotCount] <- s
       snapshotCount <- snapshotCount + 1
 

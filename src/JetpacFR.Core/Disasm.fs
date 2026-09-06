@@ -87,7 +87,7 @@ module Disasm =
     let op = int (at 0)
     let rp = (op >>> 4) &&& 3
     let cc = (op >>> 3) &&& 7
-    let target () = (pc + 2 + d8 ()) &&& 0xFFFF
+    let target () = (pc + 2 + d8 ()) &&& 0xFFFF &&& 0xFFFF
     let text =
       match op with
       | 0x00 -> "NOP"

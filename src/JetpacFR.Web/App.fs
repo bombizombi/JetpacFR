@@ -397,6 +397,13 @@ module App =
     | "red" -> red
     | _ -> normal
 
+  /// heatLut parsed once into channel bytes. Canvas ImageData is RGBA (red
+  /// first - the desktop's Bgra32 is the reverse), and re-parsing the hex
+  /// strings per pixel per tick dominated idle CPU.
+  let heatLutR = heatLut |> Array.map (fun c -> byte (Convert.ToInt32(c.Substring(1, 2), 16)))
+  let heatLutG = heatLut |> Array.map (fun c -> byte (Convert.ToInt32(c.Substring(3, 2), 16)))
+  let heatLutB = heatLut |> Array.map (fun c -> byte (Convert.ToInt32(c.Substring(5, 2), 16)))
+
   let private refreshHeatmap () =
     let counts =
       match currentTrace () with
@@ -410,21 +417,23 @@ module App =
     for y in 0 .. 255 do
       for x in 0 .. 255 do
         let c = counts.[i]
-        let li = if c <= 0 then 0 else min 9 (int (9.0 * (log10 (float c) / logMax)))
-        let col = heatLut.[li]
+        // logMax is 0 when every executed PC ran exactly once; treat that
+        // flat case as full heat instead of dividing by zero. (Sync:
+        // JetpacFR.Desktop/App.fs refreshHeatmap)
+        let li =
+          if c <= 0 then 0
+          elif logMax <= 0.0 then 9
+          else min 9 (int (9.0 * (log10 (float c) / logMax)))
         let p = i * 4
-        let r = Convert.ToInt32(col.Substring(1, 2), 16)
-        let g = Convert.ToInt32(col.Substring(3, 2), 16)
-        let b = Convert.ToInt32(col.Substring(5, 2), 16)
         if selfMod.[i] then
           // executed-then-written: blend toward magenta (matches the desktop)
-          buf.[p] <- byte ((b + 0xC0) / 2)
-          buf.[p + 1] <- byte ((g + 0x30) / 2)
-          buf.[p + 2] <- byte ((r + 0xF0) / 2)
+          buf.[p] <- byte ((int heatLutR.[li] + 0xF0) / 2)
+          buf.[p + 1] <- byte ((int heatLutG.[li] + 0x30) / 2)
+          buf.[p + 2] <- byte ((int heatLutB.[li] + 0xC0) / 2)
         else
-          buf.[p] <- byte b
-          buf.[p + 1] <- byte g
-          buf.[p + 2] <- byte r
+          buf.[p] <- heatLutR.[li]
+          buf.[p + 1] <- heatLutG.[li]
+          buf.[p + 2] <- heatLutB.[li]
         buf.[p + 3] <- 255uy
         i <- i + 1
     // white cursor marker around the current PC
@@ -445,8 +454,14 @@ module App =
   let private segmentsOf (t: Trace) : int[] =
     let n = max 1 (t.Entries.Length / 512)
     let segs = Array.zeroCreate<int> 512
-    for e in t.Entries do
-      segs.[min 511 (int e.Tick / n)] <- segs.[min 511 (int e.Tick / n)] + 1
+    // Bucket by entry index, not Tick: Tick is absolute machine cycles
+    // (~20 per instruction), so tick/n would blow past 511 a few percent
+    // into the trace and pile everything into the last bucket. (Sync:
+    // JetpacFR.Desktop/App.fs segmentsOf)
+    let mutable i = 0
+    for _ in t.Entries do
+      segs.[min 511 (i / n)] <- segs.[min 511 (i / n)] + 1
+      i <- i + 1
     segs
 
   let private refreshStrip () =
@@ -468,9 +483,9 @@ module App =
         let b = 60 + int (v * 60.0)
         for sy in 0 .. 23 do
           let p = (sy * 512 + sx) * 4
-          buf.[p] <- byte b
+          buf.[p] <- byte r
           buf.[p + 1] <- byte g
-          buf.[p + 2] <- byte r
+          buf.[p + 2] <- byte b
           buf.[p + 3] <- 255uy
       let n = currentEntryCount ()
       if n > 1 then
@@ -589,7 +604,9 @@ module App =
     trayCountLabel?textContent <- sprintf "%d in lift queue" selectedEntries.Count
 
   and private drawGraph () =
-    Dom.clear graphNodes
+    // Dom.clear (textContent) does not empty an array: stale hit
+    // rectangles would keep winning the canvas hit test after a re-mine.
+    graphNodes.Clear()
     if List.isEmpty minedRoutines then
       graphCanvas?width <- 400
       graphCanvas?height <- 60
@@ -701,6 +718,10 @@ module App =
       minedRoutines <- routines
       minedEdges <- edges
       selectedEntries <- Set.empty
+      // The staged routine belonged to the previous mining; keep "Stage"/
+      // "Validate" from operating on a stale span.
+      activeRoutine <- None
+      routineDetail?textContent <- ""
       refreshRoutines ()
       refreshTray ()
       drawGraph ()
@@ -777,23 +798,32 @@ module App =
         let reader: obj = emitJsExpr () "new FileReader()"
         reader?onload <- (fun () ->
           let buf: obj = reader?result
-          let bytes: byte[] = emitJsExpr buf "Array.from(new Uint8Array($0))"
+          // Fable byte[] IS Uint8Array - no Array.from copy needed (a large
+          // .jpt otherwise materializes a ~200 MB plain JS array).
+          let bytes: byte[] = emitJsExpr buf "new Uint8Array($0)"
           try
             let t = TraceCodecWeb.decode bytes
-            loaded <- Some t
-            cursor <- 0
-            markerPc <- int t.Entries.[0].Pc
-            syncSlider ()
-            refreshAll ()
-            let routines, edges = Miner.mine t
-            minedRoutines <- routines
-            minedEdges <- edges
-            selectedEntries <- Set.empty
-            refreshRoutines ()
-            refreshTray ()
-            drawGraph ()
-            statusText?textContent <- sprintf "loaded %d instructions; mined %d routines"
-              t.Entries.Length routines.Length
+            if t.Entries.Length = 0 then
+              statusText?textContent <- "load failed: trace has no instructions"
+            else
+              let routines, edges = Miner.mine t
+              // Commit only after decode + mine succeeded, so a failed load
+              // keeps the previously loaded trace.
+              loaded <- Some t
+              minedRoutines <- routines
+              minedEdges <- edges
+              selectedEntries <- Set.empty
+              activeRoutine <- None
+              routineDetail?textContent <- ""
+              cursor <- 0
+              markerPc <- int t.Entries.[0].Pc
+              refreshRoutines ()
+              refreshTray ()
+              drawGraph ()
+              syncSlider ()
+              refreshAll ()
+              statusText?textContent <- sprintf "loaded %d instructions; mined %d routines"
+                t.Entries.Length routines.Length
           with ex -> statusText?textContent <- "load failed: " + ex.Message)
         emitJsExpr (reader, f) "$0.readAsArrayBuffer($1)" |> ignore)
     emitJsExpr input "$0.click()" |> ignore
@@ -934,6 +964,7 @@ module App =
         match session with
         | None -> ()
         | Some s ->
+          s.FlushReplayCache()
           if running then
             statusText?textContent <-
               sprintf "frame=%d  tick=%.2fM  instr=%d/%d  distinct-pc=%d  selfmod=%d  rec=%s"
@@ -941,7 +972,7 @@ module App =
                 (float s.CycleCount / 1_000_000.0)
                 s.Recorder.EntryCount
                 s.Recorder.Capacity
-                (s.Recorder.PerPcCount |> Array.filter (fun c -> c > 0) |> Array.length)
+                (s.Recorder.PerPcCount |> Array.fold (fun n c -> if c > 0 then n + 1 else n) 0)
                 s.Recorder.SelfModCount
                 (if s.Recorder.RecordEnabled then "ON" else "OFF")
           refreshHeatmap ()
@@ -1121,13 +1152,21 @@ module App =
       refreshTray ()
       drawGraph ())
 
-    // keyboard -> ZX matrix
+    // keyboard -> ZX matrix. Typing in a text control (paste box, contract
+    // text) must not drive the emulated keyboard or the replay log.
+    let isEditableTarget (e: obj) =
+      let t: obj = e?target
+      let tag = string (t?tagName)
+      tag = "INPUT" || tag = "TEXTAREA" || tag = "SELECT" || string (t?isContentEditable) = "true"
     Dom.window?addEventListener("keydown", fun (e: obj) ->
       let key: string = unbox (e?key)
-      setKeyFor key true
-      if key = " " || key.StartsWith "Arrow" then e?preventDefault())
+      if isEditableTarget e then ()
+      else
+        setKeyFor key true
+        if key = " " || key.StartsWith "Arrow" then e?preventDefault())
     Dom.window?addEventListener("keyup", fun (e: obj) ->
-      setKeyFor (string (e?key)) false)
+      if isEditableTarget e then ()
+      else setKeyFor (string (e?key)) false)
 
     let storageKey = "jetpacfr.control.minimal"
     let mutable control: ControlFile option = None
@@ -1328,10 +1367,9 @@ module App =
       b?className <- (if brushA then "brush-btn" else "brush-btn active-brush-b")
     (Dom.byId "btnBrushA")?addEventListener("click", fun _ -> brushA <- true; brushStyle ())
     (Dom.byId "btnBrushB")?addEventListener("click", fun _ -> brushA <- false; brushStyle ())
-    Dom.window?addEventListener("keydown", fun e ->
-      let k = string e?key
-      if k = "a" || k = "A" then (brushA <- true; brushStyle ())
-      elif k = "b" || k = "B" then (brushA <- false; brushStyle ()))
+    // No global a/b brush hotkey: it collided with real ZX keys (a = row 1,
+    // b = row 7), so playing the game or typing silently flipped brushes.
+    // Use the brush buttons instead.
 
     // Preview = sweep the trace cursor over the selection in exactly 1s
     // (50 ticks x 20 ms). The web session has no frame-snapshot history,
@@ -1702,17 +1740,24 @@ module App =
             statusText?textContent <- "control file imported"
           with ex -> statusText?textContent <- "import failed: " + ex.Message
         emitJsExpr (reader, file) "$0.readAsText($1)" |> ignore)
-    // initial load: browser storage first, then a served control.json
+    // initial load: browser storage first, then a served control.json. Both
+    // parses are guarded: a corrupt localStorage value (or a privacy mode
+    // where localStorage access throws) must not abort start(), which would
+    // also prevent CEHost from starting.
     let local: obj = Dom.window?localStorage
     let applyFetched (txt: obj) =
       if not (isNull txt) && control.IsNone then
-        control <- Some (ControlFile.fromJson (string txt))
-        cmRender ()
-        statusText?textContent <- "control file loaded from games/minimal/control.json"
-    match emitJsExpr (local, storageKey) "$0.getItem($1)" with
+        try
+          control <- Some (ControlFile.fromJson (string txt))
+          cmRender ()
+          statusText?textContent <- "control file loaded from games/minimal/control.json"
+        with ex -> statusText?textContent <- "stored control.json ignored: " + ex.Message
+    match (try emitJsExpr (local, storageKey) "$0.getItem($1)" with _ -> null) with
     | null ->
       let p: obj = emitJsExpr () "fetch('games/minimal/control.json').then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null })"
       emitJsExpr (p, applyFetched) "$0.then($1)" |> ignore
     | stored ->
-      control <- Some (ControlFile.fromJson (string stored))
-      cmRender ()
+      try
+        control <- Some (ControlFile.fromJson (string stored))
+        cmRender ()
+      with ex -> statusText?textContent <- "stored control ignored: " + ex.Message

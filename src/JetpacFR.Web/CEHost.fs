@@ -125,13 +125,22 @@ module CEHost =
         else
           btn?textContent <- "Run CE"
           Dom.window?clearInterval(timerId)
+      // Typing in a text control must not drive the CE game's keyboard.
+      let isEditableTarget (e: obj) =
+        let t: obj = e?target
+        let tag = string (t?tagName)
+        tag = "INPUT" || tag = "TEXTAREA" || tag = "SELECT" || string (t?isContentEditable) = "true"
       Dom.window?addEventListener("keydown", fun (e: obj) ->
         let key: string = unbox (e?key)
-        match game with
-        | Some g -> List.iter (fun (r, b) -> g.SetKey(r, b, true)) (keyCells key)
-        | None -> ())
+        if isEditableTarget e then ()
+        else
+          match game with
+          | Some g -> List.iter (fun (r, b) -> g.SetKey(r, b, true)) (keyCells key)
+          | None -> ())
       Dom.window?addEventListener("keyup", fun (e: obj) ->
-        let key: string = unbox (e?key)
-        match game with
-        | Some g -> List.iter (fun (r, b) -> g.SetKey(r, b, false)) (keyCells key)
-        | None -> ())
+        if isEditableTarget e then ()
+        else
+          let key: string = unbox (e?key)
+          match game with
+          | Some g -> List.iter (fun (r, b) -> g.SetKey(r, b, false)) (keyCells key)
+          | None -> ())

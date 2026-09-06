@@ -1,0 +1,57 @@
+Here's the complete button map of the main window (desktop), by region:
+
+## Toolbar (top)
+
+| Text | Function |
+|---|---|
+| **Run** | Go live: exits replay mode (`StopReplay`), starts the frame timer at 50 fps; your keys are recorded into `replay.json` |
+| **Pause** | Stops the frame timer, commits the trace build, saves the replay |
+| **Step frame** | Pause + advance exactly one frame |
+| **Rec trace** *(checkbox)* | Toggles the *instruction* trace recorder on/off (does **not** affect keyboard capture) |
+| **Mute** *(checkbox)* | Toggles beeper audio (unchecked = 20% volume) |
+| **Save trace** | Writes the instruction trace to a `.jpt` file (save dialog) |
+| **Load trace** | Loads a `.jpt` trace for offline analysis |
+| **Go** | Commit a branch at the current frame: truncates history + key log here (`BranchAt`), discards the old future, resumes live play — "new future starts here" |
+| **Replay** | Re-runs the recorded keyboard stream from the current frame; stops at the recording's end |
+| **<<100 / <<10 / <<1** | Step the trace cursor back 100/10/1 instructions |
+| **Play** | "Cinema": auto-advance the trace cursor (instruction scrubbing at the `speed` rate) — *not* live play |
+| **1>> / 10>> / 100>>** | Step the trace cursor forward 1/10/100 instructions |
+| **speed** *(combo)* | Cinema step size (1/10/100/1000 instructions per tick) |
+| **game** *(combo)* | Selects the game manifest (boots it) |
+| **engine** *(combo)* | Oracle / CE / Both+compare engine switch |
+| **Set as game entry** | After a manual tape boot: capture the current machine state as the game's entry point |
+| **Export script** | Writes the session's key log to a `script.json` (save dialog) |
+| **Timeline** | Opens the standalone TimelineSelector demo window |
+
+## Center column — under the timeline selector
+
+| Text | Function |
+|---|---|
+| **Brush A / Brush B** | Select the active timeline brush (selected one fills with its color; A/B keys too) |
+| **Preview A / Preview B** | Replay selection A/B as a 1-second movie |
+| **Save ctrl** | Persist the in-memory control file to `games/<id>/control.json` (only when dirty) |
+| **Import ctrl...** | Load a `control.json` or SkoolKit `.ctl` |
+| **Export skool...** | Write the control file as a SkoolKit `.ctl` |
+| **New ctrl** | Create an empty control file over $4000–$FFFF |
+| **Memory / Execution** *(toggles)* | Code view mode: linear memory sweep vs execution trace |
+| **idx -> cmt** | Comment the instruction at the current trace index (uses shared comment box) |
+| **Name region before cursor** | Name the address region ending at the current instruction |
+| **Name A / Name B** | Name the code regions executed in timeline range A / B |
+| **Comment A / Comment B** | Add the comment text to *all* addresses executed in A / B |
+| **Comment A-only / Comment B-only** | Same, but only addresses executed in A and *not* B (or vice versa) |
+
+## Right tabs
+
+**Functions:** **Mine routines** — run the routine miner over the current trace.
+**Contract/Prompt:** **Save .md** (export the generated prompt), **Copy prompt** (to clipboard).
+**Theater:** **Validate selected** (differential-test the pasted F# port vs the oracle), **Stage to Lifted/** (write the pasted port to `Lifted/fn%04X.fs` for the CE build), **Prompts for queue** (generate prompts for all queued routines), **Validate queue** (validate them all).
+
+**Scan tab:** **Start memory scan** (snapshot baseline), **= changed / = unchanged** (keep addresses whose value did/didn't change since baseline), **= value / < smaller / > larger** (filter by the entered number), **written** (keep addresses written since baseline), **executed** (keep executed addresses), **Jump to selected** (navigate to the selected scan hit), **Comment selected** (comment it); *byte 8 / word 16* radios choose compare width, *include ROM / include screen* checkboxes the scan range.
+
+## Bottom
+
+| Text | Function |
+|---|---|
+| **Clear** | Empty the lift queue (the `%04X x%d` chips are queued routines — clicking one selects/jumps to it) |
+
+Plus the engine **radios** (Oracle / game.fs (CE) / Both + compare) next to the code window, and A/B keys on the timeline selector itself.

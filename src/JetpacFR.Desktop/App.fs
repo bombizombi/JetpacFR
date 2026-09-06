@@ -26,8 +26,8 @@ open CmtKinds
 
 /// NAudio playback: 44100 Hz mono 16-bit; per-frame beeper samples appended to
 /// a buffered provider (same plumbing as Jetpac3.Desktop). Muted by default;
-/// when enabled the beeper waveform is scaled to 10% volume before the 16-bit
-/// PCM conversion.
+/// when enabled the beeper waveform is scaled down (volume, below) before the
+/// 16-bit PCM conversion.
 module Audio =
   let private waveOut = new WaveOutEvent()
   let private provider = new BufferedWaveProvider(WaveFormat(44100, 16, 1))
@@ -39,8 +39,9 @@ module Audio =
 
   /// Muted by default; the user explicitly enables sound.
   let mutable Enabled = false
-  /// 10% volume: the beeper waveform (+-0.8) is scaled down before the 16-bit
-  /// PCM conversion so output is a tenth of full volume.
+  /// Volume: the beeper waveform (+-0.8) is scaled down before the 16-bit
+  /// PCM conversion. Tuned to 0.2 after listening tests (0.1 was too quiet);
+  /// the tooltip stays in sync with this value.
   let volume = 0.2f
 
   let Play (samples: float32[]) =
@@ -65,6 +66,9 @@ module Audio =
 type DisasmRow =
   { Tag: string
     Brush: SolidColorBrush
+    /// Optional row background: the active brush tint when the address is
+    /// inside the selected code. Null = transparent.
+    Tint: Brush
     IsCurrent: bool
     /// Row address (PC for execution rows, address for memory rows); -1
     /// for synthetic rows. Drives comment lookups and jumps.
@@ -100,7 +104,6 @@ type MainWindow() as self =
   let mutable engineCE = false
   let mutable currentGame: GameManifest option = None
   let mutable gamesList: GameManifest list = []
-  let mutable replaySavedRevision = -1
   let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
 
   /// Walk up from the app base directory to the first folder containing a
@@ -135,8 +138,10 @@ type MainWindow() as self =
   let gameBitmap = WriteableBitmap(320, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
   let heatBmp = WriteableBitmap(256, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
   let stripBmp = WriteableBitmap(512, 24, 96.0, 96.0, PixelFormats.Bgra32, null)
+  let gfxBmp = WriteableBitmap(256, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
   let heatPixels = Array.zeroCreate<byte> (256 * 256 * 4)
   let stripPixels = Array.zeroCreate<byte> (512 * 24 * 4)
+  let gfxPixels = Array.zeroCreate<byte> (256 * 256 * 4)
 
   let heatLut =
     [| Color.FromRgb(0x08uy, 0x08uy, 0x0Cuy)
@@ -172,42 +177,76 @@ type MainWindow() as self =
   let frameTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
   let uiTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 100.0)
   let cinemaTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 30.0)
+  let statsTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 500.0)
 
   // ---- controls ----------------------------------------------------------
   let gameImage = Image()
   let heatImage = Image()
   let stripImage = Image()
+  let gfxImage = Image()
+  /// Graphics view: base address of the 8 KB window being rendered.
+  let mutable gfxBase = 0x4000
+  /// Graphics view: row width in pixels. Memory is read byte for byte;
+  /// width/8 consecutive bytes are drawn side by side on one bitmap row,
+  /// then drawing steps down a row; at the bitmap bottom it wraps to the
+  /// top of the next row-width column.
+  let mutable gfxRowWidth = 8
+  let gfxSlider =
+    Slider(
+      Minimum = 0.0, Maximum = 65535.0,
+      SmallChange = 8.0, LargeChange = 128.0,
+      IsMoveToPointEnabled = true)
+  let gfxAddrLabel = TextBlock()
+  let gfxWidthBox = TextBox(Width = 44.0)
+  let gfxWidthDown = Button(Content = "-8", Width = 32.0)
+  let gfxWidthUp = Button(Content = "+8", Width = 32.0)
   let disasmList = ListBox()
   let slider = Slider()
   let cursorLabel = TextBlock()
   /// The address the code window is centered on (memCursor or trace PC).
   let disasmTarget = TextBlock()
   let statusText = TextBlock()
-  let saveReplay (force: bool) =
+  let timelineFingerprint (game: GameManifest) : TimelineFingerprint =
+    let fp = ReplayStore.fingerprint game
+    { GameId = game.GameId
+      RomSha256 = fp.RomSha256
+      TzxSha256 = fp.TzxSha256
+      ProgramSha256 = fp.ProgramSha256
+      ProgramAddress = fp.ProgramAddress }
+
+  let timelinePath (game: GameManifest) =
+    Path.Combine(game.GameDirectory, StateTimelineStore.FileName)
+
+  /// Persist states + key log. Writes ONLY when the timeline actually
+  /// changed since the last save (captures, branch truncation, key events);
+  /// `force` (the Save button) rewrites even an unchanged recording. Called
+  /// on window close and game switch - a recording grows by megabytes per
+  /// second, so there is deliberately no autosave on pause or scrub. A
+  /// trivial timeline (fresh boot or just cleared) is never written.
+  let saveTimeline (force: bool) =
     match currentGame, session with
-    | Some game, Some s when force || s.KeyLog.Revision <> replaySavedRevision ->
-      match ReplayStore.save game s.KeyLog.Events with
-      | Ok () -> replaySavedRevision <- s.KeyLog.Revision
-      | Error error -> statusText.Text <- sprintf "replay save failed for %s: %s" game.Name error
+    | Some game, Some s
+      when (force || s.TimelineDirty) && s.StateTimeline.Count > 1 ->
+      match StateTimelineStore.save (timelinePath game) (timelineFingerprint game) s.StateTimeline s.KeyLog.Events with
+      | Ok () ->
+        s.ClearTimelineDirty ()
+        statusText.Text <-
+          sprintf "timeline saved: %d frames, %.1f MB" s.StateTimeline.Count (float s.StateTimeline.BytesUsed / (1024.0 * 1024.0))
+      | Error error -> statusText.Text <- sprintf "timeline save failed for %s: %s" game.Name error
     | _ -> ()
 
-  let mutable replayIgnoreReason: string option = None
-  let loadReplay (game: GameManifest) (s: TraceSession) : bool =
-    replayIgnoreReason <- None
-    match ReplayStore.tryLoad game with
-    | ReplayLoaded events ->
-      s.KeyLog.Replace events
-      replaySavedRevision <- s.KeyLog.Revision
+  /// Install a saved recording before a single frame runs: the key script
+  /// drives autoplay and every frame - future included - is seekable.
+  let loadTimeline (game: GameManifest) (s: TraceSession) : bool =
+    match StateTimelineStore.tryLoad (timelinePath game) (timelineFingerprint game) with
+    | TimelineLoaded (timeline, events) ->
+      s.LoadStateTimeline(timeline, events)
       if not (List.isEmpty events) then
-        statusText.Text <- sprintf "%s: loaded %d saved key events" game.Name events.Length
-      not (List.isEmpty events)
-    | ReplayMissing ->
-      replaySavedRevision <- s.KeyLog.Revision
-      false
-    | ReplayIgnored reason ->
-      replaySavedRevision <- s.KeyLog.Revision
-      replayIgnoreReason <- Some reason
-      statusText.Text <- sprintf "%s: saved replay ignored (%s)" game.Name reason
+        statusText.Text <- sprintf "%s: loaded %d frames, %d key events" game.Name timeline.Count events.Length
+      timeline.Count > 1
+    | TimelineMissing -> false
+    | TimelineIgnored reason ->
+      statusText.Text <- sprintf "%s: saved timeline ignored (%s)" game.Name reason
       false
 
 
@@ -215,7 +254,7 @@ type MainWindow() as self =
   /// auto -> oracle boot (slow, first run); cold manual -> the user runs the
   /// loader in the oracle and marks the entry point.
   let launchGame (m: GameManifest) =
-    saveReplay true
+    saveTimeline false
     bootStartedAt <- System.DateTime.UtcNow
     bootScreen <- None
     bootFrameNo <- 0
@@ -223,7 +262,6 @@ type MainWindow() as self =
     manualTimer.Stop()
     currentGame <- Some m
     bootGameId <- m.GameId
-    replaySavedRevision <- -1
     match EntryCache.tryLoad m.Rom m.Tzx with
     | Some _ ->
       bootTask <- Some(System.Threading.Tasks.Task.Run(fun () ->
@@ -260,7 +298,6 @@ type MainWindow() as self =
   let routineList = ListBox()
   let routineDetail = TextBlock()
   let routineCountLabel = TextBlock()
-  let graphCanvas = Canvas()
   let trayWrap = WrapPanel()
   let trayCountLabel = TextBlock()
   let clearTrayBtn = Button(Content = "Clear")
@@ -283,6 +320,8 @@ type MainWindow() as self =
   let exportScriptBtn = Button(Content = "Export script")
   let timelineBtn = Button(Content = "Timeline")
   let timeLabel = TextBlock(Text = "00:00", VerticalAlignment = VerticalAlignment.Center)
+  /// Recording stats (timeline size, rates), refreshed twice a second.
+  let recStatsLabel = TextBlock(Foreground = dim, VerticalAlignment = VerticalAlignment.Center)
   let goBtn = Button(Content = "Go")
   let replayBtn = Button(Content = "Replay")
   let mutable rewinding = false // slider drag in progress
@@ -297,7 +336,25 @@ type MainWindow() as self =
   let mutable controlGameDir = ""
   /// Disassembly window mode: linear memory sweep vs execution trace.
   let mutable disasmModeMemory = false
+  /// Alternate IDA-style block/graph rendering of the memory view.
+  let mutable disasmModeGraph = false
+  /// Graph-view expand toggle: show ALL blocks instead of the active
+  /// brush selection filter.
+  let mutable disasmGraphAll = false
   let mutable memCursor = 0x8000
+  /// Why the cursor sits at its address (the last jump site that set it) -
+  /// reported alongside a code-DESYNC warning, where the linear sweep can't
+  /// reach the cursor as an instruction start.
+  let mutable memCursorReason = "session start"
+  /// Top address of the memory-view window. None (or out of range) means
+  /// "recenter on memCursor". The wheel moves this anchor, so the
+  /// highlighted cursor instruction stays on its address and scrolls with
+  /// the content instead of being pinned to the middle row.
+  let mutable memViewTop: int option = None
+  let gotoMemCursor (addr: int) (reason: string) =
+    memCursor <- addr
+    memCursorReason <- reason
+    memViewTop <- None // jumps recenter the window on the new cursor
   /// Memory scan state: baseline snapshot + surviving addresses.
   let mutable scanBaseline: byte[] option = None
   let mutable scanBaselineFrame = -1
@@ -321,11 +378,24 @@ type MainWindow() as self =
   let importCtrlBtn = Button(Content = "Import ctrl...", Width = 96.0)
   let newCtrlBtn = Button(Content = "New ctrl", Width = 64.0)
   let exportCtrlBtn = Button(Content = "Export skool...", Width = 100.0)
-  let memModeBtn = ToggleButton(Content = "Memory", Width = 68.0)
-  let execModeBtn = ToggleButton(Content = "Execution", Width = 76.0, IsChecked = Nullable<bool>(true))
+  // RadioButtons (one group) instead of ToggleButtons: clicking the active
+  // mode keeps it checked, so the view can never fall into a ghost mode with
+  // no button highlighted.
+  let memModeBtn = RadioButton(Content = "Memory", Width = 68.0, GroupName = "codeview", Foreground = normal)
+  let execModeBtn = RadioButton(Content = "Execution", Width = 76.0, GroupName = "codeview", IsChecked = Nullable<bool>(true), Foreground = normal)
+  let graphModeBtn = RadioButton(Content = "Graph", Width = 60.0, GroupName = "codeview", Foreground = normal)
+  let graphAllBtn = ToggleButton(Content = "All", Width = 44.0, Foreground = normal, ToolTip = "Graph view: ignore the brush selection and show all blocks")
+  /// Code graph view surfaces (alternate rendering of the memory view).
+  /// Separate from the call graph's graphCanvas: a canvas can only be
+  /// hosted by one parent and each view Clears its own surface.
+  let graphScroll = ScrollViewer(VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+  let codeGraphCanvas = Canvas(Background = SolidColorBrush(Color.FromRgb(0x18uy, 0x18uy, 0x20uy)))
+  /// Call graph surface (Functions tab, drawGraph).
+  let graphCanvas = Canvas(Background = SolidColorBrush(Color.FromRgb(0x18uy, 0x18uy, 0x20uy)))
   /// Shared comment text for all mass-comment buttons.
   let commentBox = TextBox(Width = 420.0, Height = 22.0)
   let idxCmtBtn = Button(Content = "idx -> cmt", ToolTip = "Comment the current instruction index (execution trace)")
+  let lineCmtBtn = Button(Content = "addr -> cmt", ToolTip = "Comment the current address: the cursor in memory/graph view, or the current instruction's PC in execution view (text from the comment box)")
   let nameBeforeBtn = Button(Content = "Name region before cursor", ToolTip = "Name the address region ending at the current instruction")
   let nameABtn = Button(Content = "Name A", ToolTip = "Name the code region executed in selector range A")
   let nameBBtn = Button(Content = "Name B", ToolTip = "Name the code region executed in selector range B")
@@ -337,6 +407,72 @@ type MainWindow() as self =
   let oracleRadio = RadioButton(Content = "Oracle", GroupName = "engine", IsChecked = Nullable<bool>(true), Foreground = normal)
   let ceRadio = RadioButton(Content = "game.fs (CE)", GroupName = "engine", Foreground = normal)
   let diffRadio = RadioButton(Content = "Both + compare", GroupName = "engine", Foreground = normal)
+
+  /// When set, the next switch to memory view centers on this address
+  /// instead of the execution view's current PC ("sync to this instruction").
+  let mutable pendingMemCursor: int option = None
+
+  /// Right-click menu for a code row (list or graph surface): add a Line
+  /// comment at the address (text from the shared comment box), edit or
+  /// clear it, add an exec comment for the log occurrence, copy the address,
+  /// or switch to memory view synced to this instruction. `refresh`
+  /// re-renders whichever code surface is showing. `target` anchors the
+  /// popup - without a placement target an IsOpen menu never displays.
+  let openRowMenu (target: FrameworkElement) (addr: int) (instrIdx: int) (refresh: unit -> unit) =
+    let hasComment =
+      match control with
+      | Some c -> ControlFile.commentAt c addr |> Option.isSome
+      | None -> false
+    let menu = ContextMenu()
+    let mk header act =
+      let mi = MenuItem(Header = header)
+      mi.Click.Add(fun _ -> act ())
+      menu.Items.Add mi |> ignore
+    let setText (m: ControlComment) =
+      match control with
+      | Some c ->
+        control <-
+          (if m.Kind = Line then Some (ControlFile.addLine c m.Addr m.Text)
+           else Some (ControlFile.upsert c m))
+        refresh ()
+        statusText.Text <- sprintf "comment at %04X" addr
+      | None -> statusText.Text <- "no control file - click New ctrl first"
+    mk (sprintf "add comment at %04X" addr) (fun _ ->
+      setText { Kind = Line; Addr = addr; EndExcl = 0; InstrIndex = -1; Text = "" })
+    if instrIdx >= 0 then
+      mk (sprintf "exec comment at instruction #%d" instrIdx) (fun _ ->
+        setText { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = instrIdx; Text = "" })
+    if hasComment then
+      mk (sprintf "edit comment at %04X (loads it into the comment box)" addr) (fun _ ->
+        match control with
+        | Some c ->
+          commentBox.Text <- ControlFile.commentAt c addr |> Option.defaultValue ""
+          commentBox.Focus () |> ignore
+          commentBox.SelectAll ()
+          statusText.Text <- sprintf "editing %04X - re-apply with 'add comment' when done" addr
+        | None -> ())
+      mk (sprintf "clear comment at %04X" addr) (fun _ ->
+        match control with
+        | Some c ->
+          control <- Some(ControlFile.upsert c { Kind = Line; Addr = addr; EndExcl = 0; InstrIndex = -1; Text = "" })
+          refresh ()
+          statusText.Text <- sprintf "comment cleared at %04X" addr
+        | None -> ())
+    if not disasmModeMemory then
+      mk "switch to memory view synced to this instruction" (fun _ ->
+        pendingMemCursor <- Some addr
+        if memModeBtn.IsChecked <> Nullable<bool>(true) then memModeBtn.IsChecked <- Nullable<bool>(true)
+        else
+          (match pendingMemCursor with Some a -> memCursor <- a | None -> ())
+          pendingMemCursor <- None
+          refresh ())
+    mk (sprintf "copy address %04X" addr) (fun _ ->
+      System.Windows.Clipboard.SetText(sprintf "0x%04X" addr)
+      statusText.Text <- sprintf "copied %04X" addr)
+    menu.PlacementTarget <- target
+    menu.Placement <- PlacementMode.MousePoint
+    menu.IsOpen <- true
+
   // scan tab
   let scanStartBtn = Button(Content = "Start memory scan")
   let scanChangedBtn = Button(Content = "= changed") 
@@ -455,7 +591,7 @@ type MainWindow() as self =
   /// Current timeline extent in frames (replay extent when replaying).
   let timelineExtent () : int64 =
     match session with
-    | Some s -> max 1L (int64 (max s.ReplayEndFrame s.History.LastFrame))
+    | Some s -> max 1L (int64 (max s.ReplayEndFrame s.TimelineExtent))
     | None ->
       match currentTrace () with
       | Some t when t.FrameTicks.Length > 0 -> int64 t.FrameTicks.Length
@@ -484,8 +620,10 @@ type MainWindow() as self =
     let dir = controlDir ()
     if dir <> "" then
       try
-        let span = int (timelineExtent ()) * 50 + 50, int (timelineExtent ()) * 50 + 100
-        control <- Some(ControlFile.loadOrCreate dir (fst span, snd span))
+        // New control files cover all of RAM; the block map starts empty
+        // and is filled in on the map. (The old timeline-derived default
+        // produced bogus 50-byte spans like [100,150).)
+        control <- Some(ControlFile.loadOrCreate dir (0x4000, 0x10000))
         controlGameDir <- dir
         statusText.Text <- sprintf "control file loaded (%d comments)" control.Value.Comments.Length
       with ex -> statusText.Text <- sprintf "control load failed: %s" ex.Message
@@ -541,12 +679,25 @@ type MainWindow() as self =
             sprintf "-> %04X  %-11s  %s   <<< cannot execute here" addr hex insn.Text
           else
             sprintf "   %04X  %-11s  %s" addr hex insn.Text
-        rows.Add { Tag = tag; Brush = (if isErr then red else normal); IsCurrent = isErr; Addr = addr; InstrIdx = -1 }
+        rows.Add { Tag = tag; Brush = (if isErr then red else normal); Tint = null; IsCurrent = isErr; Addr = addr; InstrIdx = -1 }
         addr <- (addr + insn.Length) &&& 0xFFFF
-  /// MM:SS of accumulated play time at 50 fps (frames / 50).
+      disasmList.ItemsSource <- rows
+      if disasmModeGraph then
+        // the fault listing is a memory view; show the list pane over the
+        // graph surface until the next mode toggle rebuilds
+        graphScroll.Visibility <- Visibility.Collapsed
+        disasmList.Visibility <- Visibility.Visible
+      disasmTarget.Text <- sprintf "target: 0x%04X (fault site)" pc
+    | None -> ()
+  /// MM:SS of play time at 50 fps (frames / 50), shown as current / total:
+  /// the total includes frames loaded from the saved recording, which are
+  /// seekable before they execute.
   let updateTimeLabel (frames: int) =
-    let totalSeconds = frames / 50
-    timeLabel.Text <- sprintf "%02d:%02d" (totalSeconds / 60) (totalSeconds % 60)
+    let curSeconds = frames / 50
+    let totalSeconds = int (timelineExtent ()) / 50
+    timeLabel.Text <-
+      sprintf "%02d:%02d / %02d:%02d"
+        (curSeconds / 60) (curSeconds % 60) (totalSeconds / 60) (totalSeconds % 60)
 
   let renderFrame () =
     match ceGame with
@@ -609,6 +760,7 @@ type MainWindow() as self =
     if e.Length = 0uy then
       { Tag = sprintf "%07d  ----  INT -> %04X   (%d tstates)" idx e.Target e.Cycles
         Brush = red
+        Tint = null
         IsCurrent = isCurrent
         Addr = -1
         InstrIdx = idx }
@@ -636,6 +788,7 @@ type MainWindow() as self =
       let cm = if comment <> "" then sprintf "  ; %s" comment else ""
       { Tag = sprintf "%07d  %04X  %-11s  %s%s%s%s%s" idx e.Pc hex insn.Text tail sm lifted cm
         Brush = brush
+        Tint = null
         IsCurrent = isCurrent
         Addr = int e.Pc
         InstrIdx = idx }
@@ -657,6 +810,81 @@ type MainWindow() as self =
       |> List.collect (fun b -> [ b.Start .. b.EndExcl - 1 ])
       |> Set.ofList
     | None -> Set.empty
+
+  /// Active-brush tints for the code view (match the timeline chip colors).
+  let tintA = SolidColorBrush(Color.FromArgb(0x30uy, 0x38uy, 0xBDuy, 0xF8uy))
+  let tintB = SolidColorBrush(Color.FromArgb(0x30uy, 0xFBuy, 0xBFuy, 0x24uy))
+
+  /// The address set of the ACTIVE brush: PCs executed inside the brush's
+  /// frame range. None when there is no trace yet or the range is empty.
+  /// Cached against (brush, range, trace): pcsInFrames scans EVERY trace
+  /// entry, so recomputing it per row made the graph view freeze the UI
+  /// thread (rows x trace-entries iterations).
+  let mutable activeSelCache: (BrushId * int * int * Trace * (BrushId * Set<int>) option) option = None
+  let activeSelection () : (BrushId * Set<int>) option =
+    match currentTrace () with
+    | Some t when t.Entries.Length > 0 ->
+      let which = timeline.ActiveBrush
+      let fA, fB = rangeOf which
+      match activeSelCache with
+      | Some (w, a, b, t2, v) when w = which && a = fA && b = fB && obj.ReferenceEquals(t2, t) -> v
+      | _ ->
+        let pcs = ControlFile.pcsInFrames t fA fB
+        let v = if List.isEmpty pcs then None else Some (which, Set.ofList pcs)
+        activeSelCache <- Some (which, fA, fB, t, v)
+        v
+    | _ -> None
+
+  /// Basic blocks for the code/graph views. The span is the bounding box
+  /// of the executed region and the brush selection, plus any control-file
+  /// code blocks that overlap them. (A control file whose code blocks do
+  /// not overlap the executed region is a stale template and is ignored -
+  /// the whole chosen span decodes as code; the splitter's resync handles
+  /// embedded data.) Cached: a decode sweep is a few ms and the pane
+  /// refreshes at 10 Hz.
+  let mutable flowCache: Z80Flow.Block list option = None
+  let mutable flowCacheAt = DateTime.MinValue
+  let flowBlocks () : Z80Flow.Block list =
+    if flowCache.IsNone || (DateTime.Now - flowCacheAt).TotalMilliseconds > 1000.0 then
+      match currentMemory () with
+      | None -> flowCache <- Some []
+      | Some mem ->
+        let counts = currentCounts ()
+        let executed = [ for a in 0 .. 0xFFFF do if counts[a] > 0 then a ]
+        let execBox =
+          if List.isEmpty executed then None
+          else Some (List.min executed, List.max executed + 1)
+        let selBox =
+          match activeSelection () with
+          | Some (_, s) when not (Set.isEmpty s) -> Some (Set.minElement s, Set.maxElement s + 1)
+          | _ -> None
+        let controlBox =
+          match control with
+          | Some c ->
+            let codes = c.Blocks |> List.filter (fun b -> b.Kind = Code)
+            if codes.IsEmpty then None
+            else Some ((codes |> List.minBy (fun b -> b.Start)).Start,
+                       (codes |> List.maxBy (fun b -> b.EndExcl)).EndExcl)
+          | None -> None
+        let overlaps (a1, b1) (a2, b2) = a1 < b2 && a2 < b1
+        let useControl =
+          match controlBox with
+          | None -> false
+          | Some cb ->
+            (match execBox with Some eb -> overlaps cb eb | None -> false)
+            || (match selBox with Some sb -> overlaps cb sb | None -> false)
+        let present =
+          [ execBox; selBox; (if useControl then controlBox else None) ]
+          |> List.choose id
+        let start, endExcl =
+          if present.IsEmpty then 0x4000, 0x10000
+          else
+            max 0x4000 ((present |> List.map fst |> List.min) - 0x200),
+            min 0x10000 ((present |> List.map snd |> List.max) + 0x200)
+        let start, endExcl = if start < endExcl then start, endExcl else 0x4000, 0x10000
+        flowCache <- Some (Z80Flow.splitBlocks mem start endExcl (fun _ -> true))
+      flowCacheAt <- DateTime.Now
+    flowCache |> Option.defaultValue []
 
   /// The address universe per scan options.
   let scanUniverse () : int[] =
@@ -684,6 +912,7 @@ type MainWindow() as self =
           let prev = match scanBaseline with Some b when a < b.Length -> b[a] | _ -> 0uy
           { Tag = sprintf "%04X  %02X%s" a mem[a] (if prev <> mem[a] then sprintf "  (was %02X)" prev else "")
             Brush = normal
+            Tint = null
             IsCurrent = false
             Addr = a
             InstrIdx = -1 })
@@ -741,9 +970,13 @@ type MainWindow() as self =
 
   /// hiBg as a brush for the memory-mode cursor row.
   let hiBgBrush = SolidColorBrush(Color.FromRgb(0x2Euy, 0x34uy, 0x44uy))
+  /// Foreground for the cursor row: hiBg (the IsCurrent row background) is
+  /// nearly black, so the row needs its own bright text color to stay legible.
+  let bright = SolidColorBrush(Color.FromRgb(0xECuy, 0xEFuy, 0xF8uy))
 
-  /// One row of the linear memory sweep.
-  let memRowFor (mem: byte[]) (addr: int) : DisasmRow =
+  /// One row of the linear memory sweep. The active-brush selection is
+  /// passed in by the caller (computed once per refresh, never per row).
+  let memRowFor (mem: byte[]) (addr: int) (sel: (BrushId * Set<int>) option) : DisasmRow =
     let insn = Disasm.disasmMemory mem addr
     let hex =
       [ for i in 0 .. insn.Length - 1 -> sprintf "%02X" mem[(addr + i) &&& 0xFFFF] ]
@@ -753,11 +986,17 @@ type MainWindow() as self =
       | Some c -> ControlFile.commentAt c addr |> Option.defaultValue ""
       | None -> ""
     let cm = if comment <> "" then sprintf "  ; %s" comment else ""
+    let tint =
+      match sel with
+      | Some (which, s) when s.Contains addr ->
+        (match which with A -> tintA :> Brush | B -> tintB :> Brush)
+      | _ -> null
     { Tag = sprintf "  %04X  %-11s  %s%s" addr hex insn.Text cm
       Brush =
-        if addr = memCursor then hiBgBrush
+        if addr = memCursor then bright
         elif (currentCounts())[addr] > 0 then cyan
         else normal
+      Tint = tint
       IsCurrent = addr = memCursor
       Addr = addr
       InstrIdx = -1 }
@@ -786,30 +1025,322 @@ type MainWindow() as self =
     controlMap.ControlData <- control
     controlMap.InstrStarts <- getInstrStarts ()
     controlMap.MemoryImage <- currentMemory ()
+  /// Graph view (plan_code_graph): blocks as boxes in address order,
+  /// arrows routed on right rails (taken = green, jump = cyan, call =
+  /// orange), back edges marked by an upward arrowhead. No virtualization:
+  /// every block decodes its rows into plain TextBlocks on a Canvas.
+  /// Skipped entirely when nothing it depends on changed: refreshDisasm
+  /// also runs off timers (cinema at 30 ms), and re-creating thousands of
+  /// TextBlocks per tick would wedge the UI thread.
+  let mutable lastGraphMem: byte[] option = None
+  let mutable lastGraphSel: (BrushId * Set<int>) option option = None
+  let mutable lastGraphAll = false
+  let mutable lastGraphControl: ControlFile option = None
+  let mutable lastGraphEpoch = (-1, -1)
+  /// `onRowMenu` opens the row context menu for an address (injected by
+  /// refreshDisasm, which owns the refresh path).
+  let buildGraph (onRowMenu: int -> unit) =
+    let sel = if disasmGraphAll then None else activeSelection ()
+    let mem = currentMemory ()
+    // mem is the same array instance for a whole session, so instance
+    // equality alone never sees content changes (self-modifying code, tape
+    // loads) and the graph went permanently stale. Pair it with a cheap
+    // session epoch; loaded traces are immutable, so they stay instance-keyed.
+    let epoch =
+      match loaded, session with
+      | Some _, _ -> (-1, -1)
+      | None, Some s -> (s.Frame, s.Recorder.SelfModCount)
+      | None, None -> (-1, -1)
+    if obj.ReferenceEquals(mem, lastGraphMem)
+       && lastGraphSel = Some sel
+       && lastGraphAll = disasmGraphAll
+       && obj.ReferenceEquals(control, lastGraphControl)
+       && epoch = lastGraphEpoch then
+      ()
+    else
+      lastGraphMem <- mem
+      lastGraphSel <- Some sel
+      lastGraphAll <- disasmGraphAll
+      lastGraphControl <- control
+      lastGraphEpoch <- epoch
+      codeGraphCanvas.Children.Clear()
+      Mouse.OverrideCursor <- Cursors.Wait
+      try
+        match mem with
+        | None -> disasmTarget.Text <- "target: ----"
+        | Some mem ->
+          let blocks =
+            match sel with
+            | Some (_, s) -> flowBlocks () |> List.filter (fun b -> Set.exists (fun a -> a >= b.Start && a < b.EndExcl) s)
+            | None -> flowBlocks ()
+          let blockW, headerH, rowH, gap = 560.0, 18.0, 15.0, 24.0
+          let leftX = 8.0
+          let railRight = leftX + blockW
+          let tops = ResizeArray<float>()
+          let bottoms = ResizeArray<float>()
+          let blockIndex = System.Collections.Generic.Dictionary<int, int>()
+          blocks |> List.iteri (fun i b -> blockIndex[b.Start] <- i)
+          let mutable y = 8.0
+          for b in blocks do
+            tops.Add y
+            let mutable a = b.Start
+            let mutable n = 0
+            while a < b.EndExcl do
+              n <- n + 1
+              a <- a + max 1 (Disasm.disasmMemory mem a).Length
+            y <- y + headerH + float n * rowH + 4.0
+            bottoms.Add y
+            y <- y + gap
+          codeGraphCanvas.Height <- max y 60.0
+          codeGraphCanvas.Width <- railRight + 130.0
+          // blocks
+          for i in 0 .. blocks.Length - 1 do
+            let b = blocks[i]
+            let name =
+              match control with
+              | Some c -> ControlFile.blockAt c b.Start |> Option.map (fun bl -> bl.Name) |> Option.defaultValue ""
+              | None -> ""
+            let p = StackPanel()
+            let header =
+              TextBlock(
+                Text = sprintf "  %04X  %s" b.Start name,
+                FontFamily = mono, FontSize = 11.5, Foreground = cyan,
+                Background = hiBgBrush, Height = headerH - 2.0)
+            p.Children.Add header |> ignore
+            let mutable a = b.Start
+            while a < b.EndExcl do
+              let row = memRowFor mem a sel
+              let tb =
+                TextBlock(
+                  Text = row.Tag, FontFamily = mono, FontSize = 11.5,
+                  Foreground = row.Brush, Background = row.Tint, Height = rowH)
+              let addr = a
+              tb.MouseLeftButtonDown.Add(fun _ ->
+                gotoMemCursor addr "graph view row"
+                disasmTarget.Text <- sprintf "target: 0x%04X (graph view)" addr)
+              tb.MouseRightButtonDown.Add(fun e ->
+                e.Handled <- true
+                onRowMenu addr)
+              p.Children.Add tb |> ignore
+              a <- a + max 1 (Disasm.disasmMemory mem a).Length
+            let border = Border(BorderBrush = dim, BorderThickness = Thickness(1.0), Child = p)
+            Canvas.SetLeft(border, leftX)
+            Canvas.SetTop(border, tops[i])
+            codeGraphCanvas.Children.Add border |> ignore
+          // edges
+          let edgeColor =
+            function
+            | Z80Flow.Branch _ -> green
+            | Z80Flow.Jump _ -> cyan
+            | Z80Flow.Call _ -> orange
+            | _ -> dim
+          let addElbow (x1: float) (y1: float) (x2: float) (y2: float) (rail: float) (color: Brush) =
+            let pl = Polyline(Stroke = color, StrokeThickness = 1.2)
+            for (px, py) in [ x1, y1; rail, y1; rail, y2; x2, y2 ] do
+              pl.Points.Add (Point(px, py))
+            codeGraphCanvas.Children.Add pl |> ignore
+            let head = Polygon(Fill = color, Points = PointCollection())
+            let d = if y2 >= y1 then 5.0 else -5.0
+            head.Points.Add (Point(x2 - 3.5, y2 - d))
+            head.Points.Add (Point(x2 + 3.5, y2 - d))
+            head.Points.Add (Point(x2, y2))
+            codeGraphCanvas.Children.Add head |> ignore
+          let mutable railSlot = 0
+          for i in 0 .. blocks.Length - 1 do
+            let b = blocks[i]
+            match b.Ends with
+            | Z80Flow.Linear -> ()
+            | Z80Flow.Return -> ()
+            | Z80Flow.Jump None | Z80Flow.Branch None -> ()
+            | kind ->
+              let target =
+                match kind with
+                | Z80Flow.Jump (Some t) | Z80Flow.Branch (Some t) | Z80Flow.Call (Some t) -> t
+                | _ -> -1
+              if target >= 0 && blockIndex.ContainsKey target then
+                let j = blockIndex[target]
+                let color = edgeColor kind
+                let fromY = bottoms[i]
+                let toY = tops[j] + 9.0
+                if j = i + 1 then
+                  // adjacent fall-through: short straight arrow
+                  let l = System.Windows.Shapes.Line(X1 = leftX + blockW / 2.0, Y1 = fromY, X2 = leftX + blockW / 2.0, Y2 = toY, Stroke = color, StrokeThickness = 1.2)
+                  codeGraphCanvas.Children.Add l |> ignore
+                  addElbow (leftX + blockW / 2.0) fromY (leftX + blockW / 2.0) toY (leftX + blockW / 2.0) color
+                else
+                  let rail = railRight + 12.0 + 14.0 * float (railSlot % 6)
+                  railSlot <- railSlot + 1
+                  addElbow railRight fromY leftX toY rail color
+          disasmTarget.Text <-
+            match sel with
+            | Some (which, _) -> sprintf "graph view: %d blocks (brush %s)" blocks.Length (match which with A -> "A" | B -> "B")
+            | None -> sprintf "graph view: %d blocks" blocks.Length
+      finally
+        Mouse.OverrideCursor <- null
 
-  let refreshDisasm () =
-    if disasmModeMemory then
+  // ---- code-window scrolling ----------------------------------------------
+  // The list's internal ScrollViewer is discovered lazily from the visual
+  // tree (ListBox.ScrollHost is protected). It is null until the window has
+  // been laid out once; each setRows call retries.
+  let mutable disasmScroll: ScrollViewer option = None
+  let findScroll () =
+    match disasmScroll with
+    | Some s -> Some s
+    | None ->
+      let rec walk (d: DependencyObject) : ScrollViewer option =
+        match d with
+        | :? ScrollViewer as sv -> Some sv
+        | _ ->
+          let n = VisualTreeHelper.GetChildrenCount d
+          let mutable found = None
+          let mutable i = 0
+          while found.IsNone && i < n do
+            found <- walk (VisualTreeHelper.GetChild(d, i))
+            i <- i + 1
+          found
+      let sv = walk disasmList
+      disasmScroll <- sv
+      sv
+
+  /// Swap the code window's rows while keeping the scroll offset stable.
+  /// Assigning a fresh ItemsSource regenerates every container and resets the
+  /// ScrollViewer to the top; refreshDisasm runs off the 30 ms cinema timer
+  /// and every scrub interaction, which made any scroll attempt snap straight
+  /// back. Same row count => same window shape, so re-apply the old offset
+  /// once the new containers are laid out (clamped by the ScrollViewer).
+  let setRows (rows: ResizeArray<DisasmRow>) =
+    let sv = findScroll ()
+    let oldOffset = sv |> Option.map (fun s -> s.VerticalOffset) |> Option.defaultValue 0.0
+    let oldCount = disasmList.Items.Count
+    disasmList.ItemsSource <- rows
+    if oldCount = rows.Count && oldOffset > 0.0 then
+      sv |> Option.iter (fun s ->
+        disasmList.Dispatcher.BeginInvoke(
+          DispatcherPriority.Loaded,
+          Action(fun () -> s.ScrollToVerticalOffset oldOffset))
+        |> ignore)
+
+  let applyViewMode () =
+    disasmList.Visibility <- if disasmModeGraph then Visibility.Collapsed else Visibility.Visible
+    graphScroll.Visibility <- if disasmModeGraph then Visibility.Visible else Visibility.Collapsed
+
+  /// Frame number (1-based) of the trace entry at `idx`, derived from the
+  /// recorded frame-boundary ticks: boundaries are the end-of-frame cycle
+  /// counts, so an entry belongs to the frame after the last boundary at or
+  /// before its start tick. 0 when the trace carries no boundaries.
+  let frameOfEntry (t: Trace) (idx: int) : int =
+    if t.FrameTicks.Length = 0 then 0
+    else
+      let tick = t.Entries[idx].Tick
+      let mutable f = 0
+      while f < t.FrameTicks.Length && t.FrameTicks[f] <= tick do f <- f + 1
+      f + 1
+
+  let rec refreshDisasm () =
+    if disasmModeGraph then
+      // the graph build can own the thread for minutes on wide spans; show
+      // the busy cursor for its duration
+      let prevCursor = Mouse.OverrideCursor
+      Mouse.OverrideCursor <- Cursors.Wait
+      // pump one Render-priority pass so the busy cursor actually shows
+      // before the build wedges the thread; queued input sits at a lower
+      // priority, so nothing re-enters mid-build
+      Dispatcher.CurrentDispatcher.Invoke(
+        DispatcherPriority.Render, System.Action(fun () -> ())) |> ignore
+      try
+        buildGraph (fun addr -> openRowMenu codeGraphCanvas addr -1 refreshDisasm)
+      finally
+        Mouse.OverrideCursor <- prevCursor
+    elif disasmModeMemory then
       match currentMemory () with
       | None ->
         disasmList.ItemsSource <- null
         disasmTarget.Text <- "target: ----"
       | Some mem ->
-        let rows = ResizeArray<DisasmRow>()
-        let mutable a = max 0 ((memCursor - 0x40) &&& 0xFFFF)
-        // Align to an instruction start below the cursor.
-        while rows.Count < 20 && a < memCursor do
-          let next = (a + (Disasm.disasmMemory mem a).Length) &&& 0xFFFF
-          if next > memCursor then (rows.Clear(); rows.Add(memRowFor mem a); a <- memCursor)
-          else
-            if next <= memCursor then rows.Add(memRowFor mem a)
-            a <- next
-        // From cursor: fill the rest of the window.
-        let mutable cur = memCursor
-        while rows.Count < 41 do
-          rows.Add(memRowFor mem cur)
-          cur <- (cur + (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
-        disasmList.ItemsSource <- rows
-        disasmTarget.Text <- sprintf "target: 0x%04X (memory view)" memCursor
+        match activeSelection () with
+        | Some (which, sel) ->
+          // Selected blocks: every block touching the selection, decoded
+          // in full, tinted where the address is selected. Scrollable.
+          let blocks =
+            flowBlocks ()
+            |> List.filter (fun b -> Set.exists (fun a -> a >= b.Start && a < b.EndExcl) sel)
+          let rows = ResizeArray<DisasmRow>()
+          for b in blocks do
+            let mutable a = b.Start
+            while a < b.EndExcl do
+              rows.Add(memRowFor mem a (Some (which, sel)))
+              a <- a + max 1 (Disasm.disasmMemory mem a).Length
+          setRows rows
+          let lo = blocks |> List.map (fun b -> b.Start) |> function [] -> 0x10000 | xs -> List.min xs
+          let hi = blocks |> List.map (fun b -> b.EndExcl) |> function [] -> 0 | xs -> List.max xs
+          disasmTarget.Text <-
+            sprintf "target: 0x%04X (memory view, brush %s: %d blocks 0x%04X-0x%04X)" memCursor
+              (match which with A -> "A" | B -> "B") blocks.Length lo hi
+        | None ->
+          let rows = ResizeArray<DisasmRow>()
+          // Recentre (only when the anchor is unset, i.e. after a jump):
+          // decode forward from a floor below the cursor until a boundary
+          // sequence lands exactly on it, then start the window 20
+          // boundaries back - the cursor row is a true instruction start
+          // and the block above it is flush. If no alignment reaches the
+          // cursor, it sits mid-instruction (a jump into the middle, or
+          // bytes shifted by self-modification): a code DESYNC - the window
+          // parks on the cursor and the target line says so.
+          let memTop =
+            match memViewTop with
+            | Some t when t >= 0 && t < 0x10000 -> t
+            | _ ->
+              let floor = max 0 (memCursor - 0xA0)
+              let starts =
+                [ floor - 4; floor - 3; floor - 2; floor - 1; floor ]
+                |> List.filter (fun s -> s >= 0)
+              let candidate =
+                starts |> List.tryPick (fun start ->
+                  let bounds = ResizeArray<int>()
+                  let mutable a = start
+                  let mutable aligned = false
+                  while a < memCursor do
+                    let next = a + max 1 (Disasm.disasmMemory mem a).Length
+                    if next = memCursor then aligned <- true
+                    if next <= memCursor then bounds.Add a
+                    a <- next
+                  if aligned && bounds.Count >= 20 then Some bounds.[bounds.Count - 20]
+                  elif aligned && bounds.Count > 0 then Some bounds.[0]
+                  elif aligned then Some memCursor
+                  else None)
+              match candidate with
+              | Some t -> t
+              | None -> memCursor
+          memViewTop <- Some memTop
+          let mutable cur = memTop
+          while rows.Count < 41 do
+            rows.Add(memRowFor mem cur None)
+            cur <- (cur + (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
+          setRows rows
+          // DESYNC probe, independent of the window: is the cursor itself an
+          // instruction start in the linear decode around it?
+          let alignedAt (a: int) =
+            if a <= 0 then true
+            else
+              let floor = max 0 (a - 0x44)
+              [ floor - 4; floor - 3; floor - 2; floor - 1; floor ]
+              |> List.filter (fun s -> s >= 0)
+              |> List.exists (fun start ->
+                let mutable p = start
+                let mutable hit = false
+                while p < a do
+                  let next = p + max 1 (Disasm.disasmMemory mem p).Length
+                  if next = a then hit <- true
+                  p <- next
+                hit)
+          let desync = memCursor > 0 && not (alignedAt memCursor)
+          disasmTarget.Text <-
+            if desync then
+              sprintf
+                "target: 0x%04X (memory view) - code DESYNC detected: cursor is mid-instruction in this sweep (cursor set by: %s)"
+                memCursor memCursorReason
+            else
+              sprintf "target: 0x%04X (memory view)" memCursor
     else
       match currentTrace () with
       | None ->
@@ -822,12 +1353,41 @@ type MainWindow() as self =
         else
           let c = max 0 (min cursor (t.Entries.Length - 1))
           let rows = ResizeArray<DisasmRow>()
+          let mutable lastIdx = -1
           for j in -20 .. 20 do
             let idx = c + j
             if idx >= 0 && idx < t.Entries.Length then
+              // Timeline jumps leave tick gaps in the log; mark the seam so
+              // the discontinuity reads as a landmark, not corrupted order.
+              if idx > 0 && int t.Entries[idx].Tick - int t.Entries[idx - 1].Tick > 2 * 69888 then
+                rows.Add
+                  { Tag = "  ---------- jump ----------"
+                    Brush = red
+                    Tint = null
+                    IsCurrent = false
+                    Addr = -1
+                    InstrIdx = -1 }
               rows.Add(rowFor t t.Entries[idx] idx (idx = c))
-          disasmList.ItemsSource <- rows
-          disasmTarget.Text <- sprintf "target: 0x%04X (instruction #%d)" (int t.Entries[c].Pc) c
+              lastIdx <- idx
+          // When the window reaches the log's end, make the boundary
+          // explicit: seeks into the recorded future pin here because
+          // nothing has executed past this point yet.
+          if lastIdx = t.Entries.Length - 1 then
+            let extent =
+              if t.FrameTicks.Length > 0 then sprintf "frame %d" t.FrameTicks.Length
+              else sprintf "%d entries" t.Entries.Length
+            rows.Add
+              { Tag = sprintf "  ---------- end of executed log (%s) ----------" extent
+                Brush = dim
+                Tint = null
+                IsCurrent = false
+                Addr = -1
+                InstrIdx = -1 }
+          setRows rows
+          let fr = frameOfEntry t c
+          disasmTarget.Text <-
+            if fr = 0 then sprintf "target: 0x%04X (instruction #%d)" (int t.Entries[c].Pc) c
+            else sprintf "target: 0x%04X (instruction #%d frame %d)" (int t.Entries[c].Pc) c fr
     syncMapData ()
 
   let updateFlags (af: int) =
@@ -876,6 +1436,46 @@ type MainWindow() as self =
     | "red" -> red
     | _ -> normal
 
+  /// Show the live machine registers - the restored state after a frame
+  /// seek. The trace-snapshot path in refreshRegs cannot reflect a future
+  /// jump: no instruction has executed there, so no snapshot exists.
+  let showLiveRegs (s: TraceSession) : int =
+    let r = s.Regs
+    setReg "AF" (int (r.Get Jetpac2.Core.R16.AF))
+    setReg "BC" (int (r.Get Jetpac2.Core.R16.BC))
+    setReg "DE" (int (r.Get Jetpac2.Core.R16.DE))
+    setReg "HL" (int (r.Get Jetpac2.Core.R16.HL))
+    setReg "AF'" (int (r.Get Jetpac2.Core.R16.AF_))
+    setReg "BC'" (int (r.Get Jetpac2.Core.R16.BC_))
+    setReg "DE'" (int (r.Get Jetpac2.Core.R16.DE_))
+    setReg "HL'" (int (r.Get Jetpac2.Core.R16.HL_))
+    setReg "IX" (int (r.Ix ()))
+    setReg "IY" (int (r.Iy ()))
+    setReg "SP" (int (r.Sp ()))
+    setReg "I" (int (r.I ()))
+    setReg "R" (int (r.R ()))
+    let pc = (int (r.Pc ())) &&& 0xFFFF
+    pcCell.Text <- sprintf "%04X" pc
+    updateFlags (int (r.Get Jetpac2.Core.R16.AF))
+    markerPc <- pc
+    pc
+
+  /// After a frame seek (slider drag / timeline scrub / preview): point the
+  /// code window at the seeked state even though nothing executed. Memory
+  /// mode centers on the restored PC; execution mode follows to the first
+  /// logged entry at-or-after the frame, clamped to the trace end (a future
+  /// frame has no entries of its own yet).
+  let seekCodeView (s: TraceSession) (frame: int) =
+    let pc = showLiveRegs s
+    gotoMemCursor pc "frame seek"
+    if not disasmModeMemory && not disasmModeGraph then
+      match currentTrace () with
+      | Some t when t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
+        cursor <- entryAtFrame t (min frame (t.FrameTicks.Length - 1))
+      | _ -> ()
+    refreshDisasm ()
+    timeline.Playhead <- int64 s.Frame
+
   let refreshHeatmap () =
     let counts = currentCounts ()
     let selfMod = currentSelfModified ()
@@ -885,7 +1485,12 @@ type MainWindow() as self =
     for y in 0 .. 255 do
       for x in 0 .. 255 do
         let c = counts[i]
-        let li = if c <= 0 then 0 else min 9 (int (9.0 * (log10 (float c) / logMax)))
+        // logMax is 0 when every executed PC ran exactly once; treat that
+        // flat case as full heat instead of feeding NaN into the LUT index.
+        let li =
+          if c <= 0 then 0
+          elif logMax <= 0.0 then 9
+          else min 9 (int (9.0 * (log10 (float c) / logMax)))
         let col = heatLut[li]
         let p = i * 4
         if selfMod[i] then
@@ -917,8 +1522,13 @@ type MainWindow() as self =
   let segmentsOf (t: Trace) : int[] =
     let n = max 1 (t.Entries.Length / 512)
     let segs = Array.zeroCreate<int> 512
+    // Bucket by entry index, not Tick: Tick is absolute machine cycles
+    // (~20 per instruction), so tick/n would blow past 511 a few percent
+    // into the trace and pile everything into the last bucket.
+    let mutable i = 0
     for e in t.Entries do
-      segs[min 511 (int e.Tick / n)] <- segs[min 511 (int e.Tick / n)] + 1
+      segs[min 511 (i / n)] <- segs[min 511 (i / n)] + 1
+      i <- i + 1
     segs
 
   let refreshStrip () =
@@ -953,6 +1563,46 @@ type MainWindow() as self =
           stripPixels[p + 2] <- 255uy
           stripPixels[p + 3] <- 255uy
       stripBmp.WritePixels(Int32Rect(0, 0, 512, 24), stripPixels, 512 * 4, 0)
+
+  // ---- graphics view --------------------------------------------------------
+  // Sprite finder: draws an 8 KB window of memory starting at gfxBase,
+  // read byte for byte. One byte = 8 horizontal pixels (MSB leftmost):
+  // the first width/8 bytes sit side by side on bitmap row 0, the next
+  // width/8 on row 1, and so on; at the bitmap bottom drawing wraps to
+  // the top of the next row-width column. With the default 8 the bytes
+  // simply march down the bitmap and step 8px right every 256 bytes, so
+  // consecutive bytes form an unbroken vertical run and sprite data
+  // reads as contiguous streaks instead of scatter. Black and white
+  // only: 1-bits white, 0-bits black.
+  let refreshGfx () =
+    let baseAddr = gfxBase &&& 0xFFFF
+    let w = max 8 (min 256 gfxRowWidth)
+    let bytesPerRow = w / 8
+    let blocks = 256 / w
+    for p in 0 .. 4 .. gfxPixels.Length - 4 do
+      gfxPixels[p] <- 0uy
+      gfxPixels[p + 1] <- 0uy
+      gfxPixels[p + 2] <- 0uy
+      gfxPixels[p + 3] <- 255uy
+    match currentMemory () with
+    | Some mem ->
+      for block in 0 .. blocks - 1 do
+        for row in 0 .. 255 do
+          for byteInRow in 0 .. bytesPerRow - 1 do
+            let i = (block * 256 + row) * bytesPerRow + byteInRow
+            let bits = mem[(baseAddr + i) &&& 0xFFFF]
+            let px = block * w + byteInRow * 8
+            for col in 0 .. 7 do
+              if bits &&& (0x80uy >>> col) <> 0uy then
+                let p = ((row * 256) + (px + col)) * 4
+                gfxPixels[p] <- 0xFFuy
+                gfxPixels[p + 1] <- 0xFFuy
+                gfxPixels[p + 2] <- 0xFFuy
+    | None -> ()
+    gfxBmp.WritePixels(Int32Rect(0, 0, 256, 256), gfxPixels, 256 * 4, 0)
+    let visible = blocks * bytesPerRow * 256
+    let hi = (baseAddr + visible - 1) &&& 0xFFFF
+    gfxAddrLabel.Text <- sprintf "%04Xh - %04Xh (%d bytes)" baseAddr hi visible
 
   let refreshCursorLabel () =
     let n = currentEntryCount ()
@@ -1165,7 +1815,6 @@ type MainWindow() as self =
     cinemaPlaying <- false
     cinemaTimer.Stop()
     previewTimer.Stop()
-    saveReplay true
     playBtn.Content <- "Play"
     buildTraceNow ()
     clampCursor ()
@@ -1328,6 +1977,7 @@ type MainWindow() as self =
     factory.SetValue(TextBlock.FontFamilyProperty, mono)
     factory.SetValue(TextBlock.FontSizeProperty, 13.0)
     factory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
+    factory.SetValue(TextBlock.BackgroundProperty, Binding("Tint"))
     itemTemplate.VisualTree <- factory
     disasmList.ItemTemplate <- itemTemplate
     let containerStyle = Style(typeof<ListBoxItem>)
@@ -1432,24 +2082,29 @@ type MainWindow() as self =
     DockPanel.SetDock(cursorLabel, Dock.Top)
     center.Children.Add(cursorLabel) |> ignore
 
-    // 3. engine radios + disasm mode toggles above the code window
-    let modeRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 4.0, 0.0, 4.0))
+    // 3. engine radios + disasm mode toggles above the code window.
+    // Two rows: packing both groups into one horizontal StackPanel made
+    // the trailing code-view buttons clip out of view on narrower windows.
+    let modeRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 4.0, 0.0, 2.0))
     let engLabel = TextBlock(Text = "engine:", Foreground = dim, VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 4.0, 0.0))
     modeRow.Children.Add engLabel |> ignore
     for r in [ oracleRadio :> FrameworkElement; ceRadio :> FrameworkElement; diffRadio :> FrameworkElement ] do
       r.Margin <- Thickness(0.0, 0.0, 10.0, 0.0)
       r.VerticalAlignment <- VerticalAlignment.Center
       modeRow.Children.Add r |> ignore
-    let sep1 = Border(Width = 1.0, Height = 18.0, Background = dim, Margin = Thickness(4.0, 0.0, 8.0, 0.0), VerticalAlignment = VerticalAlignment.Center)
-    modeRow.Children.Add sep1 |> ignore
-    let modeLabel = TextBlock(Text = "code view:", Foreground = dim, VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 4.0, 0.0))
-    modeRow.Children.Add modeLabel |> ignore
-    memModeBtn.VerticalAlignment <- VerticalAlignment.Center
-    execModeBtn.VerticalAlignment <- VerticalAlignment.Center
-    modeRow.Children.Add memModeBtn |> ignore
-    modeRow.Children.Add execModeBtn |> ignore
     DockPanel.SetDock(modeRow, Dock.Top)
     center.Children.Add modeRow |> ignore
+
+    let viewRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 2.0, 0.0, 4.0))
+    let modeLabel = TextBlock(Text = "code view:", Foreground = dim, VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 4.0, 0.0))
+    viewRow.Children.Add modeLabel |> ignore
+    memModeBtn.VerticalAlignment <- VerticalAlignment.Center
+    execModeBtn.VerticalAlignment <- VerticalAlignment.Center
+    for b in [ memModeBtn :> FrameworkElement; execModeBtn :> FrameworkElement; graphModeBtn :> FrameworkElement; graphAllBtn :> FrameworkElement ] do
+      b.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
+      viewRow.Children.Add b |> ignore
+    DockPanel.SetDock(viewRow, Dock.Top)
+    center.Children.Add viewRow |> ignore
 
     // 4. bottom: shared comment box + mass-comment buttons, then the
     //    disassembly target line (docked BEFORE the code window so the
@@ -1464,7 +2119,7 @@ type MainWindow() as self =
     cmtBar.Children.Add cmtLabel |> ignore
     cmtBar.Children.Add commentBox |> ignore
     let cmtBtnRow = WrapPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
-    for b in [ idxCmtBtn :> FrameworkElement; nameBeforeBtn :> FrameworkElement; nameABtn :> FrameworkElement;
+    for b in [ idxCmtBtn :> FrameworkElement; lineCmtBtn :> FrameworkElement; nameBeforeBtn :> FrameworkElement; nameABtn :> FrameworkElement;
                nameBBtn :> FrameworkElement; cmtABtn :> FrameworkElement; cmtBBtn :> FrameworkElement;
                cmtBNotA :> FrameworkElement; cmtANotB :> FrameworkElement ] do
       b.Margin <- Thickness(0.0, 0.0, 6.0, 3.0)
@@ -1479,8 +2134,110 @@ type MainWindow() as self =
     DockPanel.SetDock(disasmTarget, Dock.Bottom)
     center.Children.Add disasmTarget |> ignore
 
-    // 5. the code window (fills the rest)
-    center.Children.Add(disasmList) |> ignore
+    // Comment edit pane (below the code pane): every comment attached to the
+    // current line, most specific first. Line comments get editable boxes;
+    // block (range/name) comments are shown read-only and marked. Enter on a
+    // code line hands focus here.
+    let cmtPaneBorder = Border(BorderBrush = dim, BorderThickness = Thickness(1.0), Margin = Thickness(0.0, 2.0, 0.0, 2.0))
+    let cmtPaneInner = StackPanel(Margin = Thickness(4.0))
+    let cmtPaneTitle = TextBlock(Text = "comments (click a code line or use arrows)", Foreground = dim, FontSize = 11.0, Margin = Thickness(0.0, 0.0, 0.0, 2.0))
+    let cmtPaneRows = StackPanel()
+    let cmtPaneAddBox = TextBox(Width = 300.0, Height = 20.0)
+    let cmtPaneAddBtn = Button(Content = "add line comment", Width = 116.0)
+    cmtPaneBorder.Child <- cmtPaneInner
+    cmtPaneInner.Children.Add cmtPaneTitle |> ignore
+    cmtPaneInner.Children.Add cmtPaneRows |> ignore
+    let cmtPaneAddRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 2.0, 0.0, 0.0))
+    cmtPaneAddRow.Children.Add cmtPaneAddBox |> ignore
+    cmtPaneAddRow.Children.Add cmtPaneAddBtn |> ignore
+    cmtPaneInner.Children.Add cmtPaneAddRow |> ignore
+    DockPanel.SetDock(cmtPaneBorder, Dock.Bottom)
+    center.Children.Add cmtPaneBorder |> ignore
+
+    let mutable paneAddr: int option = None
+    let mutable paneControl: obj = null
+    let rec rebuildCommentPane (force: bool) =
+      let controlRef = control |> Option.map box |> Option.defaultValue null
+      if force || paneAddr <> Some memCursor || not (Object.ReferenceEquals(paneControl, controlRef)) then
+        paneAddr <- Some memCursor
+        paneControl <- controlRef
+        cmtPaneRows.Children.Clear()
+        cmtPaneTitle.Text <- sprintf "comments at %04X" memCursor
+        match control with
+        | None ->
+          cmtPaneRows.Children.Add(TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)) |> ignore
+        | Some c ->
+          let mkRow (label: string) (labelColor: Brush) (text: string) (readOnly: bool) (original: ControlComment option) =
+            let row = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
+            let tag = TextBlock(Text = label, Foreground = labelColor, FontSize = 11.0, VerticalAlignment = VerticalAlignment.Center, MinWidth = 150.0)
+            row.Children.Add tag |> ignore
+            let box = TextBox(Text = text, Width = 300.0, Height = 20.0, IsReadOnly = readOnly)
+            row.Children.Add box |> ignore
+            match original with
+            | Some m ->
+              let commit () =
+                control <- Some(ControlFile.replaceComment c m box.Text)
+                refreshDisasm ()
+                rebuildCommentPane true
+              let apply = Button(Content = "apply", Width = 48.0, Margin = Thickness(4.0, 0.0, 0.0, 0.0))
+              apply.Click.Add(fun _ -> commit ())
+              let del = Button(Content = "del", Width = 38.0, Margin = Thickness(2.0, 0.0, 0.0, 0.0))
+              del.Click.Add(fun _ ->
+                control <- Some(ControlFile.removeComment c m)
+                refreshDisasm ()
+                rebuildCommentPane true)
+              box.KeyDown.Add(fun e -> if e.Key = Key.Enter then commit ())
+              row.Children.Add apply |> ignore
+              row.Children.Add del |> ignore
+            | None -> ()
+            cmtPaneRows.Children.Add row |> ignore
+          let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = memCursor)
+          let covering kind =
+            c.Comments
+            |> List.filter (fun m -> m.Kind = kind && m.Addr <= memCursor && memCursor < m.EndExcl)
+            |> List.sortBy (fun m -> m.EndExcl - m.Addr)
+          if List.isEmpty lines && List.isEmpty (covering Range) && List.isEmpty (covering Name) then
+            cmtPaneRows.Children.Add(TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)) |> ignore
+          for m in lines do
+            mkRow "line" normal m.Text false (Some m)
+          for m in covering Range do
+            mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text true None
+          for m in covering Name do
+            mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text true None
+    cmtPaneAddBtn.Click.Add(fun _ ->
+      match control with
+      | Some c ->
+        control <- Some(ControlFile.addLine c memCursor cmtPaneAddBox.Text)
+        cmtPaneAddBox.Text <- ""
+        refreshDisasm ()
+        rebuildCommentPane true
+      | None -> statusText.Text <- "no control file - click New ctrl first")
+    // pane lights up while it owns the keyboard
+    cmtPaneInner.GotKeyboardFocus.Add(fun _ -> cmtPaneBorder.BorderBrush <- cyan)
+    cmtPaneInner.LostKeyboardFocus.Add(fun _ -> cmtPaneBorder.BorderBrush <- dim)
+    // clicking a code row (or arrows in the focused list) moves the bright
+    // cursor to that row without recentering, and feeds the pane
+    disasmList.SelectionChanged.Add(fun _ ->
+      match disasmList.SelectedItem with
+      | :? DisasmRow as row when row.Addr >= 0 && memCursor <> row.Addr ->
+        memCursor <- row.Addr
+        memCursorReason <- "row click"
+        refreshDisasm ()
+        rebuildCommentPane true
+      | _ -> ())
+    disasmList.KeyDown.Add(fun e ->
+      if e.Key = Key.Enter then
+        e.Handled <- true
+        cmtPaneBorder.BorderBrush <- cyan
+        cmtPaneAddBox.Focus () |> ignore)
+
+    // 5. the code window: list + graph surfaces stacked, one visible
+    let codeHost = Grid()
+    codeHost.Children.Add disasmList |> ignore
+    graphScroll.Content <- codeGraphCanvas
+    graphScroll.Visibility <- Visibility.Collapsed
+    codeHost.Children.Add graphScroll |> ignore
+    center.Children.Add codeHost |> ignore
 
     // right column: heatmap / functions / call graph
     let right = TabControl(Margin = Thickness(8.0), Background = panel)
@@ -1493,6 +2250,116 @@ type MainWindow() as self =
     let heatHint = TextBlock(Text = "black = never executed  magenta = executed then written", Foreground = dim, FontSize = 11.0)
     heatPanel.Children.Add heatHint |> ignore
     heatTab.Content <- heatPanel
+
+    // graphics view: byte rows (8 KB window) + row width + zoom + address
+    // slider
+    let gfxTab = TabItem(Header = "Graphics")
+    let gfxPanel = DockPanel()
+    let gfxTop = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+    let gfxHeader =
+      TextBlock(
+        Text = "memory as 8px rows (sprite finder)",
+        Foreground = dim, FontSize = 12.0,
+        VerticalAlignment = VerticalAlignment.Center)
+    gfxTop.Children.Add gfxHeader |> ignore
+    // row width: pixels per row; width/8 consecutive bytes are drawn side
+    // by side before stepping down. Type a value 8..256 and press Enter,
+    // or step by 8 with the buttons
+    let gfxWidthLabel =
+      TextBlock(
+        Text = "row width:", Foreground = dim, FontSize = 12.0,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = Thickness(14.0, 0.0, 4.0, 0.0))
+    gfxTop.Children.Add gfxWidthLabel |> ignore
+    gfxWidthBox.Text <- string gfxRowWidth
+    gfxWidthBox.ToolTip <- "pixels per row (bytes drawn side by side); press Enter to apply"
+    gfxWidthBox.Background <- panel
+    gfxWidthBox.Foreground <- normal
+    gfxTop.Children.Add gfxWidthBox |> ignore
+    let applyGfxWidth (v: int) =
+      gfxRowWidth <- max 8 (min 256 v)
+      gfxWidthBox.Text <- string gfxRowWidth
+      refreshGfx ()
+    let commitGfxWidth () =
+      match Int32.TryParse(gfxWidthBox.Text) with
+      | true, v -> applyGfxWidth v
+      | _ -> gfxWidthBox.Text <- string gfxRowWidth
+    gfxWidthBox.KeyDown.Add(fun e ->
+      if e.Key = Key.Enter then commitGfxWidth ())
+    gfxWidthBox.LostFocus.Add(fun _ -> commitGfxWidth ())
+    gfxWidthDown.ToolTip <- "narrower rows (-8 pixels)"
+    gfxWidthDown.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
+    gfxWidthDown.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth - 8))
+    gfxTop.Children.Add gfxWidthDown |> ignore
+    gfxWidthUp.ToolTip <- "wider rows (+8 pixels)"
+    gfxWidthUp.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
+    gfxWidthUp.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth + 8))
+    gfxTop.Children.Add gfxWidthUp |> ignore
+    // zoom: stretch the 256x256 bitmap by an integer factor with nearest
+    // neighbour sampling; the ScrollViewer below takes over once the
+    // enlarged image outgrows the tab
+    for z in [ 1; 2; 3; 4; 8 ] do
+      let isDflt = (z = 2)
+      let radio =
+        RadioButton(
+          Content = sprintf "%dx" z, GroupName = "gfxZoom",
+          IsChecked = Nullable<bool>(isDflt), Foreground = normal,
+          VerticalAlignment = VerticalAlignment.Center,
+          Margin = Thickness(8.0, 0.0, 0.0, 0.0))
+      radio.Checked.Add(fun _ ->
+        gfxImage.Width <- 256.0 * float z
+        gfxImage.Height <- 256.0 * float z)
+      gfxTop.Children.Add radio |> ignore
+    DockPanel.SetDock(gfxTop, Dock.Top)
+    gfxPanel.Children.Add gfxTop |> ignore
+    // slider row: 0000h [========] FFFFh (docked bottom-most)
+    let gfxSliderRow = Grid()
+    gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
+    gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition())
+    gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
+    gfxSliderRow.Margin <- Thickness(0.0, 2.0, 0.0, 0.0)
+    let gfxLoLabel =
+      TextBlock(
+        Text = "0000h", Foreground = dim, FontFamily = mono, FontSize = 11.0,
+        VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 6.0, 0.0))
+    Grid.SetColumn(gfxLoLabel, 0)
+    gfxSliderRow.Children.Add gfxLoLabel |> ignore
+    gfxSlider.VerticalAlignment <- VerticalAlignment.Center
+    Grid.SetColumn(gfxSlider, 1)
+    gfxSliderRow.Children.Add gfxSlider |> ignore
+    let gfxHiLabel =
+      TextBlock(
+        Text = "FFFFh", Foreground = dim, FontFamily = mono, FontSize = 11.0,
+        VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
+    Grid.SetColumn(gfxHiLabel, 2)
+    gfxSliderRow.Children.Add gfxHiLabel |> ignore
+    DockPanel.SetDock(gfxSliderRow, Dock.Bottom)
+    gfxPanel.Children.Add gfxSliderRow |> ignore
+    gfxAddrLabel.Foreground <- dim
+    gfxAddrLabel.FontFamily <- mono
+    gfxAddrLabel.FontSize <- 12.0
+    gfxAddrLabel.Margin <- Thickness(0.0, 6.0, 0.0, 0.0)
+    DockPanel.SetDock(gfxAddrLabel, Dock.Bottom)
+    gfxPanel.Children.Add gfxAddrLabel |> ignore
+    gfxImage.Source <- gfxBmp
+    // 512 = the default 2x zoom radio; the Checked handler above sets this
+    // too, but runs before the image gets its source
+    gfxImage.Width <- 256.0 * 2.0
+    gfxImage.Height <- 256.0 * 2.0
+    gfxImage.Stretch <- Stretch.Uniform
+    RenderOptions.SetBitmapScalingMode(gfxImage, BitmapScalingMode.NearestNeighbor)
+    let gfxScroll =
+      ScrollViewer(
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+    gfxScroll.Content <- gfxImage
+    gfxPanel.Children.Add gfxScroll |> ignore
+    gfxTab.Content <- gfxPanel
+    gfxSlider.Value <- float gfxBase
+    gfxSlider.ValueChanged.Add(fun _ ->
+      gfxBase <- int gfxSlider.Value
+      refreshGfx ())
+    refreshGfx ()
 
     let funcTab = TabItem(Header = "Functions")
     let funcPanel = DockPanel()
@@ -1548,9 +2415,9 @@ type MainWindow() as self =
     scanTab.Content <- scanPanel
 
     let graphTab = TabItem(Header = "Call graph")
-    let graphScroll = ScrollViewer(HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
-    graphScroll.Content <- graphCanvas
-    graphTab.Content <- graphScroll
+    let callGraphScroll = ScrollViewer(HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+    callGraphScroll.Content <- graphCanvas
+    graphTab.Content <- callGraphScroll
 
     let contractTab = TabItem(Header = "Contract/Prompt")
     let contractPanel = DockPanel()
@@ -1610,6 +2477,7 @@ type MainWindow() as self =
     theaterTab.Content <- theaterPanel
 
     right.Items.Add heatTab |> ignore
+    right.Items.Add gfxTab |> ignore
     right.Items.Add funcTab |> ignore
     right.Items.Add graphTab |> ignore
     right.Items.Add scanTab |> ignore
@@ -1621,6 +2489,8 @@ type MainWindow() as self =
     let pauseBtn = Button(Content = "Pause")
     let stepFrameBtn = Button(Content = "Step frame")
     let saveBtn = Button(Content = "Save trace")
+    let saveTimelineBtn = Button(Content = "Save timeline", ToolTip = "save the per-frame state timeline + keys to games/<id>/timeline.jst")
+    let clearTimelineBtn = Button(Content = "Clear timeline", ToolTip = "delete the recorded gameplay: wipes the states and key script in memory and deletes timeline.jst from the game folder (the project is untouched)")
     let loadBtn = Button(Content = "Load trace")
     runBtn.Click.Add(fun _ ->
       pauseGame ()
@@ -1634,36 +2504,50 @@ type MainWindow() as self =
       if replaying then replaying <- false)
     stepFrameBtn.Click.Add(fun _ -> pauseGame (); renderFrame ())
     saveBtn.Click.Add(fun _ -> saveTrace ())
+    saveTimelineBtn.Click.Add(fun _ -> saveTimeline true)
+    clearTimelineBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        pauseGame ()
+        replaying <- false
+        s.StopReplay ()
+        s.ResetTimeline ()
+        match currentGame with
+        | Some game ->
+          try File.Delete (timelinePath game) with _ -> ()
+          statusText.Text <- sprintf "%s: recording cleared" game.Name
+        | None -> ()
+        syncSlider ()
+        refreshAll ()
+      | None -> statusText.Text <- "no session")
     loadBtn.Click.Add(fun _ -> loadTrace ())
-    // Rewind: dragging pauses the game and previews the snapshot at the
-    // slider's frame; Go commits the branch (new future starts here);
-    // Replay re-runs the recorded keys from here and stops at the end.
+    // Seek: dragging the frame slider pauses the game and jumps to ANY
+    // recorded frame - past from history, future straight from the loaded
+    // timeline - and stops a running replay there. The session stays parked
+    // on the previewed frame until Run (live from here), Go (branch), or
+    // Replay (script from here) is pressed.
     rewindSlider.PreviewMouseDown.Add(fun _ ->
       if session.IsSome then pauseGame ()
-      rewinding <- true
-      saveReplay true)
-    rewindSlider.PreviewMouseUp.Add(fun _ ->
-      rewinding <- false
-      saveReplay true)
+      rewinding <- true)
+    rewindSlider.PreviewMouseUp.Add(fun _ -> rewinding <- false)
     rewindSlider.ValueChanged.Add(fun args ->
       match session with
       | Some s ->
         let target = int args.NewValue
-        if rewinding && target <= s.History.LastFrame then
-          if running || replaying then pauseGame ()
+        if rewinding && target <= s.TimelineExtent then
           if replaying then
             s.StopReplay ()
-            replaying <- false // drag aborts the script; preview takes over
-          s.RewindTo(target)
+            replaying <- false
+          s.JumpTo(target)
           presentGame ()
           updateTimeLabel s.Frame
+          seekCodeView s target
       | None -> ())
     goBtn.Click.Add(fun _ ->
       match session with
       | Some s ->
         pauseGame ()
         s.BranchAt(s.Frame)
-        saveReplay true
         replaying <- false
         running <- true
         frameTimer.Start()
@@ -1673,7 +2557,7 @@ type MainWindow() as self =
       match session with
       | Some s ->
         pauseGame ()
-        replayExtent <- max 1 s.History.LastFrame // timeline before truncation
+        replayExtent <- max 1 s.TimelineExtent // seekable horizon before truncation
         s.StartReplay()
         replaying <- true
         running <- true
@@ -1687,7 +2571,7 @@ type MainWindow() as self =
     recordToggle.VerticalAlignment <- VerticalAlignment.Center
 
     let soundToggle = CheckBox(Content = "Mute", IsChecked = Nullable<bool>(true))
-    soundToggle.ToolTip <- "beeper audio is muted by default; uncheck for 10% volume"
+    soundToggle.ToolTip <- "beeper audio is muted by default; uncheck for low-volume audio"
     soundToggle.Foreground <- normal
     soundToggle.VerticalAlignment <- VerticalAlignment.Center
     soundToggle.Checked.Add(fun _ -> Audio.SetEnabled false)
@@ -1975,7 +2859,7 @@ type MainWindow() as self =
           let w =
             TimelineDemoWindow(fun () ->
               match session with
-              | Some s -> max 1L (int64 (max s.ReplayEndFrame s.Frame))
+              | Some s -> max 1L (int64 (max s.ReplayEndFrame s.TimelineExtent))
               | None ->
                 match currentTrace () with
                 | Some t when t.FrameTicks.Length > 0 -> int64 t.FrameTicks.Length
@@ -1986,12 +2870,12 @@ type MainWindow() as self =
           w.Show()
       with ex -> statusText.Text <- sprintf "timeline demo failed: %s" ex.Message)
 
-    for c in [ gameCombo :> FrameworkElement; engineCombo :> FrameworkElement; parityLabel :> FrameworkElement; setEntryBtn :> FrameworkElement; exportScriptBtn :> FrameworkElement; timelineBtn :> FrameworkElement; runBtn :> FrameworkElement; pauseBtn :> FrameworkElement; stepFrameBtn :> FrameworkElement; recordToggle :> FrameworkElement; soundToggle :> FrameworkElement; saveBtn :> FrameworkElement; loadBtn :> FrameworkElement ] do
+    for c in [ gameCombo :> FrameworkElement; engineCombo :> FrameworkElement; parityLabel :> FrameworkElement; setEntryBtn :> FrameworkElement; exportScriptBtn :> FrameworkElement; timelineBtn :> FrameworkElement; runBtn :> FrameworkElement; pauseBtn :> FrameworkElement; stepFrameBtn :> FrameworkElement; recordToggle :> FrameworkElement; soundToggle :> FrameworkElement; saveBtn :> FrameworkElement; saveTimelineBtn :> FrameworkElement; clearTimelineBtn :> FrameworkElement; loadBtn :> FrameworkElement ] do
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     toolbar.Children.Add sep |> ignore
     // rewind + replay group
-    for c in [ rewindSlider :> FrameworkElement; timeLabel :> FrameworkElement; goBtn :> FrameworkElement; replayBtn :> FrameworkElement ] do
+    for c in [ rewindSlider :> FrameworkElement; timeLabel :> FrameworkElement; recStatsLabel :> FrameworkElement; goBtn :> FrameworkElement; replayBtn :> FrameworkElement ] do
       c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
       toolbar.Children.Add c |> ignore
     for c in [ b100 :> Control; b10 :> Control; b1 :> Control; playBtn :> Control; f1 :> Control; f10 :> Control; f100 :> Control ] do
@@ -2076,27 +2960,29 @@ type MainWindow() as self =
           s.StopReplay ()
           replaying <- false
         previewTimer.Stop()
-        s.RewindTo(max 0 (min (int u) s.History.LastFrame))
+        // Seek to any recorded frame, future included, and park there.
+        let target = max 0 (min (int u) s.TimelineExtent)
+        s.JumpTo(target)
         presentGame ()
         updateTimeLabel s.Frame
+        seekCodeView s target
       | None -> ()
 
     previewRangeImpl <- fun which ->
       let fStart, fEnd = rangeOf which
       let label = if which = A then "A" else "B"
       match session with
-      | Some s when fEnd - 1 <= s.History.LastFrame && fEnd - 1 >= 0 ->
+      | Some s when fEnd - 1 <= s.TimelineExtent && fEnd - 1 >= 0 ->
         if running || replaying then pauseGame ()
-        if replaying then
-          s.StopReplay ()
-          replaying <- false
+        if replaying then replaying <- false // JumpTo stops the movie core-side
         previewTimer.Stop()
         previewFrom <- max 0 fStart
         previewSpan <- max 0 (fEnd - 1 - previewFrom)
         previewTicks <- 0
-        s.RewindTo previewFrom
+        s.JumpTo previewFrom
         presentGame ()
         updateTimeLabel s.Frame
+        seekCodeView s previewFrom
         statusText.Text <- sprintf "preview %s: frames %d..%d over 1s" label fStart fEnd
         previewTimer.Start()
       | _ ->
@@ -2113,9 +2999,10 @@ type MainWindow() as self =
       match session with
       | Some s ->
         let frac = min previewTicks 50
-        s.RewindTo(max 0 (min (previewFrom + previewSpan * frac / 50) s.History.LastFrame))
+        s.JumpTo(max 0 (min (previewFrom + previewSpan * frac / 50) s.TimelineExtent))
         presentGame ()
         updateTimeLabel s.Frame
+        timeline.Playhead <- int64 s.Frame
         if previewTicks >= 50 then previewTimer.Stop()
       | None -> previewTimer.Stop())
 
@@ -2147,10 +3034,11 @@ type MainWindow() as self =
     setActiveBrush timeline.ActiveBrush
 
     // ---- control map wiring -------------------------------------------------
-    // click/drag scrubs the code views to the address under the cursor
-    controlMap.AddressClicked.Add(fun addr ->
+    // focus the code view on an address: memory mode re-centers the memory
+    // disassembly on it, execution mode jumps to its first execution
+    let focusCodeView (reason: string) (addr: int) =
       if disasmModeMemory then
-        memCursor <- addr &&& 0xFFFF
+        gotoMemCursor (addr &&& 0xFFFF) reason
         refreshDisasm ()
       else
         match currentTrace (), session with
@@ -2158,7 +3046,10 @@ type MainWindow() as self =
           cursor <- t.FirstIndexAtPc[addr]
           refreshAll ()
           syncSlider ()
-        | _ -> ())
+        | _ -> ()
+
+    // click/drag scrubs the code views to the address under the cursor
+    controlMap.AddressClicked.Add(fun addr -> focusCodeView "memory map click" addr)
 
     // right-click editing: items that need text take it from the shared
     // comment box, matching the mass-comment toolbar convention.
@@ -2239,8 +3130,7 @@ type MainWindow() as self =
       | None -> statusText.Text <- "no control file loaded")
 
     newCtrlBtn.Click.Add(fun _ ->
-      let ext = timelineExtent () |> int
-      control <- Some(ControlFile.empty (if ext > 0 then 0x4000 else 0x4000) 0x10000)
+      control <- Some(ControlFile.empty 0x4000 0x10000)
       controlGameDir <- controlDir ()
       statusText.Text <- sprintf "empty control file created over $4000-$FFFF")
 
@@ -2279,19 +3169,52 @@ type MainWindow() as self =
     // disassembly mode toggles (mutually exclusive)
     memModeBtn.Checked.Add(fun _ ->
       disasmModeMemory <- true
+      disasmModeGraph <- false
       execModeBtn.IsChecked <- Nullable<bool>(false)
+      graphModeBtn.IsChecked <- Nullable<bool>(false)
+      // Carry the execution view's position: the memory sweep always shows
+      // the cursor row exactly (linear decode can be misaligned elsewhere),
+      // so landing on it makes the instruction the exec view was showing
+      // appear in memory view. A row right-click overrides the target.
+      match pendingMemCursor with
+      | Some a -> gotoMemCursor a "row context menu sync"; pendingMemCursor <- None
+      | None ->
+        match currentTrace () with
+        | Some t when t.Entries.Length > 0 ->
+          gotoMemCursor (int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc) "execution view switch"
+        | _ -> ()
+      applyViewMode ()
       refreshDisasm ())
     execModeBtn.Checked.Add(fun _ ->
       disasmModeMemory <- false
+      disasmModeGraph <- false
       memModeBtn.IsChecked <- Nullable<bool>(false)
+      graphModeBtn.IsChecked <- Nullable<bool>(false)
+      applyViewMode ()
       refreshDisasm ())
+    graphModeBtn.Checked.Add(fun _ ->
+      disasmModeGraph <- true
+      memModeBtn.IsChecked <- Nullable<bool>(false)
+      execModeBtn.IsChecked <- Nullable<bool>(false)
+      applyViewMode ()
+      refreshDisasm ())
+    graphAllBtn.Checked.Add(fun _ ->
+      disasmGraphAll <- true
+      if disasmModeGraph then refreshDisasm ())
+    graphAllBtn.Unchecked.Add(fun _ ->
+      disasmGraphAll <- false
+      if disasmModeGraph then refreshDisasm ())
 
     // mass-comment buttons: all read commentBox.Text
     let text () : string = commentBox.Text
     let addComment (m: ControlComment) =
       match control with
       | Some c ->
-        control <- Some(ControlFile.upsert c m)
+        // Line comments append (an address can carry several); keyed kinds
+        // (exec/name/range) still replace their key.
+        control <-
+          (if m.Kind = Line then Some (ControlFile.addLine c m.Addr m.Text)
+           else Some (ControlFile.upsert c m))
         statusText.Text <- sprintf "comment added (%s)" (ControlFile.kindToString m.Kind)
         refreshDisasm ()
       | None -> statusText.Text <- "no control file - click New ctrl first"
@@ -2300,6 +3223,33 @@ type MainWindow() as self =
       | Some t when t.Entries.Length > 0 ->
         addComment { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = cursor; Text = text () }
       | _ -> statusText.Text <- "no trace - cannot index-comment")
+    lineCmtBtn.Click.Add(fun _ ->
+      let addr =
+        if disasmModeMemory || disasmModeGraph then memCursor
+        else
+          match currentTrace () with
+          | Some t when t.Entries.Length > 0 -> int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc
+          | _ -> memCursor
+      addComment { Kind = Line; Addr = addr; EndExcl = 0; InstrIndex = -1; Text = text () })
+    // right-click a code row: comment / clear / exec comment / copy address.
+    // Preview + a walk up the visual tree, so the row is found no matter
+    // which template part sits under the mouse.
+    let rec findRow (d: obj) : DisasmRow option =
+      match d with
+      | :? FrameworkElement as fe ->
+        match fe.DataContext with
+        | :? DisasmRow as row -> Some row
+        | _ ->
+          match VisualTreeHelper.GetParent fe with
+          | null -> None
+          | parent -> findRow parent
+      | _ -> None
+    disasmList.PreviewMouseRightButtonDown.Add(fun e ->
+      match findRow e.OriginalSource with
+      | Some row when row.Addr >= 0 ->
+        e.Handled <- true
+        openRowMenu disasmList row.Addr row.InstrIdx refreshDisasm
+      | _ -> ())
     nameBeforeBtn.Click.Add(fun _ ->
       match currentTrace (), control with
       | Some t, Some c when t.Entries.Length > 0 ->
@@ -2324,7 +3274,7 @@ type MainWindow() as self =
             addComment { Kind = Name; Addr = List.head pcs; EndExcl = (List.last pcs) + 8; InstrIndex = -1; Text = text () }
           | _ ->
             for pc in pcs do
-              cc <- ControlFile.upsert cc { Kind = Line; Addr = pc; EndExcl = 0; InstrIndex = -1; Text = text () }
+              cc <- ControlFile.addLine cc pc (text ())
             control <- Some { cc with Dirty = true }
             statusText.Text <- sprintf "%d line comments added" pcs.Length
             refreshDisasm ()
@@ -2378,7 +3328,12 @@ type MainWindow() as self =
         else Int32.TryParse v
       match parsed with
       | true, value ->
-        applyScanFilter (fun _ o n -> if scanWidth16.IsChecked.GetValueOrDefault() then n = (value &&& 0xFFFF) || (((n <<< 8) ||| n) &&& 0xFFFF) = (value &&& 0xFF) else n = (value &&& 0xFF))
+        // n is the 16-bit word at the address in word mode, the single byte
+        // in byte mode; each mode compares against exactly that width.
+        applyScanFilter (fun _ o n ->
+          if scanWidth16.IsChecked.GetValueOrDefault()
+          then n = (value &&& 0xFFFF)
+          else n = (value &&& 0xFF))
       | _ -> statusText.Text <- "enter a number ($hex or decimal)")
     scanSmallerBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n < o))
     scanLargerBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n > o))
@@ -2396,7 +3351,7 @@ type MainWindow() as self =
       match scanList.SelectedItem with
       | :? DisasmRow as row when row.Addr >= 0 ->
         if disasmModeMemory then
-          memCursor <- row.Addr
+          gotoMemCursor row.Addr "scan list jump"
           refreshDisasm ()
         else
           match currentTrace (), session with
@@ -2407,7 +3362,7 @@ type MainWindow() as self =
           | _, Some s ->
             // No trace yet: at least show it in memory mode.
             disasmModeMemory <- true
-            memCursor <- row.Addr
+            gotoMemCursor row.Addr "scan list jump"
             memModeBtn.IsChecked <- Nullable<bool>(true)
             statusText.Text <- sprintf "no trace yet - showing %04X in memory view" row.Addr
           | _ -> ()
@@ -2417,7 +3372,7 @@ type MainWindow() as self =
       | :? DisasmRow as row when row.Addr >= 0 ->
         match control with
         | Some c ->
-          control <- Some(ControlFile.upsert c { Kind = Line; Addr = row.Addr; EndExcl = 0; InstrIndex = -1; Text = commentBox.Text })
+          control <- Some(ControlFile.addLine c row.Addr commentBox.Text)
           statusText.Text <- sprintf "comment added at %04X" row.Addr
           refreshDisasm ()
         | None -> statusText.Text <- "no control file - click New ctrl first"
@@ -2426,24 +3381,38 @@ type MainWindow() as self =
     // keep the timeline extent fresh each UI tick
     uiTimer.Tick.Add(fun _ ->
       timeline.Length <- timelineExtent ())
+    // keep the graphics tile view in step with live memory
+    uiTimer.Tick.Add(fun _ -> refreshGfx ())
     // keep the control map live: cursor hairline, heat/self-mod overlays,
     // and a thumb showing which address window the code view displays.
     uiTimer.Tick.Add(fun _ ->
+      // While the machine is running the recorder window keeps growing, so
+      // ensureBuilt() here would linearize up to 4M entries at every tick;
+      // follow the live PC and reuse the last built trace instead.
+      let live =
+        match session with
+        | Some s when running || replaying -> Some s
+        | _ -> None
       let curAddr =
         if disasmModeMemory then Some memCursor
         else
-          match currentTrace () with
-          | Some t when t.Entries.Length > 0 ->
-            Some(int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc)
-          | _ -> None
+          match live with
+          | Some s -> Some(s.Regs.Pc())
+          | None ->
+            match currentTrace () with
+            | Some t when t.Entries.Length > 0 ->
+              Some(int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc)
+            | _ -> None
       match curAddr with
       | Some a ->
         controlMap.CursorAddress <- a
         if controlMap.IsOutside a then controlMap.CenterOn a
         let lo, hi =
-          if disasmModeMemory then (memCursor - 0x40, memCursor + 0xC0)
+          if disasmModeMemory then
+            (max 0 (memCursor - 0x40), min 0x10000 (memCursor + 0xC0))
           else
-            match currentTrace () with
+            let t = match live with Some _ -> built | None -> currentTrace ()
+            match t with
             | Some t when t.Entries.Length > 0 ->
               let c = max 0 (min cursor (t.Entries.Length - 1))
               let pcs =
@@ -2478,6 +3447,56 @@ type MainWindow() as self =
     slider.PreviewMouseDown.Add(fun _ -> userDragging <- true)
     slider.PreviewMouseUp.Add(fun _ -> userDragging <- false)
 
+    // Mouse wheel over the code window travels through the code. The fixed
+    // 41-row windows have no real scroll extent, so each notch moves the
+    // anchor itself (one instruction per line) and setRows keeps the offset
+    // stable, which reads as the code sliding under the cursor. The long
+    // brush-selection list (memory mode) and the graph surface have genuine
+    // overflow and keep their native scrolling.
+    disasmList.PreviewMouseWheel.Add(fun e ->
+      let native = disasmModeGraph || (disasmModeMemory && activeSelection().IsSome)
+      if not native then
+        let notches = float e.Delta / 120.0
+        // negated so wheel up = earlier content: lower addresses in memory
+        // mode, earlier instructions in execution mode
+        let lines = -int (float SystemParameters.WheelScrollLines * notches)
+        if lines <> 0 then
+          e.Handled <- true
+          if disasmModeMemory then
+            match currentMemory () with
+            | None -> ()
+            | Some mem ->
+              // The wheel scrolls the window anchor, not the cursor: the
+              // highlighted instruction stays on its address and moves with
+              // the content (out of view if you keep scrolling the same way).
+              let top =
+                match memViewTop with
+                | Some t when t >= 0 && t < 0x10000 -> t
+                | _ -> memCursor
+              if lines > 0 then
+                let mutable a = top
+                for _ in 1 .. lines do
+                  a <- (a + max 1 (Disasm.disasmMemory mem a).Length) &&& 0xFFFF
+                memViewTop <- Some a
+              else
+                // Back up to the previous instruction start; starts[0] is
+                // always set, so the walk terminates at worst at address 0.
+                match getInstrStarts () with
+                | None -> memViewTop <- Some ((top + lines) &&& 0xFFFF)
+                | Some starts ->
+                  let mutable a = top
+                  for _ in 1 .. -lines do
+                    a <- (a - 1) &&& 0xFFFF
+                    while not starts[a] do a <- (a - 1) &&& 0xFFFF
+                  memViewTop <- Some a
+              refreshDisasm ()
+          else
+            let n = currentEntryCount ()
+            if n > 0 then
+              cursor <- max 0 (min (cursor + lines) (n - 1))
+              refreshAll ()
+              syncSlider ())
+
     heatImage.MouseLeftButtonDown.Add(fun e ->
       match currentTrace () with
       | Some t when t.Entries.Length > 0 ->
@@ -2505,26 +3524,67 @@ type MainWindow() as self =
           | _ -> 0
         heatImage.ToolTip <- sprintf "0x%04X  (%d executions)" pc count)
 
+    // double-click on the graphics view focuses the code view on the
+    // address under the pixel: undo the zoom scaling and the row-width
+    // layout to get back from bitmap coordinates to a memory address
+    gfxImage.MouseLeftButtonDown.Add(fun e ->
+      if e.ClickCount = 2 then
+        let scale = gfxImage.ActualWidth / 256.0
+        if scale > 0.0 then
+          let pos = e.GetPosition gfxImage
+          let px = int (pos.X / scale)
+          let py = int (pos.Y / scale)
+          if px >= 0 && px < 256 && py >= 0 && py < 256 then
+            let w = max 8 (min 256 gfxRowWidth)
+            let i = ((px / w) * 256 + py) * (w / 8) + (px % w) / 8
+            let addr = (gfxBase + i) &&& 0xFFFF
+            focusCodeView "graphics pane double-click" addr
+            statusText.Text <- sprintf "graphics click: 0x%04X (pixel %d, %d)" addr px py)
+
+    // wheel over the graphics view pages memory, matching the code pane's
+    // wheel-anchored scrolling: each notch moves the window by one pixel
+    // row (bytesPerRow bytes at the current row width), handled before the
+    // ScrollViewer can turn it into viewport scrolling; the slider follows
+    gfxImage.PreviewMouseWheel.Add(fun e ->
+      let notches = float e.Delta / 120.0
+      // negated so wheel up moves toward lower addresses, matching the
+      // code pane
+      let lines = -int (float SystemParameters.WheelScrollLines * notches)
+      if lines <> 0 then
+        e.Handled <- true
+        let w = max 8 (min 256 gfxRowWidth)
+        gfxSlider.Value <- float ((gfxBase + lines * (w / 8)) &&& 0xFFFF))
+
+    // Emulator keys ride the window's KeyDown/KeyUp. Text-entry controls
+    // (comment box, paste box, scan value) must not leak keystrokes into the
+    // emulated keyboard - and with recording on, into the replay key log.
+    let isTextEntry (e: KeyEventArgs) =
+      e.OriginalSource :? System.Windows.Controls.Primitives.TextBoxBase
+      || e.OriginalSource :? ComboBox
     self.KeyDown.Add(fun e ->
-      match ceGame with
-      | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, true)) (keyMap e.Key)
-      | None ->
-        match session with
-        | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, true)) (keyMap e.Key)
+      if isTextEntry e then ()
+      else
+        match ceGame with
+        | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, true)) (keyMap e.Key)
         | None ->
-          match manualBoot with
-          | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, true)) (keyMap e.Key)
-          | None -> ())
+          match session with
+          | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, true)) (keyMap e.Key)
+          | None ->
+            match manualBoot with
+            | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, true)) (keyMap e.Key)
+            | None -> ())
     self.KeyUp.Add(fun e ->
-      match ceGame with
-      | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, false)) (keyMap e.Key)
-      | None ->
-        match session with
-        | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, false)) (keyMap e.Key)
+      if isTextEntry e then ()
+      else
+        match ceGame with
+        | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, false)) (keyMap e.Key)
         | None ->
-          match manualBoot with
-          | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
-          | None -> ())
+          match session with
+          | Some s -> List.iter (fun (r, b) -> s.SetKey(r, b, false)) (keyMap e.Key)
+          | None ->
+            match manualBoot with
+            | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
+            | None -> ())
 
     // timers
     frameTimer.Tick.Add(fun _ -> if running then renderFrame ())
@@ -2541,6 +3601,13 @@ type MainWindow() as self =
           syncingSlider <- true
           slider.Value <- float cursor
           syncingSlider <- false
+          if cursor >= n - 1 then
+            // End of the trace: stop stepping so the timer doesn't keep
+            // rebuilding the views at the last instruction forever.
+            cinemaPlaying <- false
+            cinemaTimer.Stop()
+            playBtn.Content <- "Play"
+            statusText.Text <- "cinema reached the end of the trace"
         else cinemaPlaying <- false)
     manualTimer.Tick.Add(fun _ ->
       match manualBoot with
@@ -2568,24 +3635,22 @@ type MainWindow() as self =
               let loadedSession = t.Result
               bootTask <- None
               session <- Some loadedSession
-              let hasSavedReplay =
+              let hasTimeline =
                 match currentGame with
-                | Some game when game.GameId = bootGameId -> loadReplay game loadedSession
+                | Some game when game.GameId = bootGameId -> loadTimeline game loadedSession
                 | _ -> false
-              if hasSavedReplay then
-                replayExtent <- max 1 loadedSession.KeyLog.EndFrame
+              if hasTimeline then
+                // Autoplay with the whole recorded timeline seekable from
+                // frame 0: states are restored, not re-executed.
+                replayExtent <- max 1 loadedSession.TimelineExtent
                 loadedSession.StartReplay()
                 replaying <- true
               else
                 replaying <- false
               startGame ()
-              if hasSavedReplay then
-                statusText.Text <- sprintf "%s: replaying %d saved key events from frame 0" currentGame.Value.Name loadedSession.KeyLog.Count
-              else
-                match currentGame, replayIgnoreReason with
-                | Some g, Some reason ->
-                  statusText.Text <- sprintf "%s: saved replay ignored (%s)" g.Name reason
-                | _ -> ()
+              if hasTimeline then
+                statusText.Text <-
+                  sprintf "%s: timeline loaded (%d frames) - autoplay, seek anywhere" currentGame.Value.Name loadedSession.StateTimeline.Count
             with ex ->
               statusText.Text <- "boot failed: " + ex.Message
           | Some t ->
@@ -2598,10 +3663,10 @@ type MainWindow() as self =
               sprintf "booting %s to game entry... %ds, tape frame %d" gameName secs bootFrameNo
           | None -> ()
       | Some s ->
-        saveReplay false
         if not rewinding then
-          rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.History.LastFrame)
+          rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.TimelineExtent)
           rewindSlider.Value <- float s.Frame
+        timeline.Playhead <- int64 s.Frame
         updateTimeLabel s.Frame
         if running then
           statusText.Text <-
@@ -2610,7 +3675,7 @@ type MainWindow() as self =
               (float s.CycleCount / 1_000_000.0)
               s.Recorder.EntryCount
               s.Recorder.Capacity
-              (s.Recorder.PerPcCount |> Array.filter (fun c -> c > 0) |> Array.length)
+              (s.Recorder.PerPcCount |> Array.fold (fun n c -> if c > 0 then n + 1 else n) 0)
               s.Recorder.SelfModCount
               (if s.Recorder.RecordEnabled then "ON" else "OFF")
         if not userDragging then
@@ -2623,8 +3688,23 @@ type MainWindow() as self =
               slider.Maximum <- float (n - 1)
               slider.IsEnabled <- true
             syncingSlider <- false)
+    // Recording stats, twice a second: this session's captured frames as
+    // time, the timeline's size, and the live bytes/s and bytes/min rates.
+    statsTimer.Tick.Add(fun _ ->
+      match session with
+      | Some s when s.LiveCapturedFrames > 0 ->
+        let seconds = float s.LiveCapturedFrames / 50.0
+        let mb = float s.TimelineSessionBytes / (1024.0 * 1024.0)
+        let mbPerSec = if seconds >= 2.0 then mb / seconds else 0.0
+        recStatsLabel.Text <-
+          sprintf "rec %02d:%02d  %.0f MB  %.1f MB/s  %.0f MB/min"
+            (int seconds / 60) (int seconds % 60) mb mbPerSec (mbPerSec * 60.0)
+      | _ -> recStatsLabel.Text <- "")
+    // comment pane follows the cursor and control-file changes
+    uiTimer.Tick.Add(fun _ -> rebuildCommentPane false)
     uiTimer.Start()
     manualTimer.Start()
+    statsTimer.Start()
 
     // Launch the manifest-selected default game.
     launchGame startupGame
@@ -2632,11 +3712,13 @@ type MainWindow() as self =
 
     self.Closed.Add(fun _ ->
       running <- false
-      saveReplay true
+      saveTimeline false // only when the recording actually changed
       frameTimer.Stop()
       cinemaTimer.Stop()
       manualTimer.Stop()
       uiTimer.Stop()
+      previewTimer.Stop()
+      statsTimer.Stop()
       Audio.Stop ())
 
     statusText.Text <- "booting emulator to game entry..."

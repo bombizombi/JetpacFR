@@ -13,8 +13,10 @@ module Script =
         (120, 135, (4, 2)) // hold 8 (left)
         (160, 165, (7, 0)) // fire (space)
         (200, 220, (7, 0)) // fire
-        (260, 275, (0, 0)) // up (CAPS SHIFT + 7)
+        (260, 275, (0, 0)) // up (CAPS SHIFT + 7): the shift...
+        (260, 275, (4, 3)) // ...and the 7
         (300, 315, (0, 0)) // up
+        (300, 315, (4, 3)) // ...and the 7
         (350, 365, (4, 4)) // down (6)
         (400, 420, (7, 0)) ] // fire
     [ for (press, release, (row, bit)) in script do

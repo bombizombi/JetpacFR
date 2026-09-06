@@ -12,8 +12,11 @@ open System.IO
 open JetpacFR.Core
 open Jetpac2.Core.Z80BuilderInstance
 
-let rom = LocalAssets.find "48.rom"
-let tzx = LocalAssets.find "Jetpac.tzx"
+// Lazy: the emulator assets only matter to the emulator-driving tests, and
+// the module initializer would otherwise crash --gen-game/--regen on machines
+// without them (LocalAssets.find fails hard).
+let rom = lazy (LocalAssets.find "48.rom")
+let tzx = lazy (LocalAssets.find "Jetpac.tzx")
 
 let failures = ResizeArray<string>()
 let check (name: string) (ok: bool) (detail: string) =
@@ -129,7 +132,7 @@ let runDisasmKnown () : int =
 
 let runDisasmCorpus () : int =
   printfn "disasm corpus over the loaded 64K image"
-  let oracle, _ = Jetpac3.Core.Boot.bootToEntry rom tzx None
+  let oracle, _ = Jetpac3.Core.Boot.bootToEntry rom.Value tzx.Value None
   let mem, _ = oracle.SaveState()
   let mutable bad = 0
   let mutable dbFalls = 0
@@ -149,14 +152,19 @@ let runDisasmCorpus () : int =
 
 let runTrace (romPath: string) (tzxPath: string) : int =
   printfn "trace recorder + codec roundtrip + stats"
-  let session = TraceSession(romPath, tzxPath, 500_000)
+  // Capacity above the total instruction count (120 frames x ~7-16k) so no
+  // ring eviction happens: the per-frame and self-mod invariants below only
+  // hold over an unevicted window (runBench uses the same capacity).
+  let session = TraceSession(romPath, tzxPath, 4_000_000)
   let framesN = 120
   let script = Jetpac3.Core.Script.defaultSession framesN
   for f in 0 .. framesN - 1 do
-    let frameStart, _ = session.RunFrame()
-    session.DrainBeeperSamples(frameStart) |> ignore
+    // Keys land before the frame runs (event frame f influences run f),
+    // matching the app's replay loop and runHistory's convention.
     for (sf, row, bit, pressed) in script do
       if sf = f then session.SetKey(row, bit, pressed)
+    let frameStart, _ = session.RunFrame()
+    session.DrainBeeperSamples(frameStart) |> ignore
   let recorder = session.Recorder
   let trace = recorder.Build()
   let mutable nonDecreasing = true
@@ -170,8 +178,24 @@ let runTrace (romPath: string) (tzxPath: string) : int =
   check "per-PC heat counts sum to the entry count" (heatSum = trace.Entries.Length)
     (sprintf "heat=%d entries=%d" heatSum trace.Entries.Length)
   check "interrupt service appears in the trace" sawInterrupt ""
+  // FrameTicks[f] is the absolute cycle at the end of frame f, so each entry
+  // belongs to the first boundary at-or-after its tick. Only the last 60
+  // frames are asserted to keep the check independent of any boot warm-up.
+  let perFrameCounts =
+    let counts = Array.zeroCreate<int> trace.FrameTicks.Length
+    if counts.Length > 0 then
+      let mutable fi = 0
+      for e in trace.Entries do
+        while fi < counts.Length && trace.FrameTicks[fi] <= e.Tick do fi <- fi + 1
+        if fi < counts.Length then counts[fi] <- counts[fi] + 1
+    counts
+  check "trace covers all frames" (trace.FrameTicks.Length >= framesN)
+    (sprintf "%d frame boundaries" trace.FrameTicks.Length)
+  let tail = perFrameCounts |> Array.skip (max 0 (perFrameCounts.Length - 60))
   check "per-frame instruction counts are sane (7k..16k)"
-    (trace.FrameTicks.Length >= 100) (sprintf "%d frames" trace.FrameTicks.Length)
+    (tail.Length = 60 && tail |> Array.forall (fun c -> c >= 7_000 && c <= 16_000))
+    (if tail.Length = 0 then "no frames"
+     else sprintf "tail range %d..%d over %d frames" (Array.min tail) (Array.max tail) tail.Length)
   // codec roundtrip
   let path = Path.Combine(Path.GetTempPath(), sprintf "jetpacfr-%d.jpt" (DateTime.UtcNow.Ticks))
   TraceCodec.save trace path
@@ -193,9 +217,13 @@ let runTrace (romPath: string) (tzxPath: string) : int =
   check "codec roundtrip: per-PC counts identical" (loaded.PerPcCount = trace.PerPcCount) ""
   check "codec roundtrip: self-modified flags identical" (loaded.SelfModified = trace.SelfModified) ""
   check "self-mod count is consistent" (trace.SelfModCount = (trace.SelfModified |> Array.filter id |> Array.length)) ""
+  // Ring eviction decrements per-Pc counts while the sticky self-mod flags
+  // stay set, so the strict invariant only holds when nothing was evicted.
   let selfModConsistent =
-    Array.forall2 (fun sm c -> (not sm) || c > 0) trace.SelfModified trace.PerPcCount
-  check "every self-modified address was executed" selfModConsistent ""
+    if recorder.EntryCount >= recorder.Capacity then true
+    else Array.forall2 (fun sm c -> (not sm) || c > 0) trace.SelfModified trace.PerPcCount
+  check "every self-modified address was executed" selfModConsistent
+    (sprintf "entries=%d capacity=%d" recorder.EntryCount recorder.Capacity)
   // record toggle
   let before = recorder.EntryCount
   recorder.RecordEnabled <- false
@@ -212,10 +240,12 @@ let runAgree (romPath: string) (tzxPath: string) : int =
   let framesN = 150
   let script = Jetpac3.Core.Script.defaultSession framesN
   for f in 0 .. framesN - 1 do
-    let frameStart, _ = session.RunFrame()
-    session.DrainBeeperSamples(frameStart) |> ignore
+    // Keys land before the frame runs (event frame f influences run f),
+    // matching the app's replay loop and runHistory's convention.
     for (sf, row, bit, pressed) in script do
       if sf = f then session.SetKey(row, bit, pressed)
+    let frameStart, _ = session.RunFrame()
+    session.DrainBeeperSamples(frameStart) |> ignore
   let trace = session.Recorder.Build()
   let mutable mismatches = 0
   let mutable checkedCount = 0
@@ -263,7 +293,7 @@ let runAgree (romPath: string) (tzxPath: string) : int =
 
 let runGaps () : int =
   printfn "generic-table coverage probe (the reported 0x6496 case)"
-  match EntryCache.tryLoad rom tzx with
+  match EntryCache.tryLoad rom.Value tzx.Value with
   | Some (mem, state) ->
     let port = Jetpac2.Core.Machine()
     Jetpac2.Core.Z80Table.EnsureInstalled()
@@ -281,12 +311,11 @@ let runGaps () : int =
           sprintf "uncovered opcode, pc preserved=%b" (port.Regs.Pc() = 0x6496)
         else "other: " + ex.Message
     printfn "  0x6496 from entry state (opcode %02X): %s" opcode outcome
-    // The generic table dispatches by opcode, not address: 0x6496 holds a
-    // covered opcode (0xCD = CALL), so it executes even though the game
-    // never visits that address. Uncovered opcodes still raise "no code at"
+    // The generic table dispatches by opcode, not address: whatever byte
+    // the entry state holds at 0x6496, a covered opcode must execute (PC
+    // leaves the address) and an uncovered one must raise "no code at"
     // with the PC preserved (the UI's static-disasm path).
-    if opcode = 0xCD then
-      check "0x6496 (opcode CD) is executable in the generic table" (outcome = "executable") outcome
+    if outcome = "executable" then
       check "executed step advanced past 0x6496" (port.Regs.Pc() <> 0x6496)
         (sprintf "pc=%04X" (port.Regs.Pc()))
     else
@@ -302,10 +331,12 @@ let runMine (romPath: string) (tzxPath: string) : int =
   let framesN = 500
   let script = Jetpac3.Core.Script.defaultSession framesN
   for f in 0 .. framesN - 1 do
-    let frameStart, _ = session.RunFrame()
-    session.DrainBeeperSamples(frameStart) |> ignore
+    // Keys land before the frame runs (event frame f influences run f),
+    // matching the app's replay loop and runHistory's convention.
     for (sf, row, bit, pressed) in script do
       if sf = f then session.SetKey(row, bit, pressed)
+    let frameStart, _ = session.RunFrame()
+    session.DrainBeeperSamples(frameStart) |> ignore
   let trace = session.Recorder.Build()
   let routines, edges = Miner.mine trace
   printfn "  %d routines, %d edges; 0x71B8 executed=%b"
@@ -365,8 +396,13 @@ let runMine (romPath: string) (tzxPath: string) : int =
       (not (List.isEmpty clear.LoopExtents)) (sprintf "%A" (clear.LoopExtents |> List.truncate 3))
   | None -> check "screen-clear routine (0x71CF) found in the mined set" false ""
   match routines |> List.tryFind (fun r -> r.Entry = 0x71B8) with
-  | Some _ -> check "0x71B8 (Jetpac3 lift entry) not exercised by this script" false "unexpected: 0x71B8 IS executed"
-  | None -> ()
+  | Some _ ->
+    // Expected under the app's replay timing: the script's inputs reach the
+    // lift path, so the registry's 0x71B8 lift runs in-session. Its exactness
+    // is proven by the validation theater below; here it only means the
+    // mined set contains a routine that is also lifted.
+    printfn "  0x71B8 (Jetpac3 lift entry) exercised by this script"
+  | None -> printfn "  0x71B8 (Jetpac3 lift entry) not exercised by this script"
   if failures.Count > 0 then 1 else 0
 
 let runContract (romPath: string) (tzxPath: string) : int =
@@ -375,10 +411,12 @@ let runContract (romPath: string) (tzxPath: string) : int =
   let framesN = 400
   let script = Jetpac3.Core.Script.defaultSession framesN
   for f in 0 .. framesN - 1 do
-    let frameStart, _ = session.RunFrame()
-    session.DrainBeeperSamples(frameStart) |> ignore
+    // Keys land before the frame runs (event frame f influences run f),
+    // matching the app's replay loop and runHistory's convention.
     for (sf, row, bit, pressed) in script do
       if sf = f then session.SetKey(row, bit, pressed)
+    let frameStart, _ = session.RunFrame()
+    session.DrainBeeperSamples(frameStart) |> ignore
   let trace = session.Recorder.Build()
   let routines, _ = Miner.mine trace
   match routines |> List.tryFind (fun r -> r.Entry = 0x71CF) with
@@ -395,7 +433,9 @@ let runContract (romPath: string) (tzxPath: string) : int =
     check "disassembly stays within the span"
       (contract.Disassembly |> List.forall (fun i -> i.Address >= contract.SpanLo && i.Address <= contract.SpanHi)) ""
     check "routine ends with RET"
-      (contract.Disassembly |> List.exists (fun i -> i.Text = "RET")) ""
+      (match contract.Disassembly with
+       | insns when not insns.IsEmpty -> (List.last insns).Text = "RET"
+       | _ -> false) ""
     check "writes attributed to the clear land in the screen area (4000..5AFF)"
       (contract.WriteRanges
        |> List.exists (fun (lo, hi, _, _) -> hi >= 0x4000 && lo <= 0x5AFF))
@@ -441,8 +481,9 @@ let runValidate (romPath: string) (tzxPath: string) : int =
   check "registry covers all lifted routines"
     (covered 0x71B8 && covered 0x71CF && covered 0x72EE && covered 0x64E6)
     ""
-  // Good path: the current registry (screenClear 0x71B8) never executes in
-  // this script, so the lifted port must match the oracle exactly.
+  // Good path: the full registry runs lockstep with the oracle over the
+  // script - both the interpreted code and any lifted routine the script
+  // exercises (0x71B8 under the app's replay timing) must match exactly.
   let good =
     Validation.run romPath tzxPath 120
       (Jetpac3.Core.Script.defaultSession 120)
@@ -474,7 +515,7 @@ let runValidate (romPath: string) (tzxPath: string) : int =
       (sprintf "'%s' vs '%s'" d.PortExecuted d.OracleExecuted)
     check "divergence carries register context"
       (d.PortRegs.Contains "AF=" && d.OracleRegs.Contains "AF=") ""
-    check "divergence frame is sane" (d.Frame >= 0) (sprintf "frame %d" d.Frame)
+    check "divergence frame is sane" (d.Frame >= 0 && d.Frame < 200) (sprintf "frame %d" d.Frame)
   | None -> check "divergence details captured" false "no divergence"
   if failures.Count > 0 then 1 else 0
 
@@ -485,10 +526,12 @@ let runPrompt (romPath: string) (tzxPath: string) : int =
   let framesN = 400
   let script = Jetpac3.Core.Script.defaultSession framesN
   for f in 0 .. framesN - 1 do
-    let frameStart, _ = session.RunFrame()
-    session.DrainBeeperSamples(frameStart) |> ignore
+    // Keys land before the frame runs (event frame f influences run f),
+    // matching the app's replay loop and runHistory's convention.
     for (sf, row, bit, pressed) in script do
       if sf = f then session.SetKey(row, bit, pressed)
+    let frameStart, _ = session.RunFrame()
+    session.DrainBeeperSamples(frameStart) |> ignore
   let trace = session.Recorder.Build()
   let routines, _ = Miner.mine trace
   match routines |> List.tryFind (fun r -> r.Entry = 0x71CF) with
@@ -679,6 +722,99 @@ let runReplayHandoff (romPath: string) (tzxPath: string) : int =
 
   if failures.Count > 0 then 1 else 0
 
+let runTimeline (romPath: string) (tzxPath: string) : int =
+  printfn "timeline: per-frame states, file roundtrip, future seek"
+  let framesN = 60
+  // 1. A live session captures a full state for every executed frame.
+  let recorded = TraceSession(romPath, tzxPath, 500_000)
+  for _ in 0 .. framesN - 1 do recorded.RunFrame() |> ignore
+  check "timeline captured every executed frame" (recorded.StateTimeline.Count = framesN + 1)
+    (sprintf "count=%d" recorded.StateTimeline.Count)
+  check "session reports timeline bytes" (recorded.TimelineSessionBytes > int64 framesN * 65536L) ""
+  check "live frames counted" (recorded.LiveCapturedFrames = framesN + 1) ""
+
+  // 2. Codec roundtrip: save + load reproduces every state byte-exactly.
+  let temp = Path.Combine(Path.GetTempPath(), "jetpacfr-timeline-" + Guid.NewGuid().ToString("N"))
+  Directory.CreateDirectory temp |> ignore
+  let fp =
+    { GameId = "timeline-test"
+      RomSha256 = "rom-hash"
+      TzxSha256 = "tzx-hash"
+      ProgramSha256 = ""
+      ProgramAddress = None }
+  let path = Path.Combine(temp, "timeline.jst")
+  let saveResult = StateTimelineStore.save path fp recorded.StateTimeline recorded.KeyLog.Events
+  let loadResult = StateTimelineStore.tryLoad path fp
+  let loadedOk =
+    match loadResult with
+    | TimelineLoaded (timeline, events) ->
+      timeline.Count = recorded.StateTimeline.Count
+      && events = List.ofSeq recorded.KeyLog.Events
+      && ([ for i in 0 .. timeline.Count - 1 do
+              let m1, t1, k1 = recorded.StateTimeline.FrameData i
+              let m2, t2, k2 = timeline.FrameData i
+              yield m1 = m2 && t1 = t2 && k1 = k2 ]
+           |> List.forall id)
+    | _ -> false
+  check "timeline file round-trips every state" (saveResult = Ok () && loadedOk)
+    (sprintf "%A / %A" saveResult loadResult)
+  check "timeline identity rejects another game"
+    (StateTimelineStore.tryLoad path { fp with GameId = "other-game" } = TimelineIgnored "timeline belongs to another game") ""
+  check "timeline rejects changed assets"
+    (StateTimelineStore.tryLoad path { fp with RomSha256 = "different" } = TimelineIgnored "timeline assets do not match the selected game") ""
+
+  // 3. Future seek: a fresh session loads the recording and jumps straight
+  // to the last frame WITHOUT executing anything; the machine state matches
+  // the recorded end exactly, and the timeline did not grow.
+  let seeker = TraceSession(romPath, tzxPath, 500_000)
+  match StateTimelineStore.tryLoad path fp with
+  | TimelineLoaded (timeline, events) ->
+    seeker.LoadStateTimeline(timeline, events)
+    check "loaded timeline sets the seekable horizon" (seeker.TimelineExtent = framesN) ""
+    seeker.JumpTo(framesN)
+    check "jump to the future lands on the recorded state"
+      (seeker.Frame = framesN && seeker.Memory = recorded.Memory) ""
+    check "seeking did not grow the timeline" (seeker.StateTimeline.Count = framesN + 1) ""
+    check "loaded states are not counted as live capture" (seeker.LiveCapturedFrames = 0) ""
+    // 4. Execution continues past the future jump: the first capture rebases
+    // history, then the timeline grows sequentially.
+    seeker.RunFrame() |> ignore
+    seeker.RunFrame() |> ignore
+    check "timeline grows past a future jump" (seeker.StateTimeline.Count = framesN + 3) ""
+  | other -> check "timeline load for future seek" false (sprintf "%A" other)
+
+  // 5. Branch (Go) at a future frame truncates the timeline there and new
+  // captures continue sequentially.
+  let brancher = TraceSession(romPath, tzxPath, 500_000)
+  match StateTimelineStore.tryLoad path fp with
+  | TimelineLoaded (timeline, events) ->
+    brancher.LoadStateTimeline(timeline, events)
+    brancher.JumpTo(framesN / 2)
+    brancher.BranchAt(framesN / 2)
+    check "branch at a future frame truncates the timeline"
+      (brancher.StateTimeline.Count = framesN / 2 + 1) (sprintf "count=%d" brancher.StateTimeline.Count)
+    brancher.RunFrame() |> ignore
+    check "capture continues sequentially after the branch"
+      (brancher.StateTimeline.Count = framesN / 2 + 2) ""
+  | _ -> check "timeline load for branch test" false ""
+
+  // 6. Clearing the recording mid-session: states + keys wiped, the current
+  // frame stays covered, and captures continue sequentially from frame + 1.
+  let clearer = TraceSession(romPath, tzxPath, 500_000)
+  for _ in 0 .. 29 do clearer.RunFrame() |> ignore
+  clearer.ResetTimeline ()
+  check "clear wipes stored states and the key script"
+    (clearer.StateTimeline.Count = 1 && clearer.KeyLog.Count = 0)
+    (sprintf "count=%d keys=%d" clearer.StateTimeline.Count clearer.KeyLog.Count)
+  check "cleared session reports no live capture" (clearer.LiveCapturedFrames = 0) ""
+  clearer.RunFrame() |> ignore
+  clearer.RunFrame() |> ignore
+  check "captures continue sequentially after clear" (clearer.StateTimeline.Count = 3) ""
+  check "cleared timeline covers the new frames" (clearer.StateTimeline.EndFrame = 32) ""
+
+  Directory.Delete(temp, true)
+  if failures.Count > 0 then 1 else 0
+
 let runManifest () : int =
   printfn "manifest: game discovery + load"
   let rec walk (d: DirectoryInfo) =
@@ -688,12 +824,6 @@ let runManifest () : int =
       match d.Parent with
       | null -> None
       | p -> walk p
-  let gamesDir =
-    match walk (DirectoryInfo AppContext.BaseDirectory) with
-    | Some d -> d
-    | None ->
-      check "games/ directory found from the test base" false "not found"
-      ""
   match walk (DirectoryInfo AppContext.BaseDirectory) with
   | None -> check "games/ directory found from the test base" false "not found"
   | Some gamesDir ->
@@ -788,9 +918,9 @@ let runGame2 () : int =
       let framesN = 120
       let script = Jetpac3.Core.Script.defaultSession framesN
       for f in 0 .. framesN - 1 do
-        session.RunFrame() |> ignore
         for (sf, row, bit, pressed) in script do
           if sf = f then session.SetKey(row, bit, pressed)
+        session.RunFrame() |> ignore
       let trace = session.Recorder.Build()
       let routines, edges = Miner.mine trace
       let entrySet = routines |> List.map (fun r -> r.Entry) |> Set.ofList
@@ -972,6 +1102,7 @@ let runZ80Ops () : int =
     let cyclesOk = port.CycleCount() = int64 (z.CycleCount())
     if memDiff >= 0 || not regsOk || not cyclesOk then
       badOps <- badOps + 1
+      if detail = "" then detail <- sprintf " (first: %s)" name
       if badOps <= 10 then
         printfn "  FAIL %s: mem=%d pc=%04X/%04X cycles=%d/%d" name memDiff
           (port.Regs.Pc()) (z.Regs.Pc()) (port.CycleCount()) (z.CycleCount())
@@ -1167,6 +1298,52 @@ let runControl () : int =
   let at a = JetpacFR.Core.ControlFile.commentAt cf a
   check "commentAt exact line" (at 0x8005 = Some "keyboard scan") (sprintf "%A" (at 0x8005))
   check "commentAt falls back to range" (at 0x8015 = Some "sprite update") (sprintf "%A" (at 0x8015))
+  // 2b. Mass-comment coalescing: a run of same-text line comments saves as
+  // one range (address + length) instead of one repeat per instruction.
+  let stamped =
+    (JetpacFR.Core.ControlFile.empty 0x4000 0x10000,
+     [ 25091; 25094; 25097; 25098 ])
+    ||> List.fold (fun c a ->
+      JetpacFR.Core.ControlFile.upsert c { Kind = Line; Addr = a; EndExcl = 0; InstrIndex = -1; Text = "menu idle" })
+  let rtStamped = JetpacFR.Core.ControlFile.fromJson (JetpacFR.Core.ControlFile.toJson stamped)
+  let menuRanges = rtStamped.Comments |> List.filter (fun m -> m.Text = "menu idle")
+  check "same-text line runs coalesce into one range"
+    (menuRanges = [ { Kind = Range; Addr = 25091; EndExcl = 25099; InstrIndex = -1; Text = "menu idle" } ])
+    (sprintf "%A" rtStamped.Comments)
+  check "coalesced range resolves at every member line"
+    ([ 25091; 25094; 25097; 25098 ] |> List.forall (fun a -> JetpacFR.Core.ControlFile.commentAt rtStamped a = Some "menu idle"))
+    (sprintf "%A" (List.map (fun a -> JetpacFR.Core.ControlFile.commentAt rtStamped a) [ 25091; 25094; 25097; 25098 ]))
+  let loneStamped =
+    JetpacFR.Core.ControlFile.upsert (JetpacFR.Core.ControlFile.empty 0x4000 0x10000)
+      { Kind = Line; Addr = 100; EndExcl = 0; InstrIndex = -1; Text = "solo" }
+  let rtLone = JetpacFR.Core.ControlFile.fromJson (JetpacFR.Core.ControlFile.toJson loneStamped)
+  check "a lone line comment keeps its kind"
+    (rtLone.Comments = [ { Kind = Line; Addr = 100; EndExcl = 0; InstrIndex = -1; Text = "solo" } ])
+    (sprintf "%A" rtLone.Comments)
+  // 2c. Multiple comments on one address: addLine appends, replaceComment
+  // edits in place, commentsAt orders line before covering block.
+  let multi =
+    (JetpacFR.Core.ControlFile.empty 0x4000 0x10000, [ "first"; "second" ])
+    ||> List.fold (fun c t -> JetpacFR.Core.ControlFile.addLine c 100 t)
+  check "addLine allows multiple comments per address"
+    (multi.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = 100) |> List.length = 2) ""
+  check "addLine skips an identical re-add"
+    (JetpacFR.Core.ControlFile.addLine multi 100 "first" = multi) ""
+  let edited =
+    JetpacFR.Core.ControlFile.replaceComment multi
+      { Kind = Line; Addr = 100; EndExcl = 0; InstrIndex = -1; Text = "first" } "renamed"
+  check "replaceComment edits one of several"
+    (edited.Comments |> List.exists (fun m -> m.Text = "renamed")
+     && edited.Comments |> List.exists (fun m -> m.Text = "second")) ""
+  let withRange =
+    { multi with Comments = multi.Comments @ [ { Kind = Range; Addr = 90; EndExcl = 120; InstrIndex = -1; Text = "block" } ] }
+  let expectedOrder =
+    [ { Kind = Line; Addr = 100; EndExcl = 0; InstrIndex = -1; Text = "first" }
+      { Kind = Line; Addr = 100; EndExcl = 0; InstrIndex = -1; Text = "second" }
+      { Kind = Range; Addr = 90; EndExcl = 120; InstrIndex = -1; Text = "block" } ]
+  check "commentsAt orders line before covering block"
+    (JetpacFR.Core.ControlFile.commentsAt withRange 100 = expectedOrder)
+    (sprintf "%A" (JetpacFR.Core.ControlFile.commentsAt withRange 100))
   check "commentAt none" (at 0x8090 = None) (sprintf "%A" (at 0x8090))
   // 3. upsert replaces by key; empty text deletes.
   let cf2 =
@@ -1357,7 +1534,7 @@ let runBoot () : int =
             if kv.Length = 2 && kv[0].Trim() = "pc" then Some(Convert.ToInt32(kv[1].Trim(), 16)) else None)
         |> Option.defaultValue 0
     let bootCase (label: string) (tzxPath: string) =
-        let oracle, cycles = Jetpac3.Core.Boot.bootToEntry rom tzxPath None
+        let oracle, cycles = Jetpac3.Core.Boot.bootToEntry rom.Value tzxPath None
         let mem, state = oracle.SaveState()
         let pc = statePc state
         check (sprintf "%s boots to a RAM instruction" label) (pc >= 0x4000) (sprintf "pc=%04X" pc)
@@ -1373,9 +1550,71 @@ let runBoot () : int =
     match mmTzx with
     | None -> check "manic miner tape present" false "games/manicminer/Manic Miner.tzx not found"
     | Some mmTzx ->
-        bootCase "jetpac" tzx
+        bootCase "jetpac" tzx.Value
         bootCase "manicminer" mmTzx
     0
+
+/// The basic-block splitter (plan_code_graph): crafted golden case plus
+/// the real jetpac code span. Invariants: targets never interior, blocks
+/// re-decode exactly, branch ends produce two edges.
+let runFlow () : int =
+    printfn "flow: basic-block splitter"
+    let mem = Array.zeroCreate<byte> 0x10000
+    // 8000: 3E 01     LD A,1
+    // 8002: 28 05     JR Z,+5 -> 8009
+    // 8004: 00        NOP
+    // 8005: CD 09 80  CALL 8009
+    // 8008: C9        RET
+    // 8009: C9        RET
+    mem[0x8000] <- 0x3Euy; mem[0x8001] <- 0x01uy
+    mem[0x8002] <- 0x28uy; mem[0x8003] <- 0x05uy
+    mem[0x8004] <- 0x00uy
+    mem[0x8005] <- 0xCDuy; mem[0x8006] <- 0x09uy; mem[0x8007] <- 0x80uy
+    mem[0x8008] <- 0xC9uy
+    mem[0x8009] <- 0xC9uy
+    let golden = Z80Flow.splitBlocks mem 0x8000 0x800A (fun _ -> true)
+    match golden with
+    | [ b1; b2; b3 ] ->
+        check "golden: block1 span" (b1.Start = 0x8000 && b1.EndExcl = 0x8004) (sprintf "%04X-%04X" b1.Start b1.EndExcl)
+        check "golden: block1 ends branch to 8009" (b1.Ends = Z80Flow.Branch(Some 0x8009)) (sprintf "%A" b1.Ends)
+        check "golden: block2 span" (b2.Start = 0x8004 && b2.EndExcl = 0x8009) (sprintf "%04X-%04X" b2.Start b2.EndExcl)
+        check "golden: block2 ends return" (b2.Ends = Z80Flow.Return) (sprintf "%A" b2.Ends)
+        check "golden: block3 starts at target" (b3.Start = 0x8009) (sprintf "%04X" b3.Start)
+        check "golden: block3 ends return" (b3.Ends = Z80Flow.Return) (sprintf "%A" b3.Ends)
+    // Any other shape (2 or 4 blocks) is exactly the regression this golden
+    // case exists to catch - fail loudly instead of skipping the checks.
+    | other -> check "golden: splitter returns 3 blocks" false (sprintf "%d blocks" other.Length)
+    // Real image: the whole jetpac code span as code.
+    let oracle, _ = Jetpac3.Core.Boot.bootToEntry rom.Value tzx.Value None
+    let real = oracle.Memory
+    let realBlocks = Z80Flow.splitBlocks real 0x6000 0x8000 (fun _ -> true)
+    check "jetpac: blocks found" (realBlocks.Length > 10) (sprintf "%d" realBlocks.Length)
+    let targets = System.Collections.Generic.HashSet<int>()
+    let mutable a = 0x6000
+    while a < 0x8000 do
+      let kind, len = Z80Flow.classify real a
+      match kind with
+      | Z80Flow.Jump (Some t) | Z80Flow.Branch (Some t) | Z80Flow.Call (Some t) ->
+        if t >= 0x6000 && t < 0x8000 then targets.Add t |> ignore
+      | _ -> ()
+      a <- a + len
+    let badInterior =
+      realBlocks
+      |> List.filter (fun b -> targets |> Seq.exists (fun t -> t > b.Start && t < b.EndExcl))
+      |> List.map (fun b -> sprintf "%04X" b.Start)
+    check "jetpac: no target inside a block interior" (List.isEmpty badInterior) (String.concat "," badInterior)
+    // every non-final block re-decodes exactly to its span
+    let misaligned =
+      realBlocks
+      |> List.filter (fun b -> b.EndExcl < 0x8000)
+      |> List.filter (fun b ->
+        let mutable w = b.Start
+        while w < b.EndExcl do w <- w + max 1 (Disasm.disasmMemory real w).Length
+        w <> b.EndExcl)
+    check "jetpac: blocks re-decode to their span" (List.isEmpty misaligned) (sprintf "%d misaligned" misaligned.Length)
+    printfn "  jetpac blocks: %d, targets: %d" realBlocks.Length targets.Count
+    0
+
 
 /// The historical regression harness.
 let mainTests argv =
@@ -1388,20 +1627,22 @@ let mainTests argv =
     let run (name: string) =
       match name with
       | "disasm" -> runDisasmKnown () + runDisasmCorpus ()
-      | "trace" -> runTrace rom tzx
-      | "agree" -> runAgree rom tzx
+      | "trace" -> runTrace rom.Value tzx.Value
+      | "agree" -> runAgree rom.Value tzx.Value
       | "gaps" -> runGaps ()
-      | "mine" -> runMine rom tzx
-      | "contract" -> runContract rom tzx
-      | "validate" -> runValidate rom tzx
-      | "prompt" -> runPrompt rom tzx
-      | "bench" -> runBench rom tzx
+      | "mine" -> runMine rom.Value tzx.Value
+      | "contract" -> runContract rom.Value tzx.Value
+      | "validate" -> runValidate rom.Value tzx.Value
+      | "prompt" -> runPrompt rom.Value tzx.Value
+      | "bench" -> runBench rom.Value tzx.Value
       | "boot" -> runBoot ()
       | "manifest" -> runManifest ()
       | "minimal" -> runMinimal ()
       | "game2" -> runGame2 ()
-      | "handoff" -> runReplayHandoff rom tzx
-      | "history" -> runHistory rom tzx
+      | "flow" -> runFlow ()
+      | "handoff" -> runReplayHandoff rom.Value tzx.Value
+      | "history" -> runHistory rom.Value tzx.Value
+      | "timeline" -> runTimeline rom.Value tzx.Value
       | "z80ops" -> runZ80Ops ()
       | "labels" -> runLabels ()
       | "integration" -> runIntegration ()
@@ -1409,20 +1650,25 @@ let mainTests argv =
       | "control" -> runControl ()
       | "ctrlmap" -> runCtrlMap ()
       | "all" ->
-        runDisasmKnown () + runDisasmCorpus () + runTrace rom tzx + runAgree rom tzx
-        + runGaps () + runMine rom tzx + runContract rom tzx + runValidate rom tzx
-        + runHistory rom tzx + runBoot () + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
+        runDisasmKnown () + runDisasmCorpus () + runTrace rom.Value tzx.Value + runAgree rom.Value tzx.Value
+        + runGaps () + runMine rom.Value tzx.Value + runContract rom.Value tzx.Value + runValidate rom.Value tzx.Value
+        + runHistory rom.Value tzx.Value + runTimeline rom.Value tzx.Value + runBoot () + runFlow () + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
+        + runReplayHandoff rom.Value tzx.Value + runLabels () + runIntegration () + runCE ()
+        + runControl () + runCtrlMap ()
       | other ->
         eprintfn "unknown test: %s" other
         1
     let code =
       match tests with
       | [] ->
-        eprintfn "usage: --test disasm|trace|agree|all"
+        eprintfn "usage: --test disasm|trace|agree|gaps|mine|contract|validate|prompt|bench|boot|manifest|minimal|game2|flow|handoff|history|z80ops|labels|integration|ce|control|ctrlmap|all"
         1
       | names -> List.sumBy run names
-    if failures.Count > 0 then
-      eprintfn "%d failure(s)" failures.Count
+    // Individual test runners also signal failure through their return code
+    // (unknown name, skipped test, preconditions not met); honor it so a
+    // partial or skipped run can't report "ALL TESTS PASSED".
+    if failures.Count > 0 || code <> 0 then
+      if failures.Count > 0 then eprintfn "%d failure(s)" failures.Count
       1
     else
       printfn "ALL TESTS PASSED"

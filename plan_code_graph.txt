@@ -1,0 +1,159 @@
+Code pane redesign: selection filtering + block/graph view (plan_code_graph)
+===========================================================================
+Goal: turn the code pane from a fixed 41-row window into a scrollable view
+that (a) shows only the selected code, tinted by the active brush, and
+(b) grows into an IDA-style block/graph view: linear code split into basic
+blocks, blocks connected with arrows. No virtualization - the code is small.
+
+What exists today (and its limits)
+----------------------------------
+- refreshDisasm (App.fs) builds a fixed window: execution mode = +-20 trace
+  entries around `cursor`; memory mode = 20 rows above `memCursor` (aligned
+  from a hard 0x40-byte window) + rows from the cursor down to 41 total.
+  The 0x40 clamp + 20-row cap produce the "two groups with a gap" artifact.
+- Disasm.disasmMemory gives text + length per address (no flow semantics).
+- ControlFile: Blocks (Code/Data/Gap with Start/EndExcl), Comments
+  (Line/Name/Range/Exec), commentAt for row decoration.
+- Brushes A/B are FRAME ranges on the timeline; their address sets are the
+  PCs executed in the range (pcsInFrames over the trace - same source the
+  Comment A/B buttons use). Timeline colors: A = sky (0x38BDF8),
+  B = amber (0xFBBF24).
+- ListBox + DisasmRow (Tag string, Brush, Addr, InstrIdx) - no scrolling
+  semantics beyond the fixed window.
+
+Design decisions
+----------------
+1. Selection model. "Selected code" = the address set of the ACTIVE brush:
+   pcs = pcsInFrames(trace, brush.Start, brush.End). For a live session
+   without a loaded trace the recorder window may not cover old frames;
+   fallback = the control block clicked in the map (blockAt) or the whole
+   span of the active control block. The graph view always renders the
+   selection's blocks; an "expand" toggle widens it to the full code span
+   (all control.json Code blocks).
+2. Block splitting (pure function over memory + span + known targets):
+   - New module JetpacFR.Core/Z80Flow.fs: opcode classification for the
+     flow-relevant Z80 set: isJump/isConditional/targetOf (JP/JR/DJNZ/
+     CALL absolute+relative resolution, RET/RETI/RETN as block ends).
+     Pure byte-level, no emulator state - testable in isolation.
+   - Split pass over [start,end): decode instruction by instruction;
+     collect leaders = span start, every jump/call target inside the span,
+     the instruction after every jump/RET (unconditional ends);
+     respect control.json boundaries: a Data/Gap block boundary cuts
+     blocks too (no block straddles a data region).
+   - Invariant: a jump target is never in a block interior (it is always
+     a leader). Edges: conditional jump -> fall-through + taken;
+     unconditional jump -> taken; RET -> exit; running into a Data/Gap
+     boundary -> "next" edge if the address continues as code elsewhere.
+3. Two views behind the existing mode radios (a third radio, "graph",
+   joins "memory" / "exec"):
+   - List view (replaces both current windows): ScrollViewer + rows for
+     the SELECTION only (memory-mode rows for address sets; exec rows keep
+     working for the trace cursor as today). Rows tinted with the active
+     brush color (sky/amber) when their address is in the brush set.
+     Comments render as today via commentAt.
+   - Graph view: blocks as bordered boxes (header line: start address +
+     control-file Name if any; body: instruction rows, same rendering as
+     list rows), stacked vertically in address order inside a
+     ScrollViewer; arrows drawn on side rails: fall-through = straight
+     down, taken conditional = elbow to the right/down to the target
+     block header, back edges = left rail up. Simple deterministic layout
+     (address order + rail assignment), NOT a full Sugiyama solver.
+   - No virtualization: rows are plain TextBlocks in StackPanels; a
+     64K span decodes to at most ~30k instructions worst case, the real
+     game code is a few thousand - fine for WPF.
+4. Interaction preserved: clicking a row sets memCursor / trace cursor;
+   the map context menus (name/comment/split) keep working per address;
+   the graph header shows the block's Name; Ctrl+click or a small button
+   re-centers the selection. The old +-20 window stays available as the
+   default "context" rendering when NOTHING is selected (so the pane is
+   never empty on a fresh start).
+
+Clarifications (review pass, 2026-09-04)
+----------------------------------------
+- Selection ordering: the selection is rendered through BLOCKS in address
+  order (every block touching the selection, decoded in full), never as a
+  sparse address list. A hot loop stays contiguous; a sparse PC set spread
+  over 16K would be unreadable as scattered rows. This is the decided
+  semantics for both the filtered list and the graph view.
+- CALL semantics: a CALL target is a block leader; the code after the
+  call is reached by fall-through (the callee returns), so the caller
+  block continues normally and only the target starts a new block. RET
+  blocks simply end (exit edge, no successor drawn).
+- Straddle rule: if a jump target lands strictly inside a linearly
+  decoded instruction, the walk resyncs at the target and the straddled
+  bytes belong to no block (orphaned). Implemented in Z80Flow.splitBlocks.
+- Arrow routing: everything routes on RIGHT rails (taken conditional =
+  green, unconditional jump = cyan, call = orange, fall-through = short
+  straight arrow between adjacent blocks). Back edges get an upward
+  arrowhead at the target header. Deterministic but arrows may overlap
+  across long spans; click-to-highlight-an-edge is a cheap future
+  improvement, full routing minimization stays out of scope.
+- SURFACES ARE SEPARATE: the code graph view owns its own canvas +
+  ScrollViewer. The call graph (Functions tab, drawGraph) keeps the
+  original graphCanvas. Sharing one canvas between the two features is a
+  bug: the canvas can only be hosted by one parent and both views Clear()
+  it, so the code pane would render into a canvas the Call graph tab owns
+  (or vice versa), and switching modes clobbers the other view.
+5. Execution-mode parity is a later phase: the trace stream can be cut
+   into the same block model (leaders = jump/ret instructions in the
+   trace), but its value is lower; memory mode gets the feature first.
+
+Phases
+------
+Phase 1: Z80Flow.fs + block splitter (pure, in JetpacFR.Core)
+  - Classify flow opcodes; resolve relative targets.
+  - splitBlocks : memory -> span -> targetSet -> Block list
+    (Block = { Start; EndExcl; IsEntry; Edges }).
+  - Tests in the test host: targets never interior; conditional split
+    produces two edges; golden cases over crafted byte arrays; splitter
+    agrees with getInstrStarts boundaries on the jetpac image.
+Phase 2: selection plumbing
+  - activeSelectionAddresses(): brush A/B -> pc set (pcsInFrames), with
+    control-block fallback; expose on the App side; highlight hook.
+Phase 3: scrollable filtered list view
+  - Replace the fixed window with a ScrollViewer + full row list for the
+    selection; tint rows by brush; keep the +-20 context window for the
+    empty-selection case; the "gap" artifact disappears by construction.
+Phase 4: graph view
+  - Block boxes + arrow rails as a custom FrameworkElement (same pattern
+    as TimelineSelector): Measure/Render, ScrollViewer wrapper, click to
+    set cursor, context menus forwarded.
+  - Toggle radio "graph"; expand-to-full-span toggle.
+Phase 5 (optional): execution-mode blocks over the trace stream.
+
+Verification
+------------
+- Phase 1 tests are the load-bearing ones: the splitter must guarantee
+  "no target inside a block interior" for every block, and every block
+  must re-disassemble exactly to its byte span.
+- Manual GUI checks per phase: selection tint follows the active brush;
+  graph arrows land on block headers; back edges route on the left rail;
+  comments/name blocks visible in both views; no virtualization lag on
+  the full jetpac code span.
+- The parity gate from plan_ce_dsl does not apply here (view-only change).
+
+Out of scope (this plan)
+------------------------
+- Full graph layout solvers (layered/Sugiyama), edge routing minimization.
+- Editing blocks in the graph view (control.json editing stays on the map).
+- Virtualization, lazy decode, or any performance work.
+
+Status (2026-09-04)
+-------------------
+- Phase 1 DONE: Z80Flow.fs (classify + splitBlocks with resync), wired
+  into the fsproj, golden tests + real-image agreement test in the test
+  host (targets never interior; blocks re-decode exactly).
+- Phase 2 DONE: activeSelection() (brush -> PC set via pcsInFrames) and
+  flowBlocks() (cached splitBlocks over the bounding box of executed
+  region + selection + overlapping control code blocks).
+- Phase 3 DONE: memory mode shows selection blocks (scrollable, tinted
+  by the active brush); the +-20 window remains the empty-selection
+  default; the gap artifact is gone by construction.
+- Phase 4 IN PROGRESS: buildGraph/applyViewMode/graph toggle exist, but
+  the code graph shares graphCanvas + graphScroll bindings with the
+  Functions-tab call graph (two `let graphCanvas` bindings, the second
+  shadowing the first; the canvas is assigned as Content of two
+  different ScrollViewers). Remaining work: split the surfaces, add the
+  expand-to-full-span toggle ("All" = ignore the selection filter),
+  re-route the Click handler on graph rows to keep working per surface.
+- Phase 5: unchanged (optional, lower value).

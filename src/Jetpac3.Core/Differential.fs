@@ -21,6 +21,10 @@ module Differential =
     let z80 = oracle.DebugZ80
     let mutable diffs = 0
     let mutable firstFrame = -1
+    let mutable firstMemDiff = -1
+    let mutable firstBorderDiff = false
+    let mutable firstTraceDiff = false
+    let mutable firstRegsOk = false
     let mutable firstMessage = ""
     let mutable frame = 0
     while frame < framesN && diffs = 0 do
@@ -74,6 +78,10 @@ module Differential =
         diffs <- diffs + 1
         if firstFrame < 0 then
           firstFrame <- frame
+          firstMemDiff <- memDiff
+          firstBorderDiff <- borderDiff
+          firstTraceDiff <- traceDiff
+          firstRegsOk <- regsOk
           firstMessage <-
             sprintf "frame %d (mem=%s border=%b trace=%b regs=%b)"
               frame
@@ -84,4 +92,9 @@ module Differential =
     if diffs = 0 then
       { Frame = -1; MemDiff = -1; BorderDiff = false; TraceDiff = false; RegsOk = true; Message = "OK" }
     else
-      { Frame = firstFrame; MemDiff = -1; BorderDiff = false; TraceDiff = false; RegsOk = false; Message = firstMessage }
+      { Frame = firstFrame
+        MemDiff = firstMemDiff
+        BorderDiff = firstBorderDiff
+        TraceDiff = firstTraceDiff
+        RegsOk = firstRegsOk
+        Message = firstMessage }

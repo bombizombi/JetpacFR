@@ -37,6 +37,8 @@ type Z80(scheduler: Scheduler, memory: Memory) =
   member this.PassTime(tstates: int) = scheduler.Tick (uint64 tstates)
 
   member this.Interrupt() = irqPending_ <- true
+  /// True when an interrupt is pending but not yet accepted (save-state).
+  member this.IrqPending = irqPending_
   member this.AddInHandler(handler: int -> int option) = inHandlers_.Add handler
   member this.AddOutHandler(handler: int -> int -> unit) = outHandlers_.Add handler
 
@@ -124,12 +126,17 @@ type Z80(scheduler: Scheduler, memory: Memory) =
       this.PassTime 7
       regs_.SetSp((regs_.Sp() - 2) &&& 0xFFFF)
       memory.Write16(regs_.Sp(), regs_.Pc())
+      // The stack push is 3+3 T on real hardware (the Write16 above is the
+      // direct-memory shortcut, so the cycles are charged here).
+      this.PassTime 6
       match irqMode_ with
       | 0
       | 1 -> regs_.SetPc 0x38
       | 2 ->
         // Assume the bus is at 0xff.
         let addr = 0xFF ||| ((regs_.I() <<< 8) &&& 0xFF00)
+        // Vector fetch: another 3+3 T.
+        this.PassTime 6
         regs_.SetPc(memory.Read16 addr)
       | _ -> failwith "Inconceivable interrupt mode"
 
