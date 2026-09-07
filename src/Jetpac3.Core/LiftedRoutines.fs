@@ -511,6 +511,17 @@ module LiftedRoutines =
 
   let registry = [ screenClearRoutine; screenClear71CFRoutine; screenStepRoutine; tableLookup64E6Routine ]
 
+  /// Instructions one lifted step folds at an entry, for the code view's
+  /// IDA-style merged rows. Most arms translate exactly one instruction
+  /// (their row already shows the right mnemonic); only the arms that run
+  /// several instructions inside a single Step return a list here. Kept in
+  /// step with the Execute arms above - each arm's comment is the source.
+  let folded (addr: int) : string list option =
+    match addr with
+    | 0x71B8 -> Some [ "LD HL,4000"; "LD B,58"; "LD C,0" ]
+    | 0x71C6 -> Some [ "LD HL,5800"; "LD B,5B"; "LD C,47"; "JR 71BF" ]
+    | _ -> None
+
   /// Per-address dispatch table built once from the registry. The hook runs
   /// on every executed instruction, so this must be O(1): scanning each
   /// routine's arm list per instruction cost more than the lifted work itself.

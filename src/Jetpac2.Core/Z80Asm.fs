@@ -56,6 +56,11 @@ type Z80Builder() =
   member _.Zero() : Z80Op list = []
   member _.ReturnFrom(xs: Z80Op list) = xs
 
+  /// Plain let bindings inside the CE - generated programs declare their
+  /// label cells this way (`let screenClear = Z80.label ()`) so an emitted
+  /// body is self-contained without touching the enclosing module.
+  member _.Let(x: 'a, f: 'a -> Z80Op list) : Z80Op list = f x
+
   /// Unrolled repetition at assembly time (structure is static; a bounded
   /// while emits the body repeatedly).
   member _.For(xs: seq<'a>, f: 'a -> Z80Op list) = xs |> Seq.collect f |> Seq.toList

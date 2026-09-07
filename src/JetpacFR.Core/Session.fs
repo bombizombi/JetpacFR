@@ -285,6 +285,34 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     frame <- frameNumber
     port.Video.RenderAll()
 
+  /// Step back, one instruction: restore the state after `frame - 1` and
+  /// re-execute exactly `steps` instructions of `frame` with recording
+  /// suppressed, parking the machine right after the target entry - the
+  /// state the trace cursor can resume from. Non-destructive: history, the
+  /// key log and the timeline stay intact (the recorder keeps its old
+  /// window; commit a branch with Go to rebase the stores here). `steps`
+  /// counts executed instructions (marker+vector pairs are one Step), which
+  /// keeps the park point exact even if the frame's keys replayed at
+  /// slightly different cycle boundaries than the original run.
+  member this.ParkAtInstruction(frame: int, steps: int) =
+    if frame <= 0 then invalidOp "no state before frame 0"
+    this.JumpTo(frame - 1)
+    if steps > 0 then
+      // The frame's logged keys apply directly on the port (replay
+      // semantics) without logging: the key script must stay untouched.
+      for e in keyLog.ForFrame frame do
+        port.SetKey(e.Row, e.Bit, e.Pressed)
+      let wasRecording = recorder.RecordEnabled
+      recorder.RecordEnabled <- false
+      try
+        let frameEnd = port.FrameEnd
+        let mutable n = 0
+        while n < steps && port.CycleCount() < frameEnd do
+          port.Step ()
+          n <- n + 1
+      finally
+        recorder.RecordEnabled <- wasRecording
+
   /// Wipe the recording: every stored timeline state and the whole key
   /// script. The current frame is seeded as the fresh timeline's first
   /// state, so captures continue sequentially from frame + 1 and the machine

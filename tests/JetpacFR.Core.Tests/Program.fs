@@ -1284,11 +1284,17 @@ let runControl () : int =
         [ { Kind = Line; Addr = 0x8005; EndExcl = 0; InstrIndex = -1; Text = "keyboard scan" }
           { Kind = Name; Addr = 0x8000; EndExcl = 0x8023; InstrIndex = -1; Text = "MainLoop" }
           { Kind = Range; Addr = 0x8010; EndExcl = 0x8020; InstrIndex = -1; Text = "sprite update" }
-          { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = 1234; Text = "first jump into RAM" } ]
+          { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = 1234; Text = "first jump into RAM" }
+          { Kind = Frames; Addr = 40; EndExcl = 90; InstrIndex = -1; Text = "menu idle loop" } ]
+      Symbols = [ (0x8023, "tableLookup") ]
       Dirty = true }
   let rt = JetpacFR.Core.ControlFile.fromJson (JetpacFR.Core.ControlFile.toJson cf)
   check "json roundtrip: blocks" (rt.Blocks = cf.Blocks) (sprintf "%A" rt.Blocks)
   check "json roundtrip: comments" (rt.Comments = cf.Comments) (sprintf "%A" rt.Comments)
+  check "json roundtrip: symbols" (rt.Symbols = cf.Symbols) (sprintf "%A" rt.Symbols)
+  check "json roundtrip: frames comment"
+    (rt.Comments |> List.exists (fun m -> m.Kind = Frames && m.Addr = 40 && m.EndExcl = 90 && m.Text = "menu idle loop"))
+    (sprintf "%A" rt.Comments)
   check "json roundtrip: scalars"
     (rt.Start = cf.Start && rt.EndExcl = cf.EndExcl && rt.ActiveVersion = cf.ActiveVersion
      && rt.EntryPc = cf.EntryPc && rt.ImageFile = cf.ImageFile)
@@ -1440,6 +1446,7 @@ let runCtrlMap () : int =
   let cf = { ImageFile = "x"; Start = 0x8000; EndExcl = 0x8010; EntryPc = 0x8000; ActiveVersion = -1
              Blocks = blocks
              Comments = comments @ [ { Kind = Range; Addr = 0x8006; EndExcl = 0x800A; InstrIndex = -1; Text = "sprite" } ]
+             Symbols = []
              Dirty = false }
   let rr = JetpacFR.Core.CtrlMapModel.render cf.Blocks cf.Comments starts (Some mem) counts (Array.zeroCreate<bool> 0x10000) 0x8000 0x8010 400
   check "range mark visible" (rr.Ranges = [| (0x8006, 0x800A) |]) (sprintf "%A" rr.Ranges)
@@ -1483,7 +1490,7 @@ let runCE () : int =
       (rawBytes < img.Length / 20)
       (sprintf "%d raw of %d bytes" rawBytes img.Length)
     // 3. The F# source: labels + named ops.
-    let src = Z80CE.toSource mem 0x8000 img.Length
+    let src = Z80CE.toSource mem 0x8000 img.Length []
     check "source opens a z80 block" (src.Contains "z80 {") ""
     check "source labels in-range jumps" (src.Contains "Z80.at lbl0") ""
     check "source uses labeled conditional jumps" (src.Contains "Z80.JR_Z_LBL" || src.Contains "Z80.JR_LBL" || src.Contains "Z80.JP_NZ_LBL") ""
@@ -1615,6 +1622,186 @@ let runFlow () : int =
     printfn "  jetpac blocks: %d, targets: %d" realBlocks.Length targets.Count
     0
 
+let runFlame (romPath: string) (tzxPath: string) : int =
+  printfn "flame: walker, symbols->CE labels, builder determinism, step-back"
+
+  let mkEntry pc b0 b1 target (tick: int64) len cycles taken =
+    { Pc = uint16 pc; B0 = b0; B1 = b1; B2 = 0uy; B3 = 0uy; Target = uint16 target
+      Tick = uint32 tick; Length = uint8 len; Cycles = uint8 cycles
+      FlagsBefore = 0uy; FlagsAfter = 0uy; Taken = taken }
+
+  // 1. Call/RET pairing: root + one invocation, correct kinds, spans nest.
+  let callRet =
+    [| mkEntry 0x8000 0x00uy 0uy 0x8001 100 1 4 0uy    // root NOP
+       mkEntry 0x8001 0xCDuy 0uy 0x0500 104 3 17 1uy   // CALL $0500
+       mkEntry 0x0500 0x00uy 0uy 0x0501 121 1 4 0uy    // callee NOP
+       mkEntry 0x0501 0xC9uy 0uy 0x0502 125 1 10 1uy   // RET
+       mkEntry 0x8004 0x00uy 0uy 0x8005 135 1 4 0uy |] // root NOP
+  let w = FlameWalker.walk 5 [||] callRet
+  let rects = w.Rects
+  check "call/ret: two rectangles" (rects.Length = 2) (sprintf "%d rects" rects.Length)
+  check "call/ret: root at depth 0 spanning the window"
+    (rects[0].Kind = FlameKind.FlameRoot && rects[0].Depth = 0 && rects[0].StartTick = 0L && rects[0].EndTick = 39L)
+    (sprintf "%A" rects[0])
+  check "call/ret: invocation rect"
+    (rects[1].Kind = FlameKind.FlameCall && int rects[1].Entry = 0x0500 && int rects[1].CallPc = 0x8001
+     && rects[1].Depth = 1 && rects[1].StartTick = 4L && rects[1].EndTick = 35L)
+    (sprintf "%A" rects[1])
+  check "call/ret: max depth" (w.MaxDepth = 2) (sprintf "%d" w.MaxDepth)
+  check "call/ret: entry index range" (rects[1].StartIndex = 1 && rects[1].EndIndex = 4) (sprintf "%A" rects[1])
+
+  // 2. Not-taken conditional CALL pushes nothing.
+  let notTaken = [| mkEntry 0x8000 0xC4uy 0uy 0x8002 0 3 10 0uy |]
+  check "conditional call not taken: root only" ((FlameWalker.walk -1 [||] notTaken).Rects.Length = 1) ""
+
+  // 3. RST opens a frame with the RST vector as its entry.
+  let rst = [| mkEntry 0x8000 0xFFuy 0uy 0x0038 0 1 11 1uy; mkEntry 0x0038 0xC9uy 0uy 0x0039 11 1 10 1uy |]
+  let wr = FlameWalker.walk -1 [||] rst
+  check "rst: frame with vector entry"
+    (wr.Rects.Length = 2 && wr.Rects[1].Kind = FlameKind.FlameRst && int wr.Rects[1].Entry = 0x38)
+    (sprintf "%A" wr.Rects)
+
+  // 4. Interrupt marker opens an ISR frame (nested above a call); RETN pops it.
+  let isr =
+    [| mkEntry 0x8000 0xCDuy 0uy 0x0500 0 3 17 1uy       // CALL
+       mkEntry 0x0038 0x00uy 0uy 0x0038 17 0 7 1uy       // interrupt marker (len 0, recorded under the vector 0x38)
+       mkEntry 0x0038 0xEDuy 0x4Duy 0x003A 17 2 14 1uy   // RETN
+       mkEntry 0x0501 0xC9uy 0uy 0x0502 40 1 10 1uy |]   // callee RET
+  let wi = FlameWalker.walk -1 [||] isr
+  let isrRect = wi.Rects |> Array.find (fun r -> r.Kind = FlameKind.FlameInterrupt)
+  check "interrupt: ISR frame at depth 2 above the call"
+    (int isrRect.Entry = 0x38 && isrRect.Depth = 2 && wi.MaxDepth = 3)
+    (sprintf "%A" wi.Rects)
+
+  // 5. Frames still open at the window end are closed at the window end.
+  let openFrame = [| mkEntry 0x8000 0xCDuy 0uy 0x0500 0 3 17 1uy; mkEntry 0x0500 0x00uy 0uy 0x0501 17 1 4 0uy |]
+  let wo = FlameWalker.walk -1 [||] openFrame
+  let callee = wo.Rects |> Array.find (fun r -> int r.Entry = 0x0500)
+  check "open frame closed at window end" (callee.EndTick = wo.EndTick) (sprintf "%A %A" callee wo.EndTick)
+
+  // 6. uint32 tick wrap is unwrapped once into non-negative int64 ticks.
+  let wrapped = [| mkEntry 0x8000 0x00uy 0uy 0x8001 0xFFFFFFF0L 1 4 0uy; mkEntry 0x8001 0x00uy 0uy 0x8002 0x0AL 1 4 0uy |]
+  let ww = FlameWalker.walk -1 [||] wrapped
+  check "tick wrap unwrapped" (ww.Rects[0].EndTick = 30L && ww.Rects |> Array.forall (fun r -> r.StartTick >= 0L)) (sprintf "%A" ww.Rects)
+
+  // 7. Window helpers: stabbing finds the first overlapping rect candidate.
+  check "stab: root candidate" (FlameWindow.stab w 10L <= 1) (sprintf "%d" (FlameWindow.stab w 10L))
+  check "entryAtTick" (FlameWindow.entryAtTick w 30L = 3) (sprintf "%d" (FlameWindow.entryAtTick w 30L))
+
+  // 8. Walker and Miner agree on function entries for the same window.
+  let mkTrace (entries: TraceEntry[]) : Trace =
+    { Entries = entries; Snapshots = [||]; Writes = [||]; Ports = [||]
+      FrameTicks = [||]; PerPcCount = Array.zeroCreate 0x10000
+      SelfModified = Array.zeroCreate<bool> 0x10000; SelfModCount = 0
+      FirstIndexAtPc = Array.create 0x10000 -1; StartTick = 0u; EndTick = 0u }
+  let routines, _edges = Miner.mine (mkTrace callRet)
+  let flameEntries = w.Rects |> Array.filter (fun r -> r.Kind <> FlameKind.FlameRoot) |> Array.map (fun r -> int r.Entry) |> Set.ofArray
+  let minerEntries = routines |> List.map (fun r -> r.Entry) |> Set.ofList
+  check "flame covers miner routine entries" (Set.isSubset minerEntries flameEntries) (sprintf "%A vs %A" minerEntries flameEntries)
+
+  // 9. Symbols: CE bodies declare named label cells (self-contained).
+  // The jump target must sit INSIDE the body span to get the label form.
+  let mem = Array.zeroCreate<byte> 0x10
+  mem[0] <- 0xC3uy; mem[1] <- 0x06uy; mem[2] <- 0x00uy // JP $0006
+  let body = Z80CE.toBody mem 0 0x10 [ (6, "screenClear") ]
+  check "symbol label declared in the body" (body.Contains "let screenClear = Z80.label ()") body
+  check "symbol label placed + used by jumps"
+    (body.Contains "Z80.at screenClear" && body.Contains "Z80.JP_LBL screenClear") body
+  // sanitization: a bare F# keyword yields a compiling identifier
+  let body2 = Z80CE.toBody mem 0 0x10 [ (6, "type") ]
+  check "symbol sanitized" (body2.Contains "Z80.at _type") body2
+
+  // 10. Cache: LRU keeps windows, trims the detail tier over budget
+  // (pure - a walker window from the synthetic trace, no emulator needed).
+  let wCache = FlameWalker.walk 1 [| 200u; 300u; 400u |] callRet
+  let cache = FlameCache(detailFrameBudget = 2)
+  let stored = cache.Add wCache
+  check "cache trims detail over budget, keeps rects"
+    (stored.Entries.IsNone && stored.Rects.Length = wCache.Rects.Length)
+    (sprintf "entries=%A rects=%d/%d" stored.Entries.IsSome stored.Rects.Length wCache.Rects.Length)
+  let hit = cache.TryGet(1, 3)
+  check "cache returns covering windows" (hit.IsSome && hit.Value.EndTick = wCache.EndTick) ""
+  check "cache misses non-covering ranges" (cache.TryGet(2, 4) = None) ""
+
+  // 11. Live re-execution: builder determinism + step back. Each needs one
+  // booted session (minutes on a cold boot), so they share a single session
+  // and only run when the warm entry cache exists - run --test trace first
+  // to create it.
+  match EntryCache.tryLoad romPath tzxPath with
+  | None -> printfn "  (skipped: no warm entry cache - run --test trace first for the live flame tests)"
+  | Some _ ->
+    let live = TraceSession(romPath, tzxPath, 4_000_000)
+    for _ in 0 .. 5 do live.RunFrame() |> ignore
+    // Builder determinism: re-executing frames 1..3 must reproduce the
+    // live recording byte for byte.
+    match FlameBuilder.buildFrames live.StateTimeline live.KeyLog 1 3 ignore (fun () -> false) with
+    | None -> check "flame builder ran" false "cancelled"
+    | Some wb ->
+      let lt = live.Recorder.Build()
+      // The window's base tick is frame 1's first entry in the live ring.
+      let rec firstAt (lo: int) (hi: int) (tick: uint32) =
+        if lo >= hi then lo
+        else
+          let mid = (lo + hi) / 2
+          if lt.Entries[mid].Tick < tick then firstAt (mid + 1) hi tick else firstAt lo mid tick
+      let start0 = firstAt 0 lt.Entries.Length (uint32 wb.BaseTick)
+      let n = wb.Entries.Value.Length
+      let mism =
+        [ for i in 0 .. n - 1 do
+            let a = lt.Entries[start0 + i]
+            let b = wb.Entries.Value[i]
+            if a.Pc <> b.Pc || a.B0 <> b.B0 || a.Length <> b.Length || a.Cycles <> b.Cycles || a.Tick <> b.Tick then yield i ]
+      check "builder re-executes frames identically" (start0 + n <= lt.Entries.Length && List.isEmpty mism)
+        (sprintf "start0=%d n=%d live=%d mism=%A" start0 n lt.Entries.Length (List.truncate 5 mism))
+      check "builder window has frame mapping" (wb.FirstFrame = 1 && wb.FrameTicks.Length = 3) ""
+    // Step back: park after entry k, one more instruction reproduces the
+    // originally recorded next entry exactly. Runs on the same session
+    // (ParkAtInstruction is non-destructive; the RunFrame re-runs the rest
+    // of the frame and appends it to the ring).
+    let t1 = live.Recorder.Build()
+    // Park inside frame 3. Session numbering: the entry state IS frame 0 and
+    // boundary j is recorded when session frame j+1 completes, so a frame's
+    // entries sit between boundaries [frame - 2] and [frame - 1] and a frame
+    // of 3 or more has a predecessor state to restore.
+    let firstOfFrame3 =
+      let tick = t1.FrameTicks[1]
+      let rec s2 (lo: int) (hi: int) =
+        if lo >= hi then lo
+        else
+          let mid = (lo + hi) / 2
+          if t1.Entries[mid].Tick < tick then s2 (mid + 1) hi else s2 lo mid
+      s2 0 t1.Entries.Length
+    let target = firstOfFrame3 + 50
+    if t1.Entries.Length < target + 2 || t1.FrameTicks.Length < 3 then check "step back target exists" false "trace too short"
+    else
+      let rec search (lo: int) (hi: int) =
+        if lo >= hi then lo
+        else
+          let mid = (lo + hi) >>> 1
+          if int64 t1.FrameTicks[mid] <= int64 t1.Entries[target].Tick then search (mid + 1) hi else search lo mid
+      let frame = search 0 (t1.FrameTicks.Length - 1) + 1
+      let firstInFrame =
+        if frame = 1 then 0
+        else
+          let tick = t1.FrameTicks[frame - 2]
+          let rec s2 (lo: int) (hi: int) =
+            if lo >= hi then lo
+            else
+              let mid = (lo + hi) / 2
+              if t1.Entries[mid].Tick < tick then s2 (mid + 1) hi else s2 lo mid
+          s2 0 t1.Entries.Length
+      let before = live.Recorder.EntryCount
+      live.ParkAtInstruction(frame, target - firstInFrame + 1)
+      live.RunFrame() |> ignore
+      let t2 = live.Recorder.Build()
+      let a = t2.Entries[before]
+      let b = t1.Entries[target + 1]
+      check "parked machine continues with the exact next instruction"
+        (a.Pc = b.Pc && a.Tick = b.Tick && a.Length = b.Length && a.Cycles = b.Cycles)
+        (sprintf "got %04X@%u vs %04X@%u" a.Pc a.Tick b.Pc b.Tick)
+
+  if failures.Count > 0 then 1 else 0
+
 
 /// The historical regression harness.
 let mainTests argv =
@@ -1649,12 +1836,13 @@ let mainTests argv =
       | "ce" -> runCE ()
       | "control" -> runControl ()
       | "ctrlmap" -> runCtrlMap ()
+      | "flame" -> runFlame rom.Value tzx.Value
       | "all" ->
         runDisasmKnown () + runDisasmCorpus () + runTrace rom.Value tzx.Value + runAgree rom.Value tzx.Value
         + runGaps () + runMine rom.Value tzx.Value + runContract rom.Value tzx.Value + runValidate rom.Value tzx.Value
         + runHistory rom.Value tzx.Value + runTimeline rom.Value tzx.Value + runBoot () + runFlow () + runManifest () + runGame2 () + runMinimal () + runZ80Ops ()
         + runReplayHandoff rom.Value tzx.Value + runLabels () + runIntegration () + runCE ()
-        + runControl () + runCtrlMap ()
+        + runControl () + runCtrlMap () + runFlame rom.Value tzx.Value
       | other ->
         eprintfn "unknown test: %s" other
         1

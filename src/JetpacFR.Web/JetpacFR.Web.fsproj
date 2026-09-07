@@ -48,6 +48,8 @@
     <Compile Include="../../games/minimal/Image.fs" />
     <Compile Include="../../games/minimal/Game.fs" />
     <Compile Include="SessionWeb.fs" />
+    <!-- Flame: walker + CallOps (Fable-clean); used by Miner -->
+    <Compile Include="../JetpacFR.Core/Flame.fs" />
     <Compile Include="../JetpacFR.Core/Miner.fs" />
     <Compile Include="../JetpacFR.Core/Contract.fs" />
     <Compile Include="../JetpacFR.Core/Prompt.fs" />
