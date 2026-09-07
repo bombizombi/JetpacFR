@@ -115,12 +115,23 @@ data_F000:
 
 
 20260907
---- in code window when a jump to memory location or trace tstate is requested, we compile around 20 instructions before and after.  This is fine, but when there is no vertical room, the target instruction is scrolled out of view. We can still disassemble the same amount of lines, but can you scroll the target instruction so that it is centered vertically, so that there is aprox the same amount of instructions above and below, or even better, that there is 2/5 of instructions above, and 3/5 of instructions below, slightly weighted so that we can see more instructions below.
+---sent in code window when a jump to memory location or trace tstate is requested, we compile around 20 instructions before and after.  This is fine, but when there is no vertical room, the target instruction is scrolled out of view. We can still disassemble the same amount of lines, but can you scroll the target instruction so that it is centered vertically, so that there is aprox the same amount of instructions above and below, or even better, that there is 2/5 of instructions above, and 3/5 of instructions below, slightly weighted so that we can see more instructions below.
 
---- can we optionally synchronize the brush timeline with the flame graph timeline, so they are both at the same position and at the same zoom level. (add zooming to the brush timeline if it does not already exists). there could also be a non-accented small checkbox with text "sync with main timeline" that will control this behaviour.  put default at off
+---queued can we optionally synchronize the brush timeline with the flame graph timeline, so they are both at the same position and at the same zoom level. (add zooming to the brush timeline if it does not already exists). there could also be a non-accented small checkbox with text "sync with main timeline" that will control this behaviour.  put default at off
 
 
 -?? Problem with t-state count and time (or frame) position of the trace. they could be exactly equivalent, but this is not necessarily so, so how do we handle this.  in some zoom levels it is better to look at the big picture (just time in seconds) but if we zoom into individual frames, tstates make more sense as an address)
+
+
+
+
+Ok, where in the code are we attaching those lifted routines into a list so that the processor can check for them when executing?  how many are there?  is this the same mechanism as the post instruction / pre instruction hooks that allow us to execute more code with super instructions?  what happened to the plan to implement F# CE (computational expression) for the whole game that will have Z80 language with labels and two pass assembler.  is this thing implemented, and does it actually hold the bytes for the game?
+ also, yes, do those additions to the code window, do the idaa 1.
+
+	
+
+
+
 
 
 - bug
