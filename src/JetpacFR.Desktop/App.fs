@@ -375,10 +375,15 @@ type MainWindow() as self =
   /// highlighted cursor instruction stays on its address and scrolls with
   /// the content instead of being pinned to the middle row.
   let mutable memViewTop: int option = None
+  /// Memory-mode jump flag: gotoMemCursor recentres the window AND asks the
+  /// next memory render to scroll the cursor row to 2/5 of the viewport
+  /// (wheel moves and row clicks keep the viewport still instead).
+  let mutable pendingMemJumpScroll = false
   let gotoMemCursor (addr: int) (reason: string) =
     memCursor <- addr
     memCursorReason <- reason
     memViewTop <- None // jumps recenter the window on the new cursor
+    pendingMemJumpScroll <- true
   /// Memory scan state: baseline snapshot + surviving addresses.
   let mutable scanBaseline: byte[] option = None
   let mutable scanBaselineFrame = -1
@@ -399,8 +404,17 @@ type MainWindow() as self =
   let flameFitBtn = Button(Content = "Flame fit", Width = 64.0, ToolTip = "zoom the flame graph to the built window")
   let flameAutoBtn = CheckBox(Content = "flame auto", IsChecked = Nullable<bool>(true), Foreground = normal, VerticalAlignment = VerticalAlignment.Center,
                               ToolTip = "keep a flame window for the brush selection built automatically")
+  let syncViewsBtn = CheckBox(Content = "sync with main timeline", IsChecked = Nullable<bool>(false), Foreground = dim, VerticalAlignment = VerticalAlignment.Center,
+                              ToolTip = "keep the brush timeline and the flame graph at the same position and zoom (timeline wheel zooms, shift+wheel pans)")
   /// Built flame windows (LRU, detail tier evicted for large windows).
   let flameCache = FlameCache()
+  /// Generation counter + in-flight flag for the async flame builds. Bumping
+  /// the generation makes running workers cancel and stale completions be
+  /// ignored - the game switch uses it to invalidate a build started for the
+  /// previous game. Declared at class level so the switch handler can reach
+  /// them (buildFlameRange's wiring sits later in the file).
+  let mutable flameGeneration = 0
+  let mutable flameBuilding = false
 
   // 1-second selection movie: 50 ticks x 20 ms
   let previewTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
@@ -664,7 +678,13 @@ type MainWindow() as self =
         control <- Some(ControlFile.loadOrCreate dir (0x4000, 0x10000))
         controlGameDir <- dir
         statusText.Text <- sprintf "control file loaded (%d comments)" control.Value.Comments.Length
-      with ex -> statusText.Text <- sprintf "control load failed: %s" ex.Message
+      with ex ->
+        // A failed load must not keep the previous game's control file: its
+        // annotations would render onto this game, and saving would write
+        // them into the other game's control.json.
+        control <- None
+        controlGameDir <- dir
+        statusText.Text <- sprintf "control load failed: %s" ex.Message
 
   let saveControlNow () : unit =
     match control, controlGameDir with
@@ -1257,23 +1277,42 @@ type MainWindow() as self =
       disasmScroll <- sv
       sv
 
+  /// When set, the next setRows call scrolls this row index to the given
+  /// fraction of the viewport (0 = top, 1 = bottom) instead of restoring the
+  /// previous offset. Consumed by that call - jumps request it, wheel and
+  /// row-click renders do not. The ListBox scrolls by items, so both the row
+  /// index and ViewportHeight are in rows.
+  let mutable pendingScrollToRow: (int * float) option = None
+
   /// Swap the code window's rows while keeping the scroll offset stable.
   /// Assigning a fresh ItemsSource regenerates every container and resets the
   /// ScrollViewer to the top; refreshDisasm runs off the 30 ms cinema timer
   /// and every scrub interaction, which made any scroll attempt snap straight
   /// back. Same row count => same window shape, so re-apply the old offset
-  /// once the new containers are laid out (clamped by the ScrollViewer).
+  /// once the new containers are laid out (clamped by the ScrollViewer) -
+  /// unless a jump asked for the current row to be placed instead.
   let setRows (rows: ResizeArray<DisasmRow>) =
     let sv = findScroll ()
     let oldOffset = sv |> Option.map (fun s -> s.VerticalOffset) |> Option.defaultValue 0.0
     let oldCount = disasmList.Items.Count
     disasmList.ItemsSource <- rows
-    if oldCount = rows.Count && oldOffset > 0.0 then
+    match pendingScrollToRow with
+    | Some (rowIdx, frac) ->
+      pendingScrollToRow <- None
       sv |> Option.iter (fun s ->
         disasmList.Dispatcher.BeginInvoke(
           DispatcherPriority.Loaded,
-          Action(fun () -> s.ScrollToVerticalOffset oldOffset))
+          Action(fun () ->
+            let target = float rowIdx - frac * s.ViewportHeight
+            s.ScrollToVerticalOffset (max 0.0 (min s.ScrollableHeight target))))
         |> ignore)
+    | None ->
+      if oldCount = rows.Count && oldOffset > 0.0 then
+        sv |> Option.iter (fun s ->
+          disasmList.Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            Action(fun () -> s.ScrollToVerticalOffset oldOffset))
+          |> ignore)
 
   let applyViewMode () =
     disasmList.Visibility <- if disasmModeGraph then Visibility.Collapsed else Visibility.Visible
@@ -1328,6 +1367,11 @@ type MainWindow() as self =
       | _ -> flameCtrl.CursorTick <- -1L
 
   let rec refreshDisasm () =
+    // Consume a pending memory jump once per render: only the memory branches
+    // below use it (a gotoMemCursor between renders must not leak into a
+    // later render after a mode switch).
+    let memJump = pendingMemJumpScroll
+    pendingMemJumpScroll <- false
     if disasmModeGraph then
       // the graph build can own the thread for minutes on wide spans; show
       // the busy cursor for its duration
@@ -1361,6 +1405,14 @@ type MainWindow() as self =
             while a < b.EndExcl do
               rows.Add(memRowFor mem a (Some (which, sel)))
               a <- a + max 1 (Disasm.disasmMemory mem a).Length
+          // A memory jump places the cursor row at 2/5 of the viewport (the
+          // selection list is long; without this the target can sit outside
+          // it entirely).
+          pendingScrollToRow <-
+            if memJump then
+              rows |> Seq.tryFindIndex (fun r -> r.IsCurrent)
+              |> Option.map (fun i -> i, 0.4)
+            else None
           setRows rows
           let lo = blocks |> List.map (fun b -> b.Start) |> function [] -> 0x10000 | xs -> List.min xs
           let hi = blocks |> List.map (fun b -> b.EndExcl) |> function [] -> 0 | xs -> List.max xs
@@ -1407,6 +1459,13 @@ type MainWindow() as self =
           while rows.Count < 41 do
             rows.Add(memRowFor mem cur None)
             cur <- (cur + (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
+          // A memory jump places the cursor row at 2/5 of the viewport;
+          // wheel moves and row clicks keep the viewport still.
+          pendingScrollToRow <-
+            if memJump then
+              rows |> Seq.tryFindIndex (fun r -> r.IsCurrent)
+              |> Option.map (fun i -> i, 0.4)
+            else None
           setRows rows
           // DESYNC probe, independent of the window: is the cursor itself an
           // instruction start in the linear decode around it?
@@ -1447,7 +1506,8 @@ type MainWindow() as self =
           // Window center: after a row click the held center keeps the
           // content still while only the bright row moves; any other cursor
           // move renders without the hold and recenters on the cursor.
-          let winCenter = if execViewHold then max 0 (min execViewCenter (t.Entries.Length - 1)) else c
+          let held = execViewHold
+          let winCenter = if held then max 0 (min execViewCenter (t.Entries.Length - 1)) else c
           execViewHold <- false
           execViewCenter <- winCenter
           let rows = ResizeArray<DisasmRow>()
@@ -1517,6 +1577,16 @@ type MainWindow() as self =
                 IsCurrent = false
                 Addr = -1
                 InstrIdx = -1 }
+          // Jumps (any recentering render - slider, keys, seeks, flame/heatmap
+          // navigation) place the current row at 2/5 of the viewport: two
+          // fifths of the visible rows above the target, three fifths below,
+          // so more of the following code stays readable. Held renders (row
+          // clicks, wheel) keep the viewport still instead.
+          pendingScrollToRow <-
+            if held then None
+            else
+              rows |> Seq.tryFindIndex (fun r -> r.IsCurrent)
+              |> Option.map (fun i -> i, 0.4)
           setRows rows
           let fr = frameOfEntry t c
           disasmTarget.Text <-
@@ -2221,7 +2291,7 @@ type MainWindow() as self =
     let tlColumn = StackPanel()
     tlColumn.Children.Add timeline |> ignore
     let tlBtns = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(2.0, 4.0, 0.0, 0.0))
-    for b in [ brushABtn :> FrameworkElement; brushBBtn :> FrameworkElement; previewABtn :> FrameworkElement; previewBBtn :> FrameworkElement; saveCtrlBtn :> FrameworkElement; importCtrlBtn :> FrameworkElement; exportCtrlBtn :> FrameworkElement; newCtrlBtn :> FrameworkElement; flameABtn :> FrameworkElement; flameBBtn :> FrameworkElement; flameFitBtn :> FrameworkElement; flameAutoBtn :> FrameworkElement ] do
+    for b in [ brushABtn :> FrameworkElement; brushBBtn :> FrameworkElement; previewABtn :> FrameworkElement; previewBBtn :> FrameworkElement; saveCtrlBtn :> FrameworkElement; importCtrlBtn :> FrameworkElement; exportCtrlBtn :> FrameworkElement; newCtrlBtn :> FrameworkElement; flameABtn :> FrameworkElement; flameBBtn :> FrameworkElement; flameFitBtn :> FrameworkElement; flameAutoBtn :> FrameworkElement; syncViewsBtn :> FrameworkElement ] do
       b.Margin <- Thickness(2.0)
       tlBtns.Children.Add b |> ignore
     tlColumn.Children.Add tlBtns |> ignore
@@ -3049,15 +3119,47 @@ type MainWindow() as self =
         engineCE <- false
         engineCombo.SelectedIndex <- 0
         parityLabel.Text <- ""
-        if session.IsSome then pauseGame ()
+        // Pause unconditionally: with the CE engine active `session` is None,
+        // and the old conditional skip left the frame/cinema timers running
+        // into the new game.
+        pauseGame ()
         session <- None
         loaded <- None
         built <- None
+        builtAtCount <- -1 // a stale count could suppress the new trace build
         flameTrace <- None
         flameCache.Clear ()
+        // Invalidate a flame build running for the previous game: its worker
+        // sees the new generation, cancels, and a stale completion is ignored
+        // instead of installing the old game's window.
+        flameGeneration <- flameGeneration + 1
+        flameBuilding <- false
         cursor <- 0 // the old cursor indexed the previous game's trace
         execViewCenter <- 0
         execViewHold <- false
+        memCursor <- 0x8000
+        memCursorReason <- "game switch"
+        memViewTop <- None
+        pendingMemJumpScroll <- false
+        previewFrom <- 0
+        previewSpan <- 0
+        previewTicks <- 0
+        // Mining, lift queue, and scan results describe the previous game.
+        minedRoutines <- []
+        minedEdges <- []
+        selectedEntries <- Set.empty
+        activeRoutine <- None
+        refreshRoutines ()
+        routineDetail.Text <- ""
+        refreshTray ()
+        drawGraph ()
+        contractText.Text <- ""
+        contractLabel.Text <- ""
+        scanBaseline <- None
+        scanBaselineFrame <- -1
+        scanResults <- []
+        scanList.ItemsSource <- null
+        scanCountLabel.Text <- ""
         engineCombo.IsEnabled <- hasCE g
         launchGame g
         loadControlForGame ()
@@ -3387,9 +3489,6 @@ type MainWindow() as self =
             EndTick = raw (w.EndTick - 1L) }
       | _ -> None
 
-    let mutable flameGeneration = 0
-    let mutable flameBuilding = false
-
     /// [startTick, endTick] covered by frames [f0, f1Exclusive) in window
     /// ticks, None when the window does not overlap the range.
     let tickRangeOfFrames (w: FlameWindow) (f0: int) (f1Exclusive: int) : (int64 * int64) option =
@@ -3473,6 +3572,40 @@ type MainWindow() as self =
     flameBuildImpl <- fun (a, b, zoom) -> buildFlameRange a b zoom
 
     timeline.RangeChanged.Add(fun _ -> syncFlameRanges ())
+
+    // Optional view sync: the brush timeline and the flame graph share one
+    // viewport (position + zoom). The timeline's domain is frames, the
+    // flame's is window-relative ticks; tickRangeOfFrames / frameAtTick
+    // bridge them. `syncingViews` stops the two events from feeding each
+    // other, and `tickRangeOfFrames` returning None (timeline view outside
+    // the built window) leaves the flame graph untouched.
+    let mutable syncingViews = false
+    let pushTimelineToFlame () =
+      if syncViewsBtn.IsChecked.HasValue && syncViewsBtn.IsChecked.Value && not syncingViews then
+        match flameCtrl.Window with
+        | Some w ->
+          let f0, f1 = timeline.Viewport
+          syncingViews <- true
+          match tickRangeOfFrames w (int f0) (int f1 + 1) with
+          | Some (a, b) -> flameCtrl.ZoomToRange(a, b)
+          | None -> ()
+          syncingViews <- false
+        | None -> ()
+    let pushFlameToTimeline () =
+      if syncViewsBtn.IsChecked.HasValue && syncViewsBtn.IsChecked.Value && not syncingViews then
+        match flameCtrl.Window with
+        | Some w ->
+          let o, e = flameCtrl.VisibleRange
+          let f0 = FlameWindow.frameAtTick w o
+          let f1 = FlameWindow.frameAtTick w (max o e)
+          syncingViews <- true
+          timeline.SetViewport(int64 f0, int64 (max 1 (f1 - f0)))
+          syncingViews <- false
+        | None -> ()
+    timeline.ViewportChanged.Add(fun _ -> pushTimelineToFlame ())
+    flameCtrl.ViewportChanged.Add(fun _ -> pushFlameToTimeline ())
+    // Toggling on adopts the flame graph's current view immediately.
+    syncViewsBtn.Checked.Add(fun _ -> pushFlameToTimeline ())
     flameFitBtn.Click.Add(fun _ -> flameCtrl.ZoomToFit ())
     let flameBrushBuild which =
       let a, b = rangeOf which

@@ -68,6 +68,7 @@ type TimelineSelector() as self =
   let rangeChanged = Event<BrushId * BrushRange>()
   let activeChanged = Event<BrushId>()
   let scrubbed = Event<int64>()
+  let viewportChanged = Event<unit>()
 
   let sky = Color.FromRgb(0x38uy, 0xBDuy, 0xF8uy)
   let amber = Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy)
@@ -86,6 +87,10 @@ type TimelineSelector() as self =
     Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal)
 
   let mutable length = 1L
+  /// Viewport: first visible unit + pixels per unit. ppUnit <= 0.0 means
+  /// "fit the whole length" (recomputed from the actual width on demand).
+  let mutable viewOrigin = 0L
+  let mutable ppUnit = 0.0
   let mutable rangeA = { Start = 0L; End = 0L }
   let mutable rangeB = { Start = 0L; End = 0L }
   let mutable active = A
@@ -116,10 +121,50 @@ type TimelineSelector() as self =
   [<CLIEvent>]
   member _.Scrubbed = scrubbed.Publish
 
+  [<CLIEvent>]
+  member _.ViewportChanged = viewportChanged.Publish
+
+  /// Pixels per visible unit; fit mode computed from the actual width.
+  member private this.PpUnit =
+    if ppUnit <= 0.0 then float (max 1.0 this.ActualWidth) / float length
+    else ppUnit
+
+  /// The visible unit span.
+  member private this.VisibleSpan = int64 (Math.Round(float (max 1.0 this.ActualWidth) / this.PpUnit))
+
+  /// Keep the origin inside [0, Length - visibleSpan].
+  member private this.ClampViewport () =
+    viewOrigin <- max 0L (min viewOrigin (max 0L (length - this.VisibleSpan)))
+
+  /// Show [originUnit, originUnit + spanUnits), clamped into [0, Length].
+  /// The view-sync entry point (and shift+wheel pan).
+  member this.SetViewport(originUnit: int64, spanUnits: int64) =
+    let span = max 1L (min spanUnits length)
+    let newPp = float (max 1.0 this.ActualWidth) / float span
+    let newOrigin = max 0L (min originUnit (length - span))
+    if viewOrigin <> newOrigin || abs (newPp - ppUnit) > 1e-9 then
+      viewOrigin <- newOrigin
+      ppUnit <- newPp
+      this.InvalidateVisual()
+      viewportChanged.Trigger()
+
+  /// The visible [start, end) unit range.
+  member this.Viewport : int64 * int64 =
+    viewOrigin, min length (viewOrigin + this.VisibleSpan)
+
+  /// Show the whole length again.
+  member this.ZoomToFit () =
+    viewOrigin <- 0L
+    ppUnit <- 0.0
+    this.InvalidateVisual()
+    viewportChanged.Trigger()
+
   member this.Length
     with get () = length
     and set v =
       length <- max 1L v
+      // keep a zoomed viewport usable when the recording grows or shrinks
+      if ppUnit > 0.0 then this.ClampViewport ()
       this.InvalidateVisual()
 
   member this.RangeA
@@ -160,11 +205,11 @@ type TimelineSelector() as self =
         playhead <- v
         this.InvalidateVisual()
 
-  /// Timeline unit at a client x coordinate, clamped to [0, Length].
+  /// Timeline unit at a client x coordinate, clamped to the viewport.
   member private this.UnitAt(x: float) =
-    let w = max 1.0 this.ActualWidth
-    let clamped = min (max x 0.0) w
-    int64 (Math.Round(clamped / w * float length))
+    let clamped = min (max x 0.0) (max 1.0 this.ActualWidth)
+    let u = viewOrigin + int64 (Math.Round(clamped / this.PpUnit))
+    max 0L (min u length)
 
   /// Set a brush range and notify subscribers.
   member private this.SetRange(which: BrushId, r: BrushRange) =
@@ -242,6 +287,29 @@ type TimelineSelector() as self =
     chipDrag <- None
     this.ReleaseMouseCapture()
 
+  /// wheel      -> zoom around the cursor (out stops at the full length)
+  /// shift+wheel-> pan by 10% of the visible span per notch
+  override this.OnMouseWheel(e: MouseWheelEventArgs) =
+    let w = max 1.0 this.ActualWidth
+    if Keyboard.Modifiers &&& ModifierKeys.Shift = ModifierKeys.Shift then
+      let span = this.VisibleSpan
+      let d = (max 1L (span / 10L)) * (if e.Delta > 0 then 1L else -1L)
+      this.SetViewport(viewOrigin + d, span)
+    else
+      let anchor = this.UnitAt(e.GetPosition(this).X)
+      let oldPp = this.PpUnit
+      let minPp = float w / float length
+      let newPp = max minPp (min 200.0 (oldPp * (if e.Delta > 0 then 1.2 else 1.0 / 1.2)))
+      // keep the unit under the cursor anchored at the same pixel
+      let anchorX = float (anchor - viewOrigin) * oldPp
+      viewOrigin <- max 0L (anchor - int64 (Math.Round(anchorX / newPp)))
+      ppUnit <- newPp
+      this.ClampViewport ()
+      this.InvalidateVisual()
+      viewportChanged.Trigger()
+    e.Handled <- true
+    base.OnMouseWheel e
+
   override this.OnMouseDown(e: MouseButtonEventArgs) =
     if e.LeftButton = MouseButtonState.Pressed then
       let p = e.GetPosition(this)
@@ -300,51 +368,63 @@ type TimelineSelector() as self =
       let bottom = h - labelZone - 2.0
       let trackH = max 1.0 (bottom - top)
 
+      // viewport x mapping: unit -> client pixel
+      let xOf (u: int64) = float (u - viewOrigin) * this.PpUnit
+
       let drawBrush (which: BrushId) (r: BrushRange) =
         let color, tint, pen =
           match which with
           | A -> sky, skyTint, skyPen
           | B -> amber, amberTint, amberPen
-        let x0 = min w (max 0.0 (float r.Start / float length * w))
-        let x1 = min w (max 0.0 (float r.End / float length * w))
-        // tinted range
-        dc.DrawRectangle(tint, null, Rect(min x0 x1, top, max 2.0 (abs (x1 - x0)), trackH))
-        // start/end marker lines
-        dc.DrawLine(pen, Point(x0, top), Point(x0, bottom))
-        dc.DrawLine(pen, Point(x1, top), Point(x1, bottom))
-        // label chip: "A" bottom-left of the range, "B" bottom-right (HTML)
-        let label = ft (string which) 9.0 chipFg
-        let chipW = label.Width + 8.0
-        let chipH = 12.0
-        let chipX =
-          if which = A then min x0 (max 0.0 (w - chipW))
-          else max 0.0 (min (x1 - chipW) (w - chipW))
-        let chipY = bottom - chipH
-        let chipRect = Rect(chipX, chipY, chipW, chipH)
-        if which = A then chipRectA <- chipRect
-        else chipRectB <- chipRect
-        dc.DrawRectangle(SolidColorBrush(color), null, chipRect)
-        dc.DrawText(label, Point(chipX + 4.0, chipY + (chipH - label.Height) / 2.0))
+        let x0raw = xOf r.Start
+        let x1raw = xOf r.End
+        if x1raw > 0.0 && x0raw < w then
+          let x0 = min w (max 0.0 x0raw)
+          let x1 = min w (max 0.0 x1raw)
+          // tinted range
+          dc.DrawRectangle(tint, null, Rect(min x0 x1, top, max 2.0 (abs (x1 - x0)), trackH))
+          // start/end marker lines
+          dc.DrawLine(pen, Point(x0, top), Point(x0, bottom))
+          dc.DrawLine(pen, Point(x1, top), Point(x1, bottom))
+          // label chip: "A" bottom-left of the range, "B" bottom-right (HTML)
+          let label = ft (string which) 9.0 chipFg
+          let chipW = label.Width + 8.0
+          let chipH = 12.0
+          let chipX =
+            if which = A then min x0 (max 0.0 (w - chipW))
+            else max 0.0 (min (x1 - chipW) (w - chipW))
+          let chipY = bottom - chipH
+          let chipRect = Rect(chipX, chipY, chipW, chipH)
+          if which = A then chipRectA <- chipRect
+          else chipRectB <- chipRect
+          dc.DrawRectangle(SolidColorBrush(color), null, chipRect)
+          dc.DrawText(label, Point(chipX + 4.0, chipY + (chipH - label.Height) / 2.0))
 
       drawBrush A rangeA
       drawBrush B rangeB
 
       // playhead: bright line + top notch marking the current execution
-      // state, drawn over the tints so it reads on both
+      // state, drawn over the tints so it reads on both. Hidden while it
+      // lies outside the visible viewport.
       if playhead >= 0L then
-        let x = min w (max 0.0 (float playhead / float length * w))
-        let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
-        dc.DrawLine(playPen, Point(x, top), Point(x, bottom))
-        dc.DrawRectangle(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), null, Rect(x - 2.5, top, 5.0, 5.0))
+        let x = xOf playhead
+        if x >= -1.0 && x <= w + 1.0 then
+          let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
+          dc.DrawLine(playPen, Point(x, top), Point(x, bottom))
+          dc.DrawRectangle(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), null, Rect(x - 2.5, top, 5.0, 5.0))
 
-      // x scale: round tick marks, 3-4 visible, labels at round units
-      let step = TimelineRuler.niceTickStep length
-      for t in 0L .. step .. length do
-        let x = float t / float length * w
-        dc.DrawLine(labelPen, Point(x, bottom - 3.0), Point(x, bottom + 1.0))
-        let label = ft (formatUnit t) 8.0 labelFg
-        let lx = min (max 2.0 (x - label.Width / 2.0)) (w - label.Width - 2.0)
-        dc.DrawText(label, Point(lx, h - 12.0))
+      // x scale: round tick marks over the visible span, 3-4 visible,
+      // labels at round units
+      let step = TimelineRuler.niceTickStep (this.VisibleSpan)
+      let mutable t = viewOrigin / step * step
+      while t <= viewOrigin + this.VisibleSpan do
+        if t >= 0L && t <= length then
+          let x = xOf t
+          dc.DrawLine(labelPen, Point(x, bottom - 3.0), Point(x, bottom + 1.0))
+          let label = ft (formatUnit t) 8.0 labelFg
+          let lx = min (max 2.0 (x - label.Width / 2.0)) (w - label.Width - 2.0)
+          dc.DrawText(label, Point(lx, h - 12.0))
+        t <- t + step
 
 /// Standalone host exercising TimelineSelector: two toggle buttons, a live
 /// debug readout of both ranges, and a length fed from the recording's

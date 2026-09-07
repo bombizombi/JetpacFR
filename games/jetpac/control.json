@@ -56,12 +56,20 @@
   ],
   "symbols": [
     {
-      "addr": 29422,
-      "name": "HL_previous_line"
+      "addr": 29004,
+      "name": "xy_to_screenAdr"
+    },
+    {
+      "addr": 29448,
+      "name": "xy_to_screenAdr"
     },
     {
       "addr": 29198,
-      "name": "redFuncWitlL"
+      "name": "xy_to_attribAdr"
+    },
+    {
+      "addr": 29422,
+      "name": "HL_previous_line"
     },
     {
       "addr": 29112,

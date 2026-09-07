@@ -216,6 +216,11 @@ type FlameGraph() as self =
     let visibleRows = int (this.ActualHeight / FlameGraph.RowHeight)
     firstDepth <- max 0 (min firstDepth (w.MaxDepth - visibleRows))
 
+  /// The visible [start, end) tick range, for view synchronization with the
+  /// brush timeline.
+  member this.VisibleRange : int64 * int64 =
+    origin, origin + int64 (Math.Round this.VisibleTicks)
+
   /// Fit the whole window into the current width.
   member this.ZoomToFit() =
     match window with
