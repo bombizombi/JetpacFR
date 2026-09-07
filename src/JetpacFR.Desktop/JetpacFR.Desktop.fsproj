@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <Compile Include="TimelineSelector.fs" />
+    <Compile Include="FlameGraph.fs" />
     <Compile Include="ControlMap.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>

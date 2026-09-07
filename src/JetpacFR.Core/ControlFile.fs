@@ -10,11 +10,16 @@ open System.Text.Json.Serialization
 /// - Name:    region title (block name); the timeline selector shows it.
 /// - Range:   free-text comment over an address range.
 /// - Exec:    comment attached to a trace instruction index.
+/// - Frames:  comment over a trace-state (frame) range - Addr is the first
+///            frame, EndExcl the exclusive last frame. Created by the mass
+///            comment "Frames A/B" buttons; rendered as a lane under the
+///            flame graph. Never attaches to addresses.
 type CommentKind =
   | Line
   | Name
   | Range
   | Exec
+  | Frames
 
 type ControlComment =
   { Kind: CommentKind
@@ -37,6 +42,10 @@ type ControlFile =
     ActiveVersion: int
     Blocks: Block list
     Comments: ControlComment list
+    /// Named function entry points (CALL/RST targets), addr -> name. The
+    /// flame graph, disassembly and the regenerated CE labels all resolve
+    /// through this; survives regen because it lives in control.json.
+    Symbols: (int * string) list
     /// Set when edits are not yet on disk (GUI dirty flag lives here so
     /// save/load roundtrips through one module).
     Dirty: bool }
@@ -55,18 +64,20 @@ module ControlFile =
         [ if endExcl > start then
             { Start = start; EndExcl = endExcl; Name = "whole_span"; Kind = Code } ]
       Comments = []
+      Symbols = []
       Dirty = false }
 
   // ---- JSON --------------------------------------------------------------
 
   let kindToString =
-    function Line -> "line" | Name -> "name" | Range -> "range" | Exec -> "exec"
+    function Line -> "line" | Name -> "name" | Range -> "range" | Exec -> "exec" | Frames -> "frames"
 
   let private kindFromString (s: string) : CommentKind =
     match s with
     | "name" -> Name
     | "range" -> Range
     | "exec" -> Exec
+    | "frames" -> Frames
     | _ -> Line
 
   /// Runs of same-text per-line comments (the mass-comment buttons stamp one
@@ -142,8 +153,16 @@ module ControlFile =
           w.WriteString("kind", kindToString m.Kind)
           if m.Kind = Exec then w.WriteNumber("instrIndex", m.InstrIndex)
           else w.WriteNumber("addr", m.Addr)
-          if m.Kind = Name || m.Kind = Range then w.WriteNumber("endExcl", m.EndExcl)
+          if m.Kind = Name || m.Kind = Range || m.Kind = Frames then w.WriteNumber("endExcl", m.EndExcl)
           w.WriteString("text", m.Text)
+          w.WriteEndObject()
+        w.WriteEndArray()
+      if not (List.isEmpty c.Symbols) then
+        w.WriteStartArray("symbols")
+        for (addr, name) in c.Symbols do
+          w.WriteStartObject()
+          w.WriteNumber("addr", addr)
+          w.WriteString("name", name)
           w.WriteEndObject()
         w.WriteEndArray()
       w.WriteEndObject()
@@ -206,6 +225,21 @@ module ControlFile =
               | _ -> ""
             { Kind = kind; Addr = addr; EndExcl = endE; InstrIndex = idx; Text = txt } ]
       | _ -> []
+    let symbols =
+      match root.TryGetProperty "symbols" with
+      | true, e when e.ValueKind = JsonValueKind.Array ->
+        [ for s in e.EnumerateArray() do
+            let get (k: string) =
+              match s.TryGetProperty k with
+              | true, v -> Some v
+              | _ -> None
+            match get "addr", get "name" with
+            | Some a, Some n when a.ValueKind = JsonValueKind.Number && n.ValueKind = JsonValueKind.String ->
+              Some(a.GetInt32(), n.GetString())
+            | _ -> None ]
+        |> List.choose id
+        |> List.distinctBy fst
+      | _ -> []
     let start = intOf "start" 0
     let endExcl = intOf "endExcl" (if start > 0 then 0x10000 else 0)
     { ImageFile = str "image" "original.bin"
@@ -215,6 +249,7 @@ module ControlFile =
       ActiveVersion = intOf "activeVersion" -1
       Blocks = blocks |> List.sortBy (fun b -> b.Start)
       Comments = comments
+      Symbols = symbols
       Dirty = false }
 
   let load (dir: string) : ControlFile =
@@ -254,6 +289,7 @@ module ControlFile =
       match m.Kind with
       | Line -> existing.Kind = Line && existing.Addr = m.Addr
       | Exec -> existing.Kind = Exec && existing.InstrIndex = m.InstrIndex
+      | Frames -> existing.Kind = Frames && existing.Addr = m.Addr && existing.EndExcl = m.EndExcl
       | Name | Range ->
         (existing.Kind = m.Kind && existing.Addr = m.Addr && existing.EndExcl = m.EndExcl)
     let others = c.Comments |> List.filter (sameKey >> not)
@@ -322,6 +358,26 @@ module ControlFile =
   let namesSorted (c: ControlFile) : ControlComment list =
     c.Comments |> List.filter (fun m -> m.Kind = Name) |> List.sortBy (fun m -> m.Addr)
 
+  // ---- symbol ops ---------------------------------------------------------
+
+  /// The function name at exactly `addr`, if named.
+  let symbolAt (c: ControlFile) (addr: int) : string option =
+    c.Symbols |> List.tryFind (fun (a, _) -> a = addr) |> Option.map snd
+
+  /// Upsert the function name at `addr`; empty text removes it. One name per
+  /// address - naming a new function at an already-named entry renames it.
+  let renameSymbol (c: ControlFile) (addr: int) (name: string) : ControlFile =
+    let trimmed = name.Trim()
+    let others = c.Symbols |> List.filter (fun (a, _) -> a <> addr)
+    if String.IsNullOrWhiteSpace trimmed then
+      if others.Length = c.Symbols.Length then c
+      else { c with Symbols = others; Dirty = true }
+    else
+      { c with Symbols = (addr, trimmed) :: others; Dirty = true }
+
+  let symbolsSorted (c: ControlFile) : (int * string) list =
+    c.Symbols |> List.sortBy fst
+
   /// Region names sorted by address (timeline + regen headers).
   let pcsInFrames (t: Trace) (fStart: int) (fEnd: int) : int list =
     if t.Entries.Length = 0 || t.FrameTicks.Length = 0 then []
@@ -344,6 +400,16 @@ module ControlFile =
   /// The block containing addr, if any.
   let blockAt (c: ControlFile) (addr: int) : Block option =
     c.Blocks |> List.tryFind (fun b -> b.Start <= addr && addr < b.EndExcl)
+
+  /// The display name for an address, most specific first: function symbol,
+  /// then the containing block's name (region names), then $XXXX.
+  let nameFor (c: ControlFile) (addr: int) : string =
+    match symbolAt c addr with
+    | Some n -> n
+    | None ->
+      match blockAt c addr with
+      | Some b when b.Name <> sprintf "block_%04X" b.Start -> b.Name
+      | _ -> sprintf "$%04X" addr
 
   let private withBlocks (c: ControlFile) (blocks: Block list) : ControlFile =
     { c with Blocks = blocks |> List.sortBy (fun b -> b.Start); Dirty = true }
@@ -490,6 +556,7 @@ module SkoolCtl =
       ActiveVersion = -1
       Blocks = closed |> List.filter (fun b -> b.EndExcl > b.Start)
       Comments = comments |> List.rev
+      Symbols = []
       Dirty = false }
 
   /// Export blocks + comments as SkoolKit ctrl text (decimal addresses,
@@ -510,5 +577,6 @@ module SkoolCtl =
       | Line -> sb.AppendLine(sprintf "N %d %s" m.Addr m.Text) |> ignore
       | Range -> sb.AppendLine(sprintf "D %d %s" m.Addr m.Text) |> ignore
       | Exec -> sb.AppendLine(sprintf "; [exec #%d] %s" m.InstrIndex m.Text) |> ignore
+      | Frames -> sb.AppendLine(sprintf "; [frames %d..%d] %s" m.Addr m.EndExcl m.Text) |> ignore
       | Name -> () // already emitted as block titles
     sb.ToString()

@@ -61,6 +61,8 @@ Flame graph should be scrollable down to the instruction level.  Some heuristics
 
 The F# CE us the single source of truth for the code, while the trace format is the single source of truth for execution history.  CE is also saving the single instruction comments and block comments (perhaps at the location where the block start)
 
+So, this flame graph is a series of rectangles that span the time line and grow downwards as the stack depth increases.  Can you make a plan for this, and ask any questions if you need clarifications?
+
 
 
 
@@ -96,6 +98,29 @@ The F# CE us the single source of truth for the code, while the trace format is 
 Move it to the shape compatibile with our F# CE, so builder would also need to be changed.
 
 
+-- code view
+Constants in code should also be explained like this
+
+LD BC, F000h [function_C3E3 + 11232]
+
+
+Way to add labels, so it looks like this
+
+    db 00h
+    db 00h
+data_F000:
+    db 00h
+    db 00h   (in this case we added the default label, we can rename it later)
+
+
+
+20260907
+--- in code window when a jump to memory location or trace tstate is requested, we compile around 20 instructions before and after.  This is fine, but when there is no vertical room, the target instruction is scrolled out of view. We can still disassemble the same amount of lines, but can you scroll the target instruction so that it is centered vertically, so that there is aprox the same amount of instructions above and below, or even better, that there is 2/5 of instructions above, and 3/5 of instructions below, slightly weighted so that we can see more instructions below.
+
+--- can we optionally synchronize the brush timeline with the flame graph timeline, so they are both at the same position and at the same zoom level. (add zooming to the brush timeline if it does not already exists). there could also be a non-accented small checkbox with text "sync with main timeline" that will control this behaviour.  put default at off
+
+
+-?? Problem with t-state count and time (or frame) position of the trace. they could be exactly equivalent, but this is not necessarily so, so how do we handle this.  in some zoom levels it is better to look at the big picture (just time in seconds) but if we zoom into individual frames, tstates make more sense as an address)
 
 
 - bug

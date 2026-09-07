@@ -45,16 +45,9 @@ module Miner =
       Callee: int
       Count: int }
 
-  let private isCallOp (b0: byte) =
-    match b0 with
-    | 0xCDuy | 0xC4uy | 0xCCuy | 0xD4uy | 0xDCuy | 0xE4uy | 0xECuy | 0xF4uy | 0xFCuy -> true
-    | _ -> false
+  let private isCallOp = CallOps.isCall
 
-  let private isRetOp (b0: byte) (b1: byte) =
-    match b0 with
-    | 0xC9uy | 0xC0uy | 0xC8uy | 0xD0uy | 0xD8uy | 0xE0uy | 0xE8uy | 0xF0uy | 0xF8uy -> true
-    | 0xEDuy -> b1 = 0x45uy || b1 = 0x4Duy // RETN / RETI
-    | _ -> false
+  let private isRetOp = CallOps.isRet
 
   type private Frame =
     { Entry: int

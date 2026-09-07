@@ -11,6 +11,7 @@
     <Compile Include="Z80CE.fs" />
     <Compile Include="GameProject.fs" />
     <Compile Include="Trace.fs" />
+    <Compile Include="Flame.fs" />
     <Compile Include="ControlFile.fs" />
     <Compile Include="CtrlMapModel.fs" />
     <Compile Include="Miner.fs" />
@@ -18,6 +19,7 @@
     <Compile Include="Prompt.fs" />
     <Compile Include="History.fs" />
     <Compile Include="StateTimeline.fs" />
+    <Compile Include="FlameBuilder.fs" />
     <Compile Include="Session.fs" />
     <Compile Include="Manifest.fs" />
     <Compile Include="ManualBoot.fs" />

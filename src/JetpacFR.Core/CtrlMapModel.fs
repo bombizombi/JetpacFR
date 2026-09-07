@@ -94,13 +94,15 @@ module CtrlMapModel =
       if c <= 0 then 0 else min 9 (int (9.0 * (log10 (float c) / logMax)))
 
     // Comment coverage bitmap: Line hits plus everything a Name/Range spans.
+    // Frames comments cover trace-state ranges, not addresses - skipped.
     let covered = Array.create 0x10000 false
     for m in comments do
-      let hi = if m.Kind = CommentKind.Line then m.Addr + 1 else max m.Addr m.EndExcl
-      let lo = min 0xFFFF m.Addr
-      let hi = min 0x10000 hi
-      for a in lo .. hi - 1 do
-        covered[a] <- true
+      if m.Kind <> CommentKind.Frames then
+        let hi = if m.Kind = CommentKind.Line then m.Addr + 1 else max m.Addr m.EndExcl
+        let lo = min 0xFFFF m.Addr
+        let hi = min 0x10000 hi
+        for a in lo .. hi - 1 do
+          covered[a] <- true
 
     // Row classification by sampling; 8 probes resolve mixed content well
     // enough at every zoom the renderer allows.

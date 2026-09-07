@@ -70,11 +70,48 @@ module Z80CE =
           walk endPc (rawOp block :: acc)
     walk start []
 
+  /// Sanitize a symbol name into a valid, collision-free F# identifier for
+  /// generated label cells: keep letters/digits/underscore, avoid leading
+  /// digits and F# keywords, and suffix the address when the name is taken.
+  let private fsharpKeywords =
+    set [ "abstract"; "and"; "as"; "assert"; "base"; "begin"; "class"; "const"; "default";
+          "delegate"; "do"; "done"; "downcast"; "downto"; "elif"; "else"; "end"; "enum"; "exception";
+          "extern"; "false"; "finally"; "fixed"; "for"; "fun"; "function"; "global"; "if"; "in";
+          "inherit"; "inline"; "interface"; "internal"; "lazy"; "let"; "match"; "member"; "module";
+          "mutable"; "namespace"; "new"; "not"; "null"; "of"; "open"; "or"; "override"; "private";
+          "public"; "rec"; "return"; "sig"; "static"; "struct"; "then"; "to"; "true"; "try"; "type";
+          "upcast"; "use"; "val"; "void"; "when"; "while"; "with"; "yield" ]
+
+  let private sanitizeLabel (used: System.Collections.Generic.HashSet<string>) (addr: int) (raw: string) : string =
+    let cleaned =
+      System.String
+        (raw |> Seq.map (fun ch -> if System.Char.IsLetterOrDigit ch || ch = '_' then ch else '_') |> Array.ofSeq)
+    let baseName =
+      if cleaned.Length = 0 then sprintf "sym_%04X" addr
+      elif System.Char.IsDigit cleaned[0] then "_" + cleaned
+      else cleaned
+    let name =
+      if fsharpKeywords.Contains(baseName.ToLowerInvariant()) then "_" + baseName else baseName
+    if used.Add name then name
+    else
+      let mutable candidate = sprintf "%s_%04X" name addr
+      let mutable n = 1
+      while not (used.Add candidate) do
+        candidate <- sprintf "%s_%04X_%d" name addr n
+        n <- n + 1
+      candidate
+
   /// Emit the inner lines (no enclosing braces) of the F# `z80 { ... }` body
   /// for the binary: named ops, symbolic labels for in-range jump targets,
   /// raw blocks for the rest. The composable form used by the project
   /// generator to mix code segments with marked data blocks.
-  let toBody (image: byte[]) (start: int) (count: int) : string =
+  ///
+  /// `symbols` names function entry points (from control.json): each address
+  /// inside the span becomes a named label site (`Z80.at screenClear`) and
+  /// jump targets there reuse the name; other targets stay `lblN`. All label
+  /// cells are declared by emitted `let` bindings at the top of the body, so
+  /// the body compiles standalone inside the CE.
+  let toBody (image: byte[]) (start: int) (count: int) (symbols: (int * string) list) : string =
     let limit = min (start + count) image.Length
     // Pass 1: instruction boundaries + in-range jump targets.
     let sites = ResizeArray<int * Z80Decode.Row * Z80Op>()
@@ -94,12 +131,23 @@ module Z80CE =
             endPc <- endPc + max 1 (Disasm.disasmMemory image endPc).Length
           collect endPc
     collect start
+    // Label assignment: symbol names win, auto names fill the rest, every
+    // name unique across the body.
+    let used = System.Collections.Generic.HashSet<string>()
     let labels = System.Collections.Generic.Dictionary<int, string>()
-    let mutable n = 0
-    for t in Seq.sort targets do
-      labels[t] <- sprintf "lbl%d" n
-      n <- n + 1
+    let symbolOf (t: int) = symbols |> List.tryFind (fun (a, _) -> a = t) |> Option.map snd
+    let labelSites = targets |> Seq.toList |> List.append (symbols |> List.map fst |> List.filter (fun a -> a >= start && a < limit)) |> List.distinct |> List.sort
+    for t in labelSites do
+      let name =
+        match symbolOf t with
+        | Some raw -> sanitizeLabel used t raw
+        | None -> sprintf "lbl%d" (labels.Count) |> (fun n -> if used.Add n then n else n + "_" + t.ToString("X4"))
+      labels[t] <- name
+    let decls =
+      [ for kv in labels -> sprintf "  let %s = Z80.label ()" kv.Value ]
+      |> String.concat "\n"
     let sb = System.Text.StringBuilder()
+    if decls.Length > 0 then sb.AppendLine(decls) |> ignore
     let mutable idx = 0
     let mutable pc = start
     while pc < limit do
@@ -127,9 +175,9 @@ module Z80CE =
     sb.ToString()
 
   /// Wrap a body in the `z80 { ... }` block (the historical toSource shape).
-  let toSource (image: byte[]) (start: int) (count: int) : string =
+  let toSource (image: byte[]) (start: int) (count: int) (symbols: (int * string) list) : string =
     let sb = System.Text.StringBuilder()
     sb.AppendLine "z80 {" |> ignore
-    sb.Append(toBody image start count) |> ignore
+    sb.Append(toBody image start count symbols) |> ignore
     sb.AppendLine "  }" |> ignore
     sb.ToString()
