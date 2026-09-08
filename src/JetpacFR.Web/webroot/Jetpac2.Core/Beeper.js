@@ -1,7 +1,7 @@
 
-import { item, length } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { fromFloat64, op_Addition, toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { setItem } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { item, length } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { fromFloat64, op_Addition, toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { setItem } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 export const SampleRate = 44100;
 
@@ -25,7 +25,7 @@ export function ToSamples(trace, startCycle, frameLength) {
         while (((idx + 1) < length(trace)) && (compare(item(idx + 1, trace)[0], startCycle) <= 0)) {
             idx = ((idx + 1) | 0);
         }
-        let level = item(idx, trace)[1];
+        let level = (compare(item(idx, trace)[0], startCycle) > 0) ? !item(idx, trace)[1] : item(idx, trace)[1];
         let next = idx + 1;
         let s = 0;
         while (s < SamplesPerFrame) {

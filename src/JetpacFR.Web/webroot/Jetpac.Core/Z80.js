@@ -1,10 +1,10 @@
 
 import { RegisterFile__I, RegisterFile__SetSp_Z524259A4, RegisterFile__Sp, RegisterFile__R, RegisterFile__SetR_Z524259A4, RegisterFile__Pc, RegisterFile__SetPc_Z524259A4, RegisterFile__Set_Z54B079DF, R8, RegisterFile__Get_2EC184DD, RegisterFile_$ctor } from "./Registers.js";
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Flags__ToU8, Flags_$ctor_Z524259A4 } from "./Flags.js";
 import { Scheduler__Tick_Z6EF827B6, Scheduler__get_Cycles } from "./Scheduler.js";
-import { fromInt32, toUInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { Exception, disposeSafe, getEnumerator, curry2 } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { fromInt32, toUInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { Exception, disposeSafe, getEnumerator, curry2 } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 import { Memory__Read16_Z524259A4, Memory__Write16_Z37302880, Memory__Write_Z37302880, Memory__Read_Z524259A4 } from "./Memory.js";
 
 /**
@@ -107,6 +107,13 @@ export function Z80__PassTime_Z524259A4(this$, tstates) {
 
 export function Z80__Interrupt(this$) {
     this$.irqPending_ = true;
+}
+
+/**
+ * True when an interrupt is pending but not yet accepted (save-state).
+ */
+export function Z80__get_IrqPending(this$) {
+    return this$.irqPending_;
 }
 
 export function Z80__AddInHandler_16BB63F5(this$, handler) {
@@ -233,6 +240,7 @@ function Z80__HandleInterrupt(this$) {
         Z80__PassTime_Z524259A4(this$, 7);
         RegisterFile__SetSp_Z524259A4(this$.regs_, (RegisterFile__Sp(this$.regs_) - 2) & 65535);
         Memory__Write16_Z37302880(this$.memory, RegisterFile__Sp(this$.regs_), RegisterFile__Pc(this$.regs_));
+        Z80__PassTime_Z524259A4(this$, 6);
         const matchValue = this$.irqMode_ | 0;
         switch (matchValue) {
             case 0:
@@ -241,7 +249,9 @@ function Z80__HandleInterrupt(this$) {
                 break;
             }
             case 2: {
-                RegisterFile__SetPc_Z524259A4(this$.regs_, Memory__Read16_Z524259A4(this$.memory, 255 | ((RegisterFile__I(this$.regs_) << 8) & 65280)));
+                const addr = (255 | ((RegisterFile__I(this$.regs_) << 8) & 65280)) | 0;
+                Z80__PassTime_Z524259A4(this$, 6);
+                RegisterFile__SetPc_Z524259A4(this$.regs_, Memory__Read16_Z524259A4(this$.memory, addr));
                 break;
             }
             default:

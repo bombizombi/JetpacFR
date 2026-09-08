@@ -1,12 +1,12 @@
 
-import { toString, Record, Union } from "./fable_modules/fable-library-js.5.13.0/Types.js";
-import { bool_type, list_type, record_type, string_type, int32_type, union_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { collect, empty, singleton, delay, toList } from "./fable_modules/fable-library-js.5.13.0/Seq.js";
-import { tail as tail_1, head as head_1, cons, skipWhile, skip, ofArrayWithTail, map, tryHead, tryFind, singleton as singleton_1, append, filter, sortBy, isEmpty, empty as empty_1 } from "./fable_modules/fable-library-js.5.13.0/List.js";
-import { compareArrays, comparePrimitives, defaultOf, equals, disposeSafe, getEnumerator } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { isNullOrWhiteSpace, printf, toText } from "./fable_modules/fable-library-js.5.13.0/String.js";
-import { rangeDouble } from "./fable_modules/fable-library-js.5.13.0/Range.js";
-import { orElse } from "./fable_modules/fable-library-js.5.13.0/Option.js";
+import { toString, Record, Union } from "./fable_modules/fable-library-js.5.17.0/Types.js";
+import { bool_type, list_type, record_type, string_type, int32_type, union_type } from "./fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { collect, empty, singleton, delay, toList } from "./fable_modules/fable-library-js.5.17.0/Seq.js";
+import { tail as tail_1, head as head_1, cons, skipWhile, skip, ofArrayWithTail, map, tryHead, tryFind, singleton as singleton_1, append, filter, sortBy, isEmpty, empty as empty_1 } from "./fable_modules/fable-library-js.5.17.0/List.js";
+import { compareArrays, comparePrimitives, defaultOf, equals, disposeSafe, getEnumerator, Exception } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { isNullOrWhiteSpace, printf, toText } from "./fable_modules/fable-library-js.5.17.0/String.js";
+import { rangeDouble } from "./fable_modules/fable-library-js.5.17.0/Range.js";
+import { orElse } from "./fable_modules/fable-library-js.5.17.0/Option.js";
 
 /**
  * Web shim for the control-file model: same shapes as JetpacFR.Core's
@@ -54,16 +54,17 @@ export class CommentKind extends Union {
         this.fields = fields;
     }
     cases() {
-        return ["Line", "Name", "Range", "Exec"];
+        return ["Line", "Name", "Range", "Exec", "Frames"];
     }
     static Line = new CommentKind(0, []);
     static Name = new CommentKind(1, []);
     static Range$ = new CommentKind(2, []);
     static Exec = new CommentKind(3, []);
+    static Frames = new CommentKind(4, []);
 }
 
 export function CommentKind_$reflection() {
-    return union_type("JetpacFR.Core.CommentKind", [], CommentKind, () => [[], [], [], []]);
+    return union_type("JetpacFR.Core.CommentKind", [], CommentKind, () => [[], [], [], [], []]);
 }
 
 export class ControlComment extends Record {
@@ -105,6 +106,8 @@ export function ControlFileModule_empty(start, endExcl) {
 
 export function ControlFileModule_kindToString(_arg) {
     switch (_arg.tag) {
+        case 0:
+            return "line";
         case 1:
             return "name";
         case 2:
@@ -112,7 +115,7 @@ export function ControlFileModule_kindToString(_arg) {
         case 3:
             return "exec";
         default:
-            return "line";
+            throw new Exception("Match failure: JetpacFR.Core.CommentKind");
     }
 }
 
@@ -273,7 +276,9 @@ export function ControlFileModule_fromJson(text) {
 export function ControlFileModule_upsert(c, m) {
     const others = filter((arg) => {
         let existing, matchValue;
-        return !((existing = arg, (matchValue = m.Kind, (matchValue.tag === 3) ? (equals(existing.Kind, CommentKind.Exec) && (existing.InstrIndex === m.InstrIndex)) : ((matchValue.tag === 1) ? ((equals(existing.Kind, m.Kind) && (existing.Addr === m.Addr)) && (existing.EndExcl === m.EndExcl)) : ((matchValue.tag === 2) ? ((equals(existing.Kind, m.Kind) && (existing.Addr === m.Addr)) && (existing.EndExcl === m.EndExcl)) : (equals(existing.Kind, CommentKind.Line) && (existing.Addr === m.Addr)))))));
+        return !((existing = arg, (matchValue = m.Kind, (matchValue.tag === 0) ? (equals(existing.Kind, CommentKind.Line) && (existing.Addr === m.Addr)) : ((matchValue.tag === 3) ? (equals(existing.Kind, CommentKind.Exec) && (existing.InstrIndex === m.InstrIndex)) : ((matchValue.tag === 1) ? ((equals(existing.Kind, m.Kind) && (existing.Addr === m.Addr)) && (existing.EndExcl === m.EndExcl)) : ((matchValue.tag === 2) ? ((equals(existing.Kind, m.Kind) && (existing.Addr === m.Addr)) && (existing.EndExcl === m.EndExcl)) : (() => {
+            throw new Exception("Match failure: JetpacFR.Core.CommentKind");
+        })()))))));
     }, c.Comments);
     if (isNullOrWhiteSpace(m.Text)) {
         return new ControlFile(c.ImageFile, c.Start, c.EndExcl, c.EntryPc, c.ActiveVersion, c.Blocks, others, true);

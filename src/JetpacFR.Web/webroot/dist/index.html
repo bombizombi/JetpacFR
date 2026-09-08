@@ -17,6 +17,12 @@
         --hi: #2e3444;
       }
       * { box-sizing: border-box; }
+      /* kill Chrome's pull-to-refresh: scrolling up from the top of the page
+         must not trigger the browser refresh gesture */
+      html, body {
+        overscroll-behavior-y: none;
+        overscroll-behavior: none;
+      }
       body {
         margin: 0;
         background: var(--bg);
@@ -92,6 +98,71 @@
         flex-direction: column;
         flex-shrink: 0;
       }
+      #timelineRow { display: flex; }
+      #canvasTimeline { width: 100%; height: 56px; cursor: crosshair; }
+      #tlBtnRow { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+      #tlBtnRow button {
+        background: var(--panel);
+        color: var(--dim);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .brush-btn.active-brush-a {
+        background: #38BDF8;
+        color: #020617;
+        border-color: #38BDF8;
+        font-weight: bold;
+      }
+      .brush-btn.active-brush-b {
+        background: #FBBF24;
+        color: #020617;
+        border-color: #FBBF24;
+        font-weight: bold;
+      }
+      #tlHint { margin-left: 8px; }
+      #ctrlMapCol {
+        width: 84px;
+        border-left: 1px solid var(--hi);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+      }
+      #ctrlMapBtns { display: flex; gap: 2px; padding: 3px; }
+      #ctrlMapBtns button {
+        flex: 1;
+        background: var(--panel);
+        color: var(--dim);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        padding: 2px 0;
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      #ctrlMapBtns button:hover { background: var(--hi); }
+      #canvasCtrlMap { flex: 1; width: 100%; cursor: crosshair; }
+      #ctrlMenu {
+        position: fixed;
+        display: none;
+        background: var(--panel);
+        border: 1px solid var(--hi);
+        border-radius: 3px;
+        z-index: 100;
+        min-width: 210px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      }
+      #ctrlMenu div {
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--normal);
+      }
+      #ctrlMenu div:hover { background: var(--hi); }
+      #ctrlMenu hr { border: none; border-top: 1px solid var(--hi); margin: 2px 0; }
       #tabbar { display: flex; border-bottom: 1px solid var(--hi); }
       .tab-btn {
         flex: 1;
@@ -144,11 +215,104 @@
         white-space: pre;
       }
       .hint { color: var(--dim); font-size: 11px; }
+      /* startup picker (ZX Spectrum Game Changer) */
+      #launcher {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 8, 12, 0.92);
+        z-index: 50;
+        justify-content: center;
+        align-items: center;
+      }
+      #launcherBox {
+        width: 780px;
+        max-width: 94vw;
+        max-height: 88vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        border: 1px solid var(--hi);
+        border-radius: 8px;
+        padding: 20px;
+      }
+      #launcherTitle { font-size: 24px; font-weight: bold; }
+      #launcherSub { color: var(--dim); font-size: 12px; margin: 6px 0 12px; }
+      #launcherList {
+        flex: 1;
+        overflow-y: auto;
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 4px;
+      }
+      .proj-row {
+        padding: 10px 12px;
+        margin: 4px;
+        border: 1px solid var(--hi);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .proj-row:hover { background: var(--hi); }
+      .proj-row.sel { border-color: var(--green); background: var(--hi); }
+      .proj-title { font-size: 15px; font-weight: 600; }
+      .proj-chips { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 5px; font-size: 11.5px; font-family: Consolas, monospace; }
+      .chip-on { color: var(--green); }
+      .chip-off { color: var(--dim); }
+      .chip-warn { color: var(--orange); }
+      #launcherBtns { display: flex; gap: 10px; margin-top: 14px; }
+      #launcherBtns button {
+        flex: 1;
+        height: 48px;
+        font-size: 15px;
+        font-weight: 600;
+        background: var(--panel);
+        color: var(--normal);
+        border: 1px solid var(--hi);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      #launcherBtns button:hover { background: var(--hi); }
+      #launcherBtns .hint { display: block; margin-top: 4px; font-weight: normal; }
+      #modeBar {
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        margin: 6px 0 0;
+        min-height: 16px;
+      }
+      .name-row {
+        padding: 2px 6px;
+        line-height: 1.4;
+        cursor: pointer;
+        white-space: pre;
+      }
+      .name-row:hover { background: var(--hi); }
     </style>
-    <script type="module" crossorigin src="/assets/index-Cxlwi7bR.js"></script>
+    <script type="module" crossorigin src="/assets/index-B2Zi9uQ3.js"></script>
   </head>
   <body>
+    <div id="launcher">
+      <div id="launcherBox">
+        <div id="launcherTitle">ZX Spectrum Game Changer</div>
+        <div id="launcherSub">
+          Pick a project and open it. The preselected entry is the project the app
+          auto-loads; projects marked "not deployed to web" need their web assets
+          copied into webroot/games/&lt;id&gt; before they can boot in the browser.
+        </div>
+        <div id="launcherList"></div>
+        <div id="launcherBtns">
+          <div>
+            <button id="btnLauncherOpen">Open project</button>
+            <span class="hint">boots the selected project (Enter, or double-click the row)</span>
+          </div>
+          <div>
+            <button id="btnLauncherRescan">Rescan</button>
+            <span class="hint">re-read games/index.json: picks up new projects and status changes</span>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="toolbar">
+      <button id="btnMenu" style="display: none">&lt;- back to main menu</button>
       <button id="btnRun">Run</button>
       <button id="btnPause">Pause</button>
       <button id="btnStepFrame">Step frame</button>
@@ -177,6 +341,7 @@
     <div id="main">
       <div id="left">
         <canvas id="canvasScreen" width="320" height="256"></canvas>
+        <div id="modeBar"></div>
         <div class="panel-title">CE engine (compiled F#)</div>
         <canvas id="ceScreen" width="320" height="256" style="margin-bottom: 4px"></canvas>
         <button id="ceBtn">Run CE</button>
@@ -188,6 +353,16 @@
       </div>
 
       <div id="center">
+        <div id="timelineRow">
+          <canvas id="canvasTimeline" width="600" height="56"></canvas>
+        </div>
+        <div id="tlBtnRow">
+          <button id="btnBrushA" class="brush-btn active-brush-a">Brush A</button>
+          <button id="btnBrushB" class="brush-btn">Brush B</button>
+          <button id="btnPreviewA">Preview A</button>
+          <button id="btnPreviewB">Preview B</button>
+          <span id="tlHint" class="hint">drag = range for the active brush &middot; click = point &middot; A/B keys switch</span>
+        </div>
         <div id="stripRow">
           <canvas id="canvasStrip" width="512" height="24"></canvas>
           <input type="range" id="slider" min="0" max="0" value="0" disabled />
@@ -198,13 +373,22 @@
 
       <div id="right">
         <div id="tabbar">
-          <button class="tab-btn active" data-tab="heat">Heatmap</button>
+          <button class="tab-btn active" data-tab="names">Names</button>
+          <button class="tab-btn" data-tab="heat">Heatmap</button>
           <button class="tab-btn" data-tab="func">Functions</button>
           <button class="tab-btn" data-tab="graph">Call graph</button>
           <button class="tab-btn" data-tab="contr">Contract/Prompt</button>
           <button class="tab-btn" data-tab="theater">Theater</button>
         </div>
-        <div id="panel-heat" class="tab-panel active">
+        <div id="panel-names" class="tab-panel active">
+          <div id="namesCount" class="hint" style="margin-bottom: 4px;"></div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="btnNamesRefresh">Refresh</button>
+            <span class="hint">blocks + comments from control.json; click a row to jump if it executed</span>
+          </div>
+          <div id="namesList" style="margin-top: 4px;"></div>
+        </div>
+        <div id="panel-heat" class="tab-panel">
           <div class="hint">64K execution heatmap (click to jump)</div>
           <canvas id="canvasHeat" width="256" height="256"></canvas>
           <div class="hint">black = never executed &nbsp; magenta = executed then written</div>
@@ -237,7 +421,24 @@
           <div id="theaterText"></div>
         </div>
       </div>
+
+
+
+      <div id="ctrlMapCol">
+        <div id="ctrlMapBtns">
+          <button id="btnCtrlNew" title="create an empty control file">New</button>
+          <button id="btnCtrlSave" title="save into the browser (localStorage)">Save</button>
+          <button id="btnCtrlDl" title="download control.json">Dl</button>
+          <button id="btnCtrlImport" title="import control.json">Imp</button>
+          <input type="file" id="ctrlFileInput" accept=".json" style="display:none" />
+        </div>
+        <canvas id="canvasCtrlMap" width="76" height="600"></canvas>
+      </div>
     </div>
+
+    <div id="status">booting...</div>
+    <div id="ctrlMenu"></div>
+
 
     <div id="trayRow">
       <span id="trayTitle">Lift queue:</span>
@@ -246,7 +447,6 @@
       <button id="btnClearTray">Clear</button>
     </div>
 
-    <div id="status">booting...</div>
 
     <script>
       // static tab chrome (page layout only; app logic lives in F#)

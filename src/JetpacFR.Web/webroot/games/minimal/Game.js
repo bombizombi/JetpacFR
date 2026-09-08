@@ -1,8 +1,8 @@
 
 import { Z80_runFrame, Z80_ExecutionIndex__Attach_3EE36980 } from "../../Jetpac2.Core/Z80Asm.js";
 import { index } from "./Image.js";
-import { copyTo } from "../../fable_modules/fable-library-js.5.13.0/Array.js";
-import { min } from "../../fable_modules/fable-library-js.5.13.0/Double.js";
+import { copyTo } from "../../fable_modules/fable-library-js.5.17.0/Array.js";
+import { min } from "../../fable_modules/fable-library-js.5.17.0/Double.js";
 
 /**
  * The per-frame CE driver (69888 T-states). CE ops dispatch by PC from the

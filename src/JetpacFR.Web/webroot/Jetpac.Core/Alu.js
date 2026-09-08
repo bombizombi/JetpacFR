@@ -1,8 +1,8 @@
 
-import { Union } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { union_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { Union } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { union_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Flags__get_carry, Flags__get_half_carry, Flags__get_subtract, Flags_op_LogicalNot_Z7353D318, Flags_Subtract, Flags_op_ExclusiveOr_Z51621B00, Flags_Overflow, Flags_HalfCarry, Flags, Flags_Carry, Flags_Parity, Flags_Zero, Flags_Flag5, Flags_Flag3, Flags_Sign, Flags_$ctor_Z524259A4, Flags_op_BitwiseAnd_Z51621B00, Flags_op_BitwiseOr_Z51621B00 } from "./Flags.js";
-import { equals } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { equals } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 
 export class Direction extends Union {
     constructor(tag, fields) {
@@ -83,7 +83,7 @@ export function adc16(lhs, rhs, carryIn) {
     const intermediate = (((lhs & 65535) + (rhs & 65535)) + (carryIn ? 1 : 0)) | 0;
     const carry = (intermediate > 65535) ? Flags_Carry() : (new Flags(0));
     const result = (intermediate & 65535) | 0;
-    const halfCarry = (((lhs & 4095) + (rhs & 4095)) > 4095) ? Flags_HalfCarry() : (new Flags(0));
+    const halfCarry = ((((lhs & 4095) + (rhs & 4095)) + (carryIn ? 1 : 0)) > 4095) ? Flags_HalfCarry() : (new Flags(0));
     const flags35 = Flags_op_BitwiseAnd_Z51621B00(Flags_$ctor_Z524259A4((result >> 8) & 255), Flags_op_BitwiseOr_Z51621B00(Flags_Flag5(), Flags_Flag3()));
     const negative = ((result & 32768) !== 0) ? Flags_Sign() : (new Flags(0));
     const zero = (result === 0) ? Flags_Zero() : (new Flags(0));

@@ -12,296 +12,344 @@ open Fable.Core.JsInterop
 /// desktop uses real sha256 but the marker is never cross-checked between the
 /// two shells).
 module private AssetHash =
-  let ofBytes (b: byte[]) : string =
-    let mutable h = 0x811C9DC5
-    for i in 0 .. b.Length - 1 do
-      h <- (h ^^^ int b[i]) * 0x01000193
-      h <- h &&& 0xFFFFFFFF
-    h.ToString("x8")
+    let ofBytes (b: byte[]) : string =
+        let mutable h = 0x811C9DC5
+
+        for i in 0 .. b.Length - 1 do
+            h <- (h ^^^ int b[i]) * 0x01000193
+            h <- h &&& 0xFFFFFFFF
+
+        h.ToString("x8")
 
 module EntryCache =
 
-  let private storage: obj = emitJsExpr () "window.localStorage"
-  let private memKey = "jetpacfr.entry.v1.mem"
-  let private stateKey = "jetpacfr.entry.v1.state"
-  let private metaKey = "jetpacfr.entry.v1.meta"
+    let private storage: obj = emitJsExpr () "window.localStorage"
+    let private memKey = "jetpacfr.entry.v1.mem"
+    let private stateKey = "jetpacfr.entry.v1.state"
+    let private metaKey = "jetpacfr.entry.v1.meta"
 
-  let private marker (romPath: string) (tzxPath: string) =
-    sprintf "rom=%s\ntzx=%s" (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider romPath))
-      (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider tzxPath))
+    let private marker (romPath: string) (tzxPath: string) =
+        sprintf
+            "rom=%s\ntzx=%s"
+            (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider romPath))
+            (AssetHash.ofBytes (Jetpac3.Core.Boot.AssetProvider tzxPath))
 
-  let private getItem (key: string) : string option =
-    let v: obj = storage?getItem(key)
-    if isNull v then None else Some (unbox<string> v)
+    let private getItem (key: string) : string option =
+        let v: obj = storage?getItem (key)
+        if isNull v then None else Some(unbox<string> v)
 
-  /// Some(mem, state) when localStorage holds a cache matching the current
-  /// assets and it decodes to a full 64K image; None otherwise (cold boot).
-  let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
-    try
-      match getItem metaKey with
-      | Some m when m = marker romPath tzxPath ->
-        match getItem memKey, getItem stateKey with
-        | Some memB64, Some state ->
-          let mem = System.Convert.FromBase64String memB64
-          if mem.Length = 0x10000 then Some (mem, state) else None
-        | _ -> None
-      | _ -> None
-    with _ -> None
+    /// Some(mem, state) when localStorage holds a cache matching the current
+    /// assets and it decodes to a full 64K image; None otherwise (cold boot).
+    let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
+        try
+            match getItem metaKey with
+            | Some m when m = marker romPath tzxPath ->
+                match getItem memKey, getItem stateKey with
+                | Some memB64, Some state ->
+                    let mem = System.Convert.FromBase64String memB64
+                    if mem.Length = 0x10000 then Some(mem, state) else None
+                | _ -> None
+            | _ -> None
+        with _ ->
+            None
 
-  let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
-    try
-      storage?setItem(metaKey, marker romPath tzxPath)
-      storage?setItem(memKey, System.Convert.ToBase64String mem)
-      storage?setItem(stateKey, state)
-    with _ -> () // the cache is an optimization; quota failures must not break startup
+    let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
+        try
+            storage?setItem (metaKey, marker romPath tzxPath)
+            storage?setItem (memKey, System.Convert.ToBase64String mem)
+            storage?setItem (stateKey, state)
+        with _ ->
+            () // the cache is an optimization; quota failures must not break startup
 
 [<Struct>]
 type ReplayKeyEvent =
-  { Frame: int
-    Row: int
-    Bit: int
-    Pressed: bool }
+    { Frame: int
+      Row: int
+      Bit: int
+      Pressed: bool }
 
 module private ReplayCache =
-  let private key (romBytes: byte[]) (tzxBytes: byte[]) =
-    "jetpacfr.replay.v1.jetpac." + AssetHash.ofBytes romBytes + "." + AssetHash.ofBytes tzxBytes
+    let private key (romBytes: byte[]) (tzxBytes: byte[]) =
+        "jetpacfr.replay.v1.jetpac."
+        + AssetHash.ofBytes romBytes
+        + "."
+        + AssetHash.ofBytes tzxBytes
 
-  let private storage: obj = emitJsExpr () "window.localStorage"
+    let private storage: obj = emitJsExpr () "window.localStorage"
 
-  let load (romBytes: byte[]) (tzxBytes: byte[]) : ReplayKeyEvent list =
-    try
-      let raw: obj = storage?getItem(key romBytes tzxBytes)
-      if isNull raw then []
-      else
-        let compact: string =
-          emitJsExpr (unbox<string> raw)
-            "JSON.parse($0).events.map(e => [e.frame,e.row,e.bit,e.pressed].join(',')).join('\\n')"
-        if String.IsNullOrWhiteSpace compact then []
-        else
-          compact.Split([| '\n' |], StringSplitOptions.RemoveEmptyEntries)
-          |> Array.choose (fun line ->
-            match line.Split(',') with
-            | [| frame; row; bit; pressed |] ->
-              match Int32.TryParse frame, Int32.TryParse row, Int32.TryParse bit, Boolean.TryParse pressed with
-              | (true, f), (true, r), (true, b), (true, p)
-                when f >= 0 && r >= 0 && r < 8 && b >= 0 && b < 5 ->
-                Some { Frame = f; Row = r; Bit = b; Pressed = p }
-              | _ -> None
-            | _ -> None)
-          |> Array.toList
-    with _ -> []
+    let load (romBytes: byte[]) (tzxBytes: byte[]) : ReplayKeyEvent list =
+        try
+            let raw: obj = storage?getItem (key romBytes tzxBytes)
 
-  let save (romBytes: byte[]) (tzxBytes: byte[]) (events: seq<ReplayKeyEvent>) =
-    try
-      let eventText =
-        events
-        |> Seq.map (fun e -> sprintf "{\"frame\":%d,\"row\":%d,\"bit\":%d,\"pressed\":%b}" e.Frame e.Row e.Bit e.Pressed)
-        |> String.concat ","
-      let body =
-        sprintf
-          "{\"format\":\"jetpacfr-replay\",\"version\":1,\"gameId\":\"jetpac\",\"romSha256\":\"%s\",\"tzxSha256\":\"%s\",\"events\":[%s]}"
-          (AssetHash.ofBytes romBytes) (AssetHash.ofBytes tzxBytes) eventText
-      storage?setItem(key romBytes tzxBytes, body)
-    with _ -> ()
+            if isNull raw then
+                []
+            else
+                let compact: string =
+                    emitJsExpr
+                        (unbox<string> raw)
+                        "JSON.parse($0).events.map(e => [e.frame,e.row,e.bit,e.pressed].join(',')).join('\\n')"
+
+                if String.IsNullOrWhiteSpace compact then
+                    []
+                else
+                    compact.Split([| '\n' |], StringSplitOptions.RemoveEmptyEntries)
+                    |> Array.choose (fun line ->
+                        match line.Split(',') with
+                        | [| frame; row; bit; pressed |] ->
+                            match
+                                Int32.TryParse frame, Int32.TryParse row, Int32.TryParse bit, Boolean.TryParse pressed
+                            with
+                            | (true, f), (true, r), (true, b), (true, p) when
+                                f >= 0 && r >= 0 && r < 8 && b >= 0 && b < 5
+                                ->
+                                Some
+                                    { Frame = f
+                                      Row = r
+                                      Bit = b
+                                      Pressed = p }
+                            | _ -> None
+                        | _ -> None)
+                    |> Array.toList
+        with _ ->
+            []
+
+    let save (romBytes: byte[]) (tzxBytes: byte[]) (events: seq<ReplayKeyEvent>) =
+        try
+            let eventText =
+                events
+                |> Seq.map (fun e ->
+                    sprintf "{\"frame\":%d,\"row\":%d,\"bit\":%d,\"pressed\":%b}" e.Frame e.Row e.Bit e.Pressed)
+                |> String.concat ","
+
+            let body =
+                sprintf
+                    "{\"format\":\"jetpacfr-replay\",\"version\":1,\"gameId\":\"jetpac\",\"romSha256\":\"%s\",\"tzxSha256\":\"%s\",\"events\":[%s]}"
+                    (AssetHash.ofBytes romBytes)
+                    (AssetHash.ofBytes tzxBytes)
+                    eventText
+
+            storage?setItem (key romBytes tzxBytes, body)
+        with _ ->
+            ()
 
 type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
-  // Web: assets arrive as byte arrays (embedded base64). EntryCache/Boot use the
-  // fixed asset keys "rom"/"tzx", resolved by Boot.AssetProvider.
-  let romPath = "rom"
-  let tzxPath = "tzx"
+    // Web: assets arrive as byte arrays (embedded base64). EntryCache/Boot use the
+    // fixed asset keys "rom"/"tzx", resolved by Boot.AssetProvider.
+    let romPath = "rom"
+    let tzxPath = "tzx"
 
-  let port = Jetpac2.Core.Machine()
-  let recorder = TraceRecorder(capacity, 512)
-  let replayEvents = ResizeArray<ReplayKeyEvent>(ReplayCache.load romBytes tzxBytes)
-  let mutable frame = 0
-  let mutable warmStart = false
-  let snapshotInterval = 64
-  // Persisting the whole event list on every keystroke (including browser
-  // auto-repeat) serialized an ever-growing list per key event; batch the
-  // write behind a dirty flag flushed by the app's UI tick, and cap the
-  // retained window so localStorage stays bounded.
-  let mutable replayDirty = false
-  let replayCap = 10_000
+    let port = Jetpac2.Core.Machine()
+    let recorder = TraceRecorder(capacity, 512)
+    let replayEvents = ResizeArray<ReplayKeyEvent>(ReplayCache.load romBytes tzxBytes)
+    let mutable frame = 0
+    let mutable warmStart = false
+    let snapshotInterval = 64
+    // Persisting the whole event list on every keystroke (including browser
+    // auto-repeat) serialized an ever-growing list per key event; batch the
+    // write behind a dirty flag flushed by the app's UI tick, and cap the
+    // retained window so localStorage stays bounded.
+    let mutable replayDirty = false
+    let replayCap = 10_000
 
-  /// Put the port into the game-entry state. Warm: load the cached snapshot.
-  /// Cold: boot the oracle to the entry and cache its state for next time.
-  let loadEntryState () =
-    match EntryCache.tryLoad romPath tzxPath with
-    | Some (mem, state) ->
-      try
-        port.LoadState(mem, state)
-        warmStart <- true
-      with _ ->
-        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
-        let mem, state = oracle.SaveState()
-        EntryCache.save romPath tzxPath mem state
-        port.LoadState(mem, state)
-        warmStart <- false
-    | None ->
-      let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
-      let mem, state = oracle.SaveState()
-      EntryCache.save romPath tzxPath mem state
-      port.LoadState(mem, state)
-      warmStart <- false
+    /// Put the port into the game-entry state. Warm: load the cached snapshot.
+    /// Cold: boot the oracle to the entry and cache its state for next time.
+    let loadEntryState () =
+        match EntryCache.tryLoad romPath tzxPath with
+        | Some(mem, state) ->
+            try
+                port.LoadState(mem, state)
+                warmStart <- true
+            with _ ->
+                let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
+                let mem, state = oracle.SaveState()
+                EntryCache.save romPath tzxPath mem state
+                port.LoadState(mem, state)
+                warmStart <- false
+        | None ->
+            let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
+            let mem, state = oracle.SaveState()
+            EntryCache.save romPath tzxPath mem state
+            port.LoadState(mem, state)
+            warmStart <- false
 
-  let snapshotOf () =
-    let r = port.Regs
-    { Tick = uint32 (port.CycleCount())
-      Af = uint16 (r.Get Jetpac2.Core.R16.AF)
-      Bc = uint16 (r.Get Jetpac2.Core.R16.BC)
-      De = uint16 (r.Get Jetpac2.Core.R16.DE)
-      Hl = uint16 (r.Get Jetpac2.Core.R16.HL)
-      Af2 = uint16 (r.Get Jetpac2.Core.R16.AF_)
-      Bc2 = uint16 (r.Get Jetpac2.Core.R16.BC_)
-      De2 = uint16 (r.Get Jetpac2.Core.R16.DE_)
-      Hl2 = uint16 (r.Get Jetpac2.Core.R16.HL_)
-      Ix = uint16 (r.Ix())
-      Iy = uint16 (r.Iy())
-      Sp = uint16 (r.Sp())
-      Pc = uint16 (r.Pc())
-      I = uint8 (r.I())
-      R = uint8 (r.R()) }
+    let snapshotOf () =
+        let r = port.Regs
 
-  do
-    Jetpac2.Core.Z80Table.EnsureInstalled()
-    port.AddMemoryWriteHandler(fun e ->
-      recorder.RecordWrite
-        { Tick = uint32 e.Tick
-          Address = uint16 e.Address
-          OldValue = e.OldValue
-          NewValue = e.NewValue })
-    port.AddOutHandler(fun p v ->
-      recorder.RecordPort
         { Tick = uint32 (port.CycleCount())
-          Port = uint16 p
-          Value = uint8 (v &&& 0xFF)
-          Border = uint8 (v &&& 7) })
-    loadEntryState ()
-    recorder.RecordSnapshot(snapshotOf ())
+          Af = uint16 (r.Get Jetpac2.Core.R16.AF)
+          Bc = uint16 (r.Get Jetpac2.Core.R16.BC)
+          De = uint16 (r.Get Jetpac2.Core.R16.DE)
+          Hl = uint16 (r.Get Jetpac2.Core.R16.HL)
+          Af2 = uint16 (r.Get Jetpac2.Core.R16.AF_)
+          Bc2 = uint16 (r.Get Jetpac2.Core.R16.BC_)
+          De2 = uint16 (r.Get Jetpac2.Core.R16.DE_)
+          Hl2 = uint16 (r.Get Jetpac2.Core.R16.HL_)
+          Ix = uint16 (r.Ix())
+          Iy = uint16 (r.Iy())
+          Sp = uint16 (r.Sp())
+          Pc = uint16 (r.Pc())
+          I = uint8 (r.I())
+          R = uint8 (r.R()) }
 
-  /// True when the entry state came from the cache (no oracle boot needed).
-  member this.WarmStart = warmStart
-  member this.Frame = frame
-  member this.Recorder = recorder
-  member this.CycleCount = port.CycleCount()
-  member this.Regs = port.Regs
-  member this.Memory = port.Memory
-  member this.ReplayEventCount = replayEvents.Count
+    do
+        Jetpac2.Core.Z80Table.EnsureInstalled()
 
-  member this.SetKey(row: int, bit: int, pressed: bool) =
-    replayEvents.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
-    if replayEvents.Count > replayCap then
-      replayEvents.RemoveRange(0, replayEvents.Count - replayCap)
-    replayDirty <- true
-    port.SetKey(row, bit, pressed)
+        port.AddMemoryWriteHandler(fun e ->
+            recorder.RecordWrite
+                { Tick = uint32 e.Tick
+                  Address = uint16 e.Address
+                  OldValue = e.OldValue
+                  NewValue = e.NewValue })
 
-  /// Write the pending replay events to localStorage (called from the UI
-  /// tick, not per keystroke).
-  member this.FlushReplayCache() =
-    if replayDirty then
-      replayDirty <- false
-      ReplayCache.save romBytes tzxBytes replayEvents
+        port.AddOutHandler(fun p v ->
+            recorder.RecordPort
+                { Tick = uint32 (port.CycleCount())
+                  Port = uint16 p
+                  Value = uint8 (v &&& 0xFF)
+                  Border = uint8 (v &&& 7) })
 
-  /// Rendered frame (BGRA 320x256) from the port's video state.
-  member this.ScreenBuffer = port.Video.BlitTo()
+        loadEntryState ()
+        recorder.RecordSnapshot(snapshotOf ())
 
-  /// Drain the frame's beeper transitions and synthesize the 882 samples for
-  /// the just-executed frame.
-  member this.DrainBeeperSamples(frameStart: int64) : float32[] =
-    let trace = port.BeeperTrace |> Seq.toList
-    port.BeeperTrace.Clear()
-    Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
+    /// True when the entry state came from the cache (no oracle boot needed).
+    member this.WarmStart = warmStart
+    member this.Frame = frame
+    member this.Recorder = recorder
+    member this.CycleCount = port.CycleCount()
+    member this.Regs = port.Regs
+    member this.Memory = port.Memory
+    member this.ReplayEventCount = replayEvents.Count
 
-  /// Execute one frame (69888 T-states plus overshoot) on the port machine,
-  /// recording every instruction. Returns (frameStart, frameEnd) for the
-  /// audio call.
-  member this.RunFrame() : int64 * int64 =
-    let frameStart = port.CycleCount()
-    let frameEnd = port.FrameEnd
-    let mutable step = 0
-    while port.CycleCount() < frameEnd do
-      let irq = port.IrqPending && port.Iff1
-      let pc = port.Regs.Pc()
-      let flagsBefore = port.Flags().ToU8()
-      let cyclesBefore = port.CycleCount()
-      if irq then
-        // One Step services the interrupt AND runs the vector instruction.
-        // Record a synthetic marker (Length = 0) plus the vector instruction
-        // under its own pc; the interrupted instruction resumes after the
-        // ISR returns and gets its own entry then.
-        let vector =
-          match port.IrqMode with
-          | 2 ->
-            let addr = 0xFF ||| ((port.Regs.I() <<< 8) &&& 0xFF00)
-            let lo = int port.Memory[addr &&& 0xFFFF]
-            let hi = int port.Memory[(addr + 1) &&& 0xFFFF]
-            (lo ||| (hi <<< 8)) &&& 0xFFFF
-          | _ -> 0x38
-        recorder.Record
-          { Pc = uint16 vector
-            B0 = 0uy
-            B1 = 0uy
-            B2 = 0uy
-            B3 = 0uy
-            Target = uint16 vector
-            Tick = uint32 cyclesBefore
-            Length = 0uy
-            Cycles = 7uy
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 flagsBefore
-            Taken = 1uy }
-        let vinsn = Disasm.disasmMemory port.Memory vector
-        // Capture the executed bytes BEFORE the step: an instruction that
-        // writes over itself must be recorded with the bytes it fetched.
-        let m = port.Memory
-        let b0 = m[vector &&& 0xFFFF]
-        let b1 = m[(vector + 1) &&& 0xFFFF]
-        let b2 = m[(vector + 2) &&& 0xFFFF]
-        let b3 = m[(vector + 3) &&& 0xFFFF]
-        port.Step()
-        let after = port.Regs.Pc()
-        let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (vector + vinsn.Length) &&& 0xFFFF
-        recorder.Record
-          { Pc = uint16 vector
-            B0 = b0
-            B1 = b1
-            B2 = b2
-            B3 = b3
-            Target = uint16 after
-            Tick = uint32 cyclesBefore
-            Length = uint8 vinsn.Length
-            Cycles = uint8 (min 255 cycles)
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 (port.Flags().ToU8())
-            Taken = (if after <> next then 1uy else 0uy) }
-      else
-        let insn = Disasm.disasmMemory port.Memory pc
-        let m = port.Memory
-        let b0 = m[pc &&& 0xFFFF]
-        let b1 = m[(pc + 1) &&& 0xFFFF]
-        let b2 = m[(pc + 2) &&& 0xFFFF]
-        let b3 = m[(pc + 3) &&& 0xFFFF]
-        port.Step()
-        let after = port.Regs.Pc()
-        let cycles = int (port.CycleCount() - cyclesBefore)
-        let next = (pc + insn.Length) &&& 0xFFFF
-        recorder.Record
-          { Pc = uint16 pc
-            B0 = b0
-            B1 = b1
-            B2 = b2
-            B3 = b3
-            Target = uint16 after
-            Tick = uint32 cyclesBefore
-            Length = uint8 insn.Length
-            Cycles = uint8 (min 255 cycles)
-            FlagsBefore = uint8 flagsBefore
-            FlagsAfter = uint8 (port.Flags().ToU8())
-            Taken = (if after <> next then 1uy else 0uy) }
-      if step % snapshotInterval = 0 then recorder.RecordSnapshot(snapshotOf ())
-      step <- step + 1
-    port.FrameEnd <- frameEnd + 69888L
-    recorder.RecordFrameBoundary(uint32 (port.CycleCount()))
-    frame <- frame + 1
-    frameStart, port.CycleCount()
+    member this.SetKey(row: int, bit: int, pressed: bool) =
+        replayEvents.Add
+            { Frame = frame
+              Row = row
+              Bit = bit
+              Pressed = pressed }
+
+        if replayEvents.Count > replayCap then
+            replayEvents.RemoveRange(0, replayEvents.Count - replayCap)
+
+        replayDirty <- true
+        port.SetKey(row, bit, pressed)
+
+    /// Write the pending replay events to localStorage (called from the UI
+    /// tick, not per keystroke).
+    member this.FlushReplayCache() =
+        if replayDirty then
+            replayDirty <- false
+            ReplayCache.save romBytes tzxBytes replayEvents
+
+    /// Rendered frame (BGRA 320x256) from the port's video state.
+    member this.ScreenBuffer = port.Video.BlitTo()
+
+    /// Drain the frame's beeper transitions and synthesize the 882 samples for
+    /// the just-executed frame.
+    member this.DrainBeeperSamples(frameStart: int64) : float32[] =
+        let trace = port.BeeperTrace |> Seq.toList
+        port.BeeperTrace.Clear()
+        Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
+
+    /// Execute one frame (69888 T-states plus overshoot) on the port machine,
+    /// recording every instruction. Returns (frameStart, frameEnd) for the
+    /// audio call.
+    member this.RunFrame() : int64 * int64 =
+        let frameStart = port.CycleCount()
+        let frameEnd = port.FrameEnd
+        let mutable step = 0
+
+        while port.CycleCount() < frameEnd do
+            let irq = port.IrqPending && port.Iff1
+            let pc = port.Regs.Pc()
+            let flagsBefore = port.Flags().ToU8()
+            let cyclesBefore = port.CycleCount()
+
+            if irq then
+                // One Step services the interrupt AND runs the vector instruction.
+                // Record a synthetic marker (Length = 0) plus the vector instruction
+                // under its own pc; the interrupted instruction resumes after the
+                // ISR returns and gets its own entry then.
+                let vector =
+                    match port.IrqMode with
+                    | 2 ->
+                        let addr = 0xFF ||| ((port.Regs.I() <<< 8) &&& 0xFF00)
+                        let lo = int port.Memory[addr &&& 0xFFFF]
+                        let hi = int port.Memory[(addr + 1) &&& 0xFFFF]
+                        (lo ||| (hi <<< 8)) &&& 0xFFFF
+                    | _ -> 0x38
+
+                recorder.Record
+                    { Pc = uint16 vector
+                      B0 = 0uy
+                      B1 = 0uy
+                      B2 = 0uy
+                      B3 = 0uy
+                      Target = uint16 vector
+                      Tick = uint32 cyclesBefore
+                      Length = 0uy
+                      Cycles = 7uy
+                      FlagsBefore = uint8 flagsBefore
+                      FlagsAfter = uint8 flagsBefore
+                      Taken = 1uy }
+
+                let vinsn = Disasm.disasmMemory port.Memory vector
+                // Capture the executed bytes BEFORE the step: an instruction that
+                // writes over itself must be recorded with the bytes it fetched.
+                let m = port.Memory
+                let b0 = m[vector &&& 0xFFFF]
+                let b1 = m[(vector + 1) &&& 0xFFFF]
+                let b2 = m[(vector + 2) &&& 0xFFFF]
+                let b3 = m[(vector + 3) &&& 0xFFFF]
+                port.Step()
+                let after = port.Regs.Pc()
+                let cycles = int (port.CycleCount() - cyclesBefore)
+                let next = (vector + vinsn.Length) &&& 0xFFFF
+
+                recorder.Record
+                    { Pc = uint16 vector
+                      B0 = b0
+                      B1 = b1
+                      B2 = b2
+                      B3 = b3
+                      Target = uint16 after
+                      Tick = uint32 cyclesBefore
+                      Length = uint8 vinsn.Length
+                      Cycles = uint8 (min 255 cycles)
+                      FlagsBefore = uint8 flagsBefore
+                      FlagsAfter = uint8 (port.Flags().ToU8())
+                      Taken = (if after <> next then 1uy else 0uy) }
+            else
+                let insn = Disasm.disasmMemory port.Memory pc
+                let m = port.Memory
+                let b0 = m[pc &&& 0xFFFF]
+                let b1 = m[(pc + 1) &&& 0xFFFF]
+                let b2 = m[(pc + 2) &&& 0xFFFF]
+                let b3 = m[(pc + 3) &&& 0xFFFF]
+                port.Step()
+                let after = port.Regs.Pc()
+                let cycles = int (port.CycleCount() - cyclesBefore)
+                let next = (pc + insn.Length) &&& 0xFFFF
+
+                recorder.Record
+                    { Pc = uint16 pc
+                      B0 = b0
+                      B1 = b1
+                      B2 = b2
+                      B3 = b3
+                      Target = uint16 after
+                      Tick = uint32 cyclesBefore
+                      Length = uint8 insn.Length
+                      Cycles = uint8 (min 255 cycles)
+                      FlagsBefore = uint8 flagsBefore
+                      FlagsAfter = uint8 (port.Flags().ToU8())
+                      Taken = (if after <> next then 1uy else 0uy) }
+
+            if step % snapshotInterval = 0 then
+                recorder.RecordSnapshot(snapshotOf ())
+
+            step <- step + 1
+
+        port.FrameEnd <- frameEnd + 69888L
+        recorder.RecordFrameBoundary(uint32 (port.CycleCount()))
+        frame <- frame + 1
+        frameStart, port.CycleCount()

@@ -1,23 +1,23 @@
 
-import { equalsWith, choose, item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { join, split, isNullOrWhiteSpace, toBase64String, fromBase64String, printf, toText, format } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { equalsWith, choose, item } from "./fable_modules/fable-library-js.5.17.0/Array.js";
+import { join, split, isNullOrWhiteSpace, toBase64String, fromBase64String, printf, toText, format } from "./fable_modules/fable-library-js.5.17.0/String.js";
 import { bootToEntry, AssetProvider } from "./BootWeb.js";
-import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
-import { FSharpRef, Record } from "./fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, record_type, bool_type, int32_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { ofArray, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
-import { clear, defaultOf } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { tryParse } from "./fable_modules/fable-library-js.5.13.0/Int32.js";
-import { tryParse as tryParse_1 } from "./fable_modules/fable-library-js.5.13.0/Boolean.js";
-import { toList, map } from "./fable_modules/fable-library-js.5.13.0/Seq.js";
+import { Operators_IsNull } from "./fable_modules/fable-library-js.5.17.0/FSharp.Core.js";
+import { FSharpRef, Record } from "./fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, record_type, bool_type, int32_type } from "./fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { ofArray, empty } from "./fable_modules/fable-library-js.5.17.0/List.js";
+import { clear, defaultOf } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { tryParse } from "./fable_modules/fable-library-js.5.17.0/Int32.js";
+import { tryParse as tryParse_1 } from "./fable_modules/fable-library-js.5.17.0/Boolean.js";
+import { toList, map } from "./fable_modules/fable-library-js.5.17.0/Seq.js";
 import { RegisterFile__R, RegisterFile__Sp, RegisterFile__Iy, RegisterFile__Ix, R16, RegisterFile__Get_Z61FD1070, Machine__LoadState_5EF83E14, Machine__set_FrameEnd_Z524259C1, Machine__Step, RegisterFile__I, Machine__get_IrqMode, Flags__ToU8, Machine__Flags, RegisterFile__Pc, Machine__get_Iff1, Machine__get_IrqPending, Machine__get_FrameEnd, Machine__get_BeeperTrace, Machine__get_Video, Machine__SetKey_289F56A, Machine__get_Memory, Machine__get_Regs, Machine__CycleCount, Machine__AddOutHandler_Z5F57DC44, Machine__AddMemoryWriteHandler_Z3CB4FF01, Machine_$ctor } from "./Jetpac2.Core/Machine.js";
 import { RegSnapshot, TraceRecorder__RecordFrameBoundary_Z6EF827D7, TraceEntry, TraceRecorder__Record_A4DCE76, TraceRecorder__RecordSnapshot_7114161F, PortEvent, TraceRecorder__RecordPort_Z54D84C2A, MemWriteEvent, TraceRecorder__RecordWrite_Z30129C29, TraceRecorder_$ctor_Z37302880 } from "./TraceTypesWeb.js";
 import { EnsureInstalled } from "./Jetpac2.Core/Z80Table.js";
-import { op_Addition, toInt32_unchecked, compare, op_Subtraction, toInt64_unchecked, toUInt32_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
+import { op_Addition, toInt32_unchecked, compare, op_Subtraction, toInt64_unchecked, toUInt32_unchecked } from "./fable_modules/fable-library-js.5.17.0/BigInt.js";
 import { VideoScreen__BlitTo } from "./Jetpac2.Core/Screen.js";
 import { ToSamples } from "./Jetpac2.Core/Beeper.js";
 import { disasmMemory } from "./JetpacFR.Core/Disasm.js";
-import { min } from "./fable_modules/fable-library-js.5.13.0/Double.js";
+import { min } from "./fable_modules/fable-library-js.5.17.0/Double.js";
 import { Spectrum48__SaveState } from "./Jetpac.Core/Spectrum.js";
 
 function AssetHash_ofBytes(b) {
@@ -245,6 +245,8 @@ export class TraceSession {
         this.frame = 0;
         this.warmStart = false;
         this.snapshotInterval = 64;
+        this.replayDirty = false;
+        this.replayCap = 10000;
         EnsureInstalled();
         Machine__AddMemoryWriteHandler_Z3CB4FF01(this.port, (e) => {
             TraceRecorder__RecordWrite_Z30129C29(this.recorder, new MemWriteEvent(toUInt32_unchecked(e.Tick) >>> 0, e.Address & 0xFFFF, e.OldValue, e.NewValue));
@@ -298,8 +300,22 @@ export function TraceSession__get_ReplayEventCount(this$) {
 
 export function TraceSession__SetKey_289F56A(this$, row, bit, pressed) {
     void (this$.replayEvents.push(new ReplayKeyEvent(this$.frame, row, bit, pressed)));
-    ReplayCache_save(this$.romBytes, this$.tzxBytes, this$.replayEvents);
+    if (this$.replayEvents.length > this$.replayCap) {
+        this$.replayEvents.splice(0, this$.replayEvents.length - this$.replayCap);
+    }
+    this$.replayDirty = true;
     Machine__SetKey_289F56A(this$.port, row, bit, pressed);
+}
+
+/**
+ * Write the pending replay events to localStorage (called from the UI
+ * tick, not per keystroke).
+ */
+export function TraceSession__FlushReplayCache(this$) {
+    if (this$.replayDirty) {
+        this$.replayDirty = false;
+        ReplayCache_save(this$.romBytes, this$.tzxBytes, this$.replayEvents);
+    }
 }
 
 /**
@@ -347,21 +363,29 @@ export function TraceSession__RunFrame(this$) {
             }
             TraceRecorder__Record_A4DCE76(this$.recorder, new TraceEntry(vector & 0xFFFF, 0, 0, 0, 0, vector & 0xFFFF, toUInt32_unchecked(cyclesBefore) >>> 0, 0, 7, flagsBefore & 0xFF, flagsBefore & 0xFF, 1));
             const vinsn = disasmMemory(Machine__get_Memory(this$.port), vector);
+            const m = Machine__get_Memory(this$.port);
+            const b0 = item(vector & 65535, m);
+            const b1 = item((vector + 1) & 65535, m);
+            const b2 = item((vector + 2) & 65535, m);
+            const b3 = item((vector + 3) & 65535, m);
             Machine__Step(this$.port);
             const after = RegisterFile__Pc(Machine__get_Regs(this$.port)) | 0;
             const cycles = ~~toInt32_unchecked(toInt64_unchecked(op_Subtraction(Machine__CycleCount(this$.port), cyclesBefore))) | 0;
             const next = ((vector + vinsn.Length) & 65535) | 0;
-            const m = Machine__get_Memory(this$.port);
-            TraceRecorder__Record_A4DCE76(this$.recorder, new TraceEntry(vector & 0xFFFF, item(vector & 65535, m), item((vector + 1) & 65535, m), item((vector + 2) & 65535, m), item((vector + 3) & 65535, m), after & 0xFFFF, toUInt32_unchecked(cyclesBefore) >>> 0, vinsn.Length & 0xFF, min(255, cycles) & 0xFF, flagsBefore & 0xFF, ((copyOfStruct_1 = Machine__Flags(this$.port), Flags__ToU8(copyOfStruct_1))) & 0xFF, (after !== next) ? 1 : 0));
+            TraceRecorder__Record_A4DCE76(this$.recorder, new TraceEntry(vector & 0xFFFF, b0, b1, b2, b3, after & 0xFFFF, toUInt32_unchecked(cyclesBefore) >>> 0, vinsn.Length & 0xFF, min(255, cycles) & 0xFF, flagsBefore & 0xFF, ((copyOfStruct_1 = Machine__Flags(this$.port), Flags__ToU8(copyOfStruct_1))) & 0xFF, (after !== next) ? 1 : 0));
         }
         else {
             const insn = disasmMemory(Machine__get_Memory(this$.port), pc);
+            const m_1 = Machine__get_Memory(this$.port);
+            const b0_1 = item(pc & 65535, m_1);
+            const b1_1 = item((pc + 1) & 65535, m_1);
+            const b2_1 = item((pc + 2) & 65535, m_1);
+            const b3_1 = item((pc + 3) & 65535, m_1);
             Machine__Step(this$.port);
             const after_1 = RegisterFile__Pc(Machine__get_Regs(this$.port)) | 0;
             const cycles_1 = ~~toInt32_unchecked(toInt64_unchecked(op_Subtraction(Machine__CycleCount(this$.port), cyclesBefore))) | 0;
             const next_1 = ((pc + insn.Length) & 65535) | 0;
-            const m_1 = Machine__get_Memory(this$.port);
-            TraceRecorder__Record_A4DCE76(this$.recorder, new TraceEntry(pc & 0xFFFF, item(pc & 65535, m_1), item((pc + 1) & 65535, m_1), item((pc + 2) & 65535, m_1), item((pc + 3) & 65535, m_1), after_1 & 0xFFFF, toUInt32_unchecked(cyclesBefore) >>> 0, insn.Length & 0xFF, min(255, cycles_1) & 0xFF, flagsBefore & 0xFF, ((copyOfStruct_2 = Machine__Flags(this$.port), Flags__ToU8(copyOfStruct_2))) & 0xFF, (after_1 !== next_1) ? 1 : 0));
+            TraceRecorder__Record_A4DCE76(this$.recorder, new TraceEntry(pc & 0xFFFF, b0_1, b1_1, b2_1, b3_1, after_1 & 0xFFFF, toUInt32_unchecked(cyclesBefore) >>> 0, insn.Length & 0xFF, min(255, cycles_1) & 0xFF, flagsBefore & 0xFF, ((copyOfStruct_2 = Machine__Flags(this$.port), Flags__ToU8(copyOfStruct_2))) & 0xFF, (after_1 !== next_1) ? 1 : 0));
         }
         if ((step % this$.snapshotInterval) === 0) {
             TraceRecorder__RecordSnapshot_7114161F(this$.recorder, TraceSession__snapshotOf(this$));

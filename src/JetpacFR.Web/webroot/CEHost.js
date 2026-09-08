@@ -1,15 +1,15 @@
 
-import { equals, defaultOf } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { iterate, isEmpty, tryHead, empty, ofArray, singleton } from "./fable_modules/fable-library-js.5.13.0/List.js";
+import { equals, defaultOf } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { iterate, isEmpty, tryHead, empty, ofArray, singleton } from "./fable_modules/fable-library-js.5.17.0/List.js";
 import { CEGame__SetKey_289F56A, CEGame__get_Frame, CEGame__DrainBeeperSamples_Z524259C1, CEGame__RunFrame, CEGame_$ctor_20C827FE, CEGame__get_ScreenBuffer } from "./JetpacFR.Core/CEGame.js";
-import { item } from "./fable_modules/fable-library-js.5.13.0/Array.js";
+import { item } from "./fable_modules/fable-library-js.5.17.0/Array.js";
 import { Audio_Play, Dom_setInterval, Dom_window, Dom_byId } from "./App.js";
-import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
+import { Operators_IsNull } from "./fable_modules/fable-library-js.5.17.0/FSharp.Core.js";
 import { entryState } from "./games/minimal/Game.js";
 import { program, binary } from "./games/minimal/Image.js";
 import { GameRegistry_parity, GameRegistry_tryFind, GameRegistry_all, GameImage, GameRegistry_register } from "./JetpacFR.Core/GameRegistry.js";
-import { toString } from "./fable_modules/fable-library-js.5.13.0/Types.js";
-import { printf, toText, substring } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { toString } from "./fable_modules/fable-library-js.5.17.0/Types.js";
+import { printf, toText, substring } from "./fable_modules/fable-library-js.5.17.0/String.js";
 
 let game = undefined;
 
@@ -146,9 +146,21 @@ export function start() {
                 Dom_window.clearInterval(timerId);
             }
         });
-        Dom_window.addEventListener("keydown", ((e) => {
-            const key = e.key;
-            if (game == null) {
+        const isEditableTarget = (e) => {
+            const t = e.target;
+            const tag = toString(t.tagName);
+            if (((tag === "INPUT") ? true : (tag === "TEXTAREA")) ? true : (tag === "SELECT")) {
+                return true;
+            }
+            else {
+                return toString(t.isContentEditable) === "true";
+            }
+        };
+        Dom_window.addEventListener("keydown", ((e_1) => {
+            const key = e_1.key;
+            if (isEditableTarget(e_1)) {
+            }
+            else if (game == null) {
             }
             else {
                 const g_1 = game;
@@ -157,15 +169,19 @@ export function start() {
                 }, keyCells(key));
             }
         }));
-        Dom_window.addEventListener("keyup", ((e_1) => {
-            const key_1 = e_1.key;
-            if (game == null) {
+        Dom_window.addEventListener("keyup", ((e_2) => {
+            if (isEditableTarget(e_2)) {
             }
             else {
-                const g_2 = game;
-                iterate((tupledArg_1) => {
-                    CEGame__SetKey_289F56A(g_2, tupledArg_1[0], tupledArg_1[1], false);
-                }, keyCells(key_1));
+                const key_1 = e_2.key;
+                if (game == null) {
+                }
+                else {
+                    const g_2 = game;
+                    iterate((tupledArg_1) => {
+                        CEGame__SetKey_289F56A(g_2, tupledArg_1[0], tupledArg_1[1], false);
+                    }, keyCells(key_1));
+                }
             }
         }));
     }

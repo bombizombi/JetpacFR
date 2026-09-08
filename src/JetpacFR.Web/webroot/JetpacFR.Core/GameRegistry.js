@@ -1,10 +1,10 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { record_type, list_type, int32_type, array_type, uint8_type, string_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { record_type, list_type, int32_type, array_type, uint8_type, string_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Z80_assemble, Z80Op_$reflection } from "../Jetpac2.Core/Z80Asm.js";
-import { ofSeq, tryFind, reverse, cons, empty } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { ofSeq, tryFind, reverse, cons, empty } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 /**
  * The per-game CE registry entry: one compiled game version, exposed by

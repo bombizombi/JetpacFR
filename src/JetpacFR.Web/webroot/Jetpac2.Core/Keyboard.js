@@ -1,8 +1,8 @@
 
-import { setItem, item, fill, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { empty, singleton, collect, delay, toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { rangeDouble } from "../fable_modules/fable-library-js.5.13.0/Range.js";
+import { setItem, item, fill, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { empty, singleton, collect, delay, toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { rangeDouble } from "../fable_modules/fable-library-js.5.17.0/Range.js";
 
 /**
  * Port of JetpacFSharp (Jetpac.Core) Keyboard — specbolt's keyboard matrix

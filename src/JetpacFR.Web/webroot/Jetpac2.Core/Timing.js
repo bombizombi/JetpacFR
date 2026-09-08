@@ -1,8 +1,8 @@
 
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { compare, op_Addition, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { clear, disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { compare, op_Addition, toInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { clear, disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 
 /**
  * Port of JetpacFSharp (Jetpac.Core) Scheduler — specbolt's sorted task

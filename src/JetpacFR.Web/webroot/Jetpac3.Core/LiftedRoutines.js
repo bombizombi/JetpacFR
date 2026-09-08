@@ -1,12 +1,12 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { record_type, lambda_type, unit_type, list_type, int32_type, string_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { record_type, lambda_type, unit_type, list_type, int32_type, string_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Alu_add16, Alu_add8, Alu_dec8, Alu_sbc16, Alu_sub8, Flags__get_zero, RegisterFile__Wz, RegisterFile__Ix, RegisterFile__SetWz_Z524259A4, Alu_and8, Alu_inc8, Alu_Direction, Alu_fastRotateCircular8, Machine__Push16_Z524259A4, Machine__Read_Z524259A4, RegisterFile__Exx, Machine__ReadImm16, Machine__Pop16, RegisterFile__SetPc_Z524259A4, Machine__Branch_Z524259A4, Flags__get_carry, Machine__Flags, Machine__ReadImm, Alu_cmp8, Machine__SetFlags_2901ED1A, RegisterFile__Set_33BF5693, RegisterFile__Set_ZC22B834, Machine__PassTime_Z524259A4, R8, RegisterFile__Get_Z600F6D11, R16, RegisterFile__Get_Z61FD1070, Machine__Write_Z37302880, Machine__Fetch, Machine__get_Regs, RegisterFile__Pc, Machine_$reflection } from "../Jetpac2.Core/Machine.js";
 import { ExecutionMode, ExecutionMode_$reflection } from "./Explorer.js";
-import { printf, toFail } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { ofArray } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { item, setItem, fill } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { defaultOf, disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { printf, toFail } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { ofArray } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { item, setItem, fill } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { defaultOf, disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 
 /**
  * The converted `screenClear` routine (0x71B8 / 0x71C6): idiomatic F# replacing
@@ -140,7 +140,7 @@ export function LiftedRoutines_screenClearHook(addr) {
                 LiftedRoutines_clearAttrs(m_1);
             };
         default:
-            if ((addr >= 29119) && (addr <= 29125)) {
+            if (((addr >= 29119) && (addr <= 29123)) ? true : (addr === 29125)) {
                 return (m_2) => {
                     LiftedRoutines_clearLoop(m_2);
                 };
@@ -645,6 +645,24 @@ export const LiftedRoutines_tableLookup64E6Routine = new LiftedRoutine("table-lo
 }, ExecutionMode.Lifted);
 
 export const LiftedRoutines_registry = ofArray([LiftedRoutines_screenClearRoutine, LiftedRoutines_screenClear71CFRoutine, LiftedRoutines_screenStepRoutine, LiftedRoutines_tableLookup64E6Routine]);
+
+/**
+ * Instructions one lifted step folds at an entry, for the code view's
+ * IDA-style merged rows. Most arms translate exactly one instruction
+ * (their row already shows the right mnemonic); only the arms that run
+ * several instructions inside a single Step return a list here. Kept in
+ * step with the Execute arms above - each arm's comment is the source.
+ */
+export function LiftedRoutines_folded(addr) {
+    switch (addr) {
+        case 29112:
+            return ofArray(["LD HL,4000", "LD B,58", "LD C,0"]);
+        case 29126:
+            return ofArray(["LD HL,5800", "LD B,5B", "LD C,47", "JR 71BF"]);
+        default:
+            return undefined;
+    }
+}
 
 const LiftedRoutines_hookTable = (() => {
     const table = fill(new Array(65536), 0, 65536, null);

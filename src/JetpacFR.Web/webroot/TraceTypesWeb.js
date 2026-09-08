@@ -1,9 +1,9 @@
 
-import { Record } from "./fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, bool_type, int32_type, array_type, record_type, uint32_type, uint8_type, uint16_type } from "./fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { copy, setItem, getSubArray, item, fill } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { max } from "./fable_modules/fable-library-js.5.13.0/Double.js";
-import { copyToArray, Exception } from "./fable_modules/fable-library-js.5.13.0/Util.js";
+import { Record } from "./fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, bool_type, int32_type, array_type, record_type, uint32_type, uint8_type, uint16_type } from "./fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { copy, setItem, getSubArray, copyTo, item, fill } from "./fable_modules/fable-library-js.5.17.0/Array.js";
+import { max } from "./fable_modules/fable-library-js.5.17.0/Double.js";
+import { copyToArray, Exception } from "./fable_modules/fable-library-js.5.17.0/Util.js";
 
 /**
  * One executed instruction in the trace window. Bytes are the bytes the
@@ -221,11 +221,19 @@ export function TraceRecorder__Record_A4DCE76(this$, entry) {
         this$.segments[~~(this$.head / this$.segmentSize)] = ((item(~~(this$.head / this$.segmentSize), this$.segments) + 1) | 0);
         this$.endTick = entry.Tick;
         this$.head = (((this$.head + 1) % this$.capacity) | 0);
+        if (this$.count === this$.capacity) {
+            this$.startTick = item(this$.head, this$.entries).Tick;
+        }
     }
 }
 
 export function TraceRecorder__RecordSnapshot_7114161F(this$, s) {
-    if (this$.recordEnabled && (this$.snapshotCount < this$.snapshots.length)) {
+    if (this$.recordEnabled) {
+        if (this$.snapshotCount === this$.snapshots.length) {
+            const keep = ~~(this$.snapshots.length / 2) | 0;
+            copyTo(this$.snapshots, this$.snapshots.length - keep, this$.snapshots, 0, keep);
+            this$.snapshotCount = (keep | 0);
+        }
         this$.snapshots[this$.snapshotCount] = s;
         this$.snapshotCount = ((this$.snapshotCount + 1) | 0);
     }

@@ -1,7 +1,7 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, record_type, array_type, int32_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { setItem, item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, record_type, array_type, int32_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { setItem, item, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 export const VideoConstants_XBorder = 32;
 

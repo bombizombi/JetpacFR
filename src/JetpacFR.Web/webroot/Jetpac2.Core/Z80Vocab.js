@@ -1,7 +1,7 @@
 
 import { Z80_runOf, Z80_mkOp } from "./Z80Asm.js";
 import { fd_cb, dd_cb, cb, ed, fd, dd, main } from "./Z80Table.js";
-import { ofArray } from "../fable_modules/fable-library-js.5.13.0/List.js";
+import { ofArray } from "../fable_modules/fable-library-js.5.17.0/List.js";
 
 export const LD_B_B = Z80_mkOp("LD B,B", new Uint8Array([64]), Z80_runOf(main, 64));
 

@@ -1,10 +1,10 @@
 
-import { join, printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.13.0/System.Text.js";
-import { disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { fromInt32, max, op_Division, toInt64_unchecked, toInt32_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { map, isEmpty } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { toString } from "../fable_modules/fable-library-js.5.13.0/Types.js";
+import { join, printf, toText } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.17.0/System.Text.js";
+import { disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { fromInt32, max, op_Division, toInt64_unchecked, toInt32_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { map, isEmpty } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { toString } from "../fable_modules/fable-library-js.5.17.0/Types.js";
 
 function regLine(s) {
     return toText(printf("AF=%04X BC=%04X DE=%04X HL=%04X IX=%04X IY=%04X SP=%04X I=%02X R=%02X"))(s.Af)(s.Bc)(s.De)(s.Hl)(s.Ix)(s.Iy)(s.Sp)(s.I)(s.R);

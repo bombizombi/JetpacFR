@@ -2,15 +2,15 @@
 import { Machine__get_BeeperTrace, Machine__CycleCount, Machine__get_Memory, Machine__get_Video, Machine__SetKey_289F56A, Machine__DrainEffects, Machine__RemoveCoHook_Z524259A4, Machine__AddCoHook_6363443A, Machine__get_Regs, RegisterFile__Pc, Machine__LoadState_5EF83E14, Machine_$ctor } from "../Jetpac2.Core/Machine.js";
 import { EnsureInstalled } from "../Jetpac2.Core/Z80Table.js";
 import { Z80_assemble, Z80_runFrame, Z80_ExecutionIndex__Attach_3EE36980, Z80_makeIndexAt } from "../Jetpac2.Core/Z80Asm.js";
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { VideoScreen__BlitTo } from "../Jetpac2.Core/Screen.js";
-import { toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { clear } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { clear } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 import { ToSamples } from "../Jetpac2.Core/Beeper.js";
-import { op_Subtraction, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { max, min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { ofSeq } from "../fable_modules/fable-library-js.5.13.0/List.js";
+import { op_Subtraction, toInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { max, min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { ofSeq } from "../fable_modules/fable-library-js.5.17.0/List.js";
 
 /**
  * The CE execution engine (Phase 5): drives a port Machine with a CE

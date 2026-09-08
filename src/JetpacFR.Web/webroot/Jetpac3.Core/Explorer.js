@@ -1,15 +1,15 @@
 
-import { Record, Union } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { option_type, list_type, record_type, bool_type, int32_type, int64_type, union_type, string_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { toFail, substring, startsWith, split, printf, toText, join, isNullOrWhiteSpace } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { Exception } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { Operators_IsNull } from "../fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
-import { tail, head, isEmpty, choose, tryPick, sortBy, map, ofArray, singleton, append, empty } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { defaultArg } from "../fable_modules/fable-library-js.5.13.0/Option.js";
-import { parse } from "../fable_modules/fable-library-js.5.13.0/Int32.js";
-import { parse as parse_1 } from "../fable_modules/fable-library-js.5.13.0/Long.js";
-import { parse as parse_2 } from "../fable_modules/fable-library-js.5.13.0/Boolean.js";
+import { Record, Union } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { option_type, list_type, record_type, bool_type, int32_type, int64_type, union_type, string_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { toFail, substring, startsWith, split, printf, toText, join, isNullOrWhiteSpace } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { Exception } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { Operators_IsNull } from "../fable_modules/fable-library-js.5.17.0/FSharp.Core.js";
+import { tail, head, isEmpty, choose, tryPick, sortBy, map, ofArray, singleton, append, empty } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { defaultArg } from "../fable_modules/fable-library-js.5.17.0/Option.js";
+import { parse } from "../fable_modules/fable-library-js.5.17.0/Int32.js";
+import { parse as parse_1 } from "../fable_modules/fable-library-js.5.17.0/Long.js";
+import { parse as parse_2 } from "../fable_modules/fable-library-js.5.17.0/Boolean.js";
 
 /**
  * Stable identifier for a checkpoint in the explorer graph.

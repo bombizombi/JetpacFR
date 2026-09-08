@@ -1,7 +1,7 @@
 
-import { item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { item, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 import { Machine_set_GeneratedStep_5007B66A, Machine__get_Iff2, Alu_iff2FlagsFor, RegisterFile__R, Alu_shiftArithmetic8, Alu_daa, Alu_adc16, Machine__set_IrqMode_Z524259A4, RegisterFile__SetI_Z524259A4, RegisterFile__SetSp_Z524259A4, Machine__Halt, Flags_Overflow, Flags_Flag5, Flags, Flags_Flag3, Flags_Zero, Flags_Sign, Alu_sbc16, Alu_fastRotate8, Alu_rotate8, RegisterFile__Ix, Flags__get_sign, Alu_rotateCircular8, Alu_shiftLogical8, Alu_cpl, Alu_parityFlagsFor, Flags_Carry, Flags_op_BitwiseAnd_603E7D40, Flags_op_BitwiseOr_603E7D40, Flags__get_parity, RegisterFile__Ex_Z3F9DF200, Alu_Direction, Alu_fastRotateCircular8, Machine__In_Z524259A4, Alu_sub8, RegisterFile__Sp, Alu_add16, RegisterFile__Exx, Alu_and8, Alu_bit, Machine__Out_Z37302880, Alu_add8, Alu_scf, Alu_ccf, Alu_cmp8, Alu_dec8, Alu_inc8, RegisterFile__Iy, Flags__get_zero, Alu_or8, RegisterFile__Set_ZC22B834, Machine__Pop16, Flags__get_carry, Machine__Flags, RegisterFile__Pc, Machine__Push16_Z524259A4, RegisterFile__Wz, R16, RegisterFile__Get_Z61FD1070, RegisterFile__SetWz_Z524259A4, Machine__Branch_Z524259A4, Machine__PassTime_Z524259A4, Machine__Write_Z37302880, Machine__Read_Z524259A4, Machine__ReadImm16, RegisterFile__SetPc_Z524259A4, Machine__ReadImm, Machine__SetFlags_2901ED1A, RegisterFile__Set_33BF5693, Machine__get_Regs, R8, RegisterFile__Get_Z600F6D11, Alu_xor8, Machine__set_Iff2_Z1FBCCD16, Machine__set_Iff1_Z1FBCCD16, Machine__Fetch, Machine__get_Memory } from "./Machine.js";
-import { printf, toFail } from "../fable_modules/fable-library-js.5.13.0/String.js";
+import { printf, toFail } from "../fable_modules/fable-library-js.5.17.0/String.js";
 
 export const page00 = initialize(256, (i) => ((i === 0) ? ((m) => {
     if (item(0, Machine__get_Memory(m)) !== 243) {

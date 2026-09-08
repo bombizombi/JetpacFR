@@ -1,13 +1,13 @@
 
-import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, option_type, record_type, int32_type, lambda_type, unit_type, array_type, uint8_type, string_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, option_type, record_type, int32_type, lambda_type, unit_type, array_type, uint8_type, string_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Machine__set_FrameEnd_Z524259C1, Machine_get_GeneratedStep, Machine__get_Memory, Machine__AddMemoryResetHandler_3A5B6456, Machine__AddMemoryWriteHandler_Z3CB4FF01, Machine__ExecuteOne_5007B66A, Machine__Step, Machine__CycleCount, Machine__get_FrameEnd, Machine__get_Regs, RegisterFile__Pc, Machine_$reflection } from "./Machine.js";
-import { empty, append, singleton } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { op_Addition, toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { collect, toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { disposeSafe, getEnumerator, Exception } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { getSubArray, initialize, fill, copyTo, item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { printf, toFail } from "../fable_modules/fable-library-js.5.13.0/String.js";
+import { empty, append, singleton } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { op_Addition, toInt64_unchecked, compare } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { collect, toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { disposeSafe, getEnumerator, Exception } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { getSubArray, initialize, fill, copyTo, item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { printf, toFail } from "../fable_modules/fable-library-js.5.17.0/String.js";
 import { main } from "./Z80Table.js";
 
 /**
@@ -96,6 +96,15 @@ export function Z80Builder__Zero(_) {
 
 export function Z80Builder__ReturnFrom_34270A2A(_, xs) {
     return xs;
+}
+
+/**
+ * Plain let bindings inside the CE - generated programs declare their
+ * label cells this way (`let screenClear = Z80.label ()`) so an emitted
+ * body is self-contained without touching the enclosing module.
+ */
+export function Z80Builder__Let_Z4EE50B04(_, x, f) {
+    return f(x);
 }
 
 /**

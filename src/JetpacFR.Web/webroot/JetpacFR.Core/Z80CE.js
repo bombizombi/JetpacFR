@@ -1,21 +1,28 @@
 
 import { Machine__Step, Machine__CycleCount, Machine__get_FrameEnd, Machine__get_Regs, RegisterFile__Pc } from "../Jetpac2.Core/Machine.js";
-import { compare } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
+import { compare } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
 import { Z80Op } from "../Jetpac2.Core/Z80Asm.js";
-import { empty, cons, reverse, head, tail, isEmpty } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { map, initialize, item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { tryFind, map as map_1, filter, append, sort, empty, cons, reverse, head, tail, isEmpty } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { map as map_2, initialize, item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 import { rows as rows_1 } from "../Jetpac2.Core/Z80Decode.js";
-import { max, min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
+import { max, min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
 import { disasmMemory } from "./Disasm.js";
-import { tryGetValue, addToSet } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
-import { defaultOf, disposeSafe, comparePrimitives, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { sort } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { join, printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { StringBuilder__Append_Z721C83C5, StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.13.0/System.Text.js";
-import { toString, FSharpRef } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { value as value_6 } from "../fable_modules/fable-library-js.5.13.0/Option.js";
+import { FSharpSet__Contains, ofSeq } from "../fable_modules/fable-library-js.5.17.0/Set.js";
+import { defaultOf, disposeSafe, numberHash, getEnumerator, comparePrimitives } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { delay, toList, map } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { isDigit, isLetterOrDigit } from "../fable_modules/fable-library-js.5.17.0/Char.js";
+import { join, format, printf, toText } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { tryGetValue, addToSet } from "../fable_modules/fable-library-js.5.17.0/MapUtil.js";
+import { List_distinct } from "../fable_modules/fable-library-js.5.17.0/Seq2.js";
+import { StringBuilder__Append_Z721C83C5, StringBuilder__AppendLine_Z721C83C5, StringBuilder_$ctor } from "../fable_modules/fable-library-js.5.17.0/System.Text.js";
+import { toString, FSharpRef } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { value as value_7 } from "../fable_modules/fable-library-js.5.17.0/Option.js";
 
-function rawOp(bytes) {
+/**
+ * A raw byte block op (public: the game-project tooling reuses it when
+ * checking the parity of emitted per-block programs).
+ */
+export function rawOp(bytes) {
     return new Z80Op("raw", bytes, (m) => {
         const start = RegisterFile__Pc(Machine__get_Regs(m)) | 0;
         const limit = ((start + bytes.length) & 65535) | 0;
@@ -119,13 +126,50 @@ export function toOps(image, start, count) {
     return walk(start, empty());
 }
 
+const fsharpKeywords = ofSeq(["abstract", "and", "as", "assert", "base", "begin", "class", "const", "default", "delegate", "do", "done", "downcast", "downto", "elif", "else", "end", "enum", "exception", "extern", "false", "finally", "fixed", "for", "fun", "function", "global", "if", "in", "inherit", "inline", "interface", "internal", "lazy", "let", "match", "member", "module", "mutable", "namespace", "new", "not", "null", "of", "open", "or", "override", "private", "public", "rec", "return", "sig", "static", "struct", "then", "to", "true", "try", "type", "upcast", "use", "val", "void", "when", "while", "with", "yield"], {
+    Compare: (x, y) => (comparePrimitives(x, y) | 0),
+});
+
+function sanitizeLabel(used, addr, raw) {
+    const cleaned = Array.from(map((ch) => {
+        if (isLetterOrDigit(ch) ? true : (ch === "_")) {
+            return ch;
+        }
+        else {
+            return "_";
+        }
+    }, raw.split(""))).join('');
+    const baseName = (cleaned.length === 0) ? toText(printf("sym_%04X"))(addr) : (isDigit(cleaned[0]) ? ("_" + cleaned) : cleaned);
+    const name = FSharpSet__Contains(fsharpKeywords, baseName.toLowerCase()) ? ("_" + baseName) : baseName;
+    if (addToSet(name, used)) {
+        return name;
+    }
+    else {
+        let candidate = toText(printf("%s_%04X"))(name)(addr);
+        let n = 1;
+        while (!addToSet(candidate, used)) {
+            let arg_5;
+            candidate = ((arg_5 = (n | 0), toText(printf("%s_%04X_%d"))(name)(addr)(arg_5)));
+            n = ((n + 1) | 0);
+        }
+        return candidate;
+    }
+}
+
 /**
  * Emit the inner lines (no enclosing braces) of the F# `z80 { ... }` body
  * for the binary: named ops, symbolic labels for in-range jump targets,
  * raw blocks for the rest. The composable form used by the project
  * generator to mix code segments with marked data blocks.
+ * 
+ * `symbols` names function entry points (from control.json): each address
+ * inside the span becomes a named label site (`Z80.at screenClear`) and
+ * jump targets there reuse the name; other targets stay `lblN`. All label
+ * cells are declared by emitted `let` bindings at the top of the body, so
+ * the body compiles standalone inside the CE.
  */
-export function toBody(image, start, count) {
+export function toBody(image, start, count, symbols) {
+    let list_4;
     const limit = min(start + count, image.length) | 0;
     const sites = [];
     const targets = new Set([]);
@@ -161,47 +205,72 @@ export function toBody(image, start, count) {
         }
     };
     collect(start);
+    const used = new Set([]);
     const labels = new Map([]);
-    let n = 0;
-    const enumerator = getEnumerator(sort(targets, {
-        Compare: (x, y) => (comparePrimitives(x, y) | 0),
+    const enumerator = getEnumerator(sort(List_distinct((list_4 = toList(targets), append(filter((a_1) => {
+        if (a_1 >= start) {
+            return a_1 < limit;
+        }
+        else {
+            return false;
+        }
+    }, map_1((tuple_1) => (tuple_1[0] | 0), symbols)), list_4)), {
+        Equals: (x, y) => (x === y),
+        GetHashCode: (x) => (numberHash(x) | 0),
+    }), {
+        Compare: (x_1, y_1) => (comparePrimitives(x_1, y_1) | 0),
     }));
     try {
         while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
-            let arg;
-            const t_1 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]() | 0;
-            labels.set(t_1, (arg = (n | 0), toText(printf("lbl%d"))(arg)));
-            n = ((n + 1) | 0);
+            const t_2 = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]() | 0;
+            let name;
+            let matchValue_1;
+            const option_1 = tryFind((tupledArg) => (tupledArg[0] === t_2), symbols);
+            matchValue_1 = ((option_1 != null) ? option_1[1] : undefined);
+            if (matchValue_1 == null) {
+                let n;
+                const arg = labels.size | 0;
+                n = toText(printf("lbl%d"))(arg);
+                name = (addToSet(n, used) ? n : ((n + "_") + format('{0:' + "X4" + '}', t_2)));
+            }
+            else {
+                name = sanitizeLabel(used, t_2, matchValue_1);
+            }
+            labels.set(t_2, name);
         }
     }
     finally {
         disposeSafe(enumerator);
     }
+    const decls = join("\n", toList(delay(() => map((kv) => toText(printf("  let %s = Z80.label ()"))(kv[1]), labels))));
     const sb = StringBuilder_$ctor();
+    if (decls.length > 0) {
+        StringBuilder__AppendLine_Z721C83C5(sb, decls);
+    }
     let idx = 0;
     let pc_1 = start;
     while (pc_1 < limit) {
-        let arg_2;
+        let arg_3;
         if ((idx < sites.length) && (pc_1 === item(idx, sites)[0])) {
             const patternInput_1 = item(idx, sites);
             const row_1 = patternInput_1[1];
-            let matchValue_1;
+            let matchValue_2;
             let outArg = defaultOf();
-            matchValue_1 = [tryGetValue(labels, patternInput_1[0], new FSharpRef(() => outArg, (v) => {
+            matchValue_2 = [tryGetValue(labels, patternInput_1[0], new FSharpRef(() => outArg, (v) => {
                 outArg = v;
             })), outArg];
-            if (matchValue_1[0]) {
-                StringBuilder__AppendLine_Z721C83C5(sb, toText(printf("  Z80.at %s"))(matchValue_1[1]));
+            if (matchValue_2[0]) {
+                StringBuilder__AppendLine_Z721C83C5(sb, toText(printf("  Z80.at %s"))(matchValue_2[1]));
             }
             if (row_1.LabelName != null) {
-                const t_2 = targetOf(patternInput_1[2], pc_1) | 0;
-                let matchValue_2;
+                const t_3 = targetOf(patternInput_1[2], pc_1) | 0;
+                let matchValue_3;
                 let outArg_1 = defaultOf();
-                matchValue_2 = [tryGetValue(labels, t_2, new FSharpRef(() => outArg_1, (v_1) => {
+                matchValue_3 = [tryGetValue(labels, t_3, new FSharpRef(() => outArg_1, (v_1) => {
                     outArg_1 = v_1;
                 })), outArg_1];
-                if (matchValue_2[0]) {
-                    StringBuilder__AppendLine_Z721C83C5(sb, (arg_2 = value_6(row_1.LabelName), toText(printf("  Z80.%s %s"))(arg_2)(matchValue_2[1])));
+                if (matchValue_3[0]) {
+                    StringBuilder__AppendLine_Z721C83C5(sb, (arg_3 = value_7(row_1.LabelName), toText(printf("  Z80.%s %s"))(arg_3)(matchValue_3[1])));
                 }
                 else {
                     StringBuilder__AppendLine_Z721C83C5(sb, "  " + row_1.Format(image, pc_1));
@@ -215,7 +284,7 @@ export function toBody(image, start, count) {
         }
         else {
             const rawEnd = min((idx < sites.length) ? item(idx, sites)[0] : limit, limit) | 0;
-            const hex = join("; ", map((b) => toText(printf("0x%02Xuy"))(b), initialize(rawEnd - pc_1, (i) => item(pc_1 + i, image), Uint8Array)));
+            const hex = join("; ", map_2((b) => toText(printf("0x%02Xuy"))(b), initialize(rawEnd - pc_1, (i) => item(pc_1 + i, image), Uint8Array)));
             StringBuilder__AppendLine_Z721C83C5(sb, toText(printf("  yield! [| %s |]"))(hex));
             pc_1 = (rawEnd | 0);
         }
@@ -226,10 +295,10 @@ export function toBody(image, start, count) {
 /**
  * Wrap a body in the `z80 { ... }` block (the historical toSource shape).
  */
-export function toSource(image, start, count) {
+export function toSource(image, start, count, symbols) {
     const sb = StringBuilder_$ctor();
     StringBuilder__AppendLine_Z721C83C5(sb, "z80 {");
-    StringBuilder__Append_Z721C83C5(sb, toBody(image, start, count));
+    StringBuilder__Append_Z721C83C5(sb, toBody(image, start, count, symbols));
     StringBuilder__AppendLine_Z721C83C5(sb, "  }");
     return toString(sb);
 }

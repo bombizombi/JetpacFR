@@ -1,7 +1,7 @@
 
-import { Union } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, union_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { Union } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, union_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { item, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 /**
  * 8-bit register selector.
