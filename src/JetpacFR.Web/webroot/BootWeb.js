@@ -1,13 +1,13 @@
 
-import { Exception, disposeSafe, getEnumerator, createAtom } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { printf, toFail } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { Exception, disposeSafe, getEnumerator, createAtom } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { printf, toFail } from "./fable_modules/fable-library-js.5.17.0/String.js";
 import { TapeModule_stripFrame, TapeModule_headerInfo, TapeModule_parseTzx } from "./Jetpac.Core/Tape.js";
-import { item as item_1, length, isEmpty, ofSeq } from "./fable_modules/fable-library-js.5.13.0/List.js";
+import { item as item_1, length, isEmpty, ofSeq } from "./fable_modules/fable-library-js.5.17.0/List.js";
 import { Spectrum48__get_DebugZ80, Spectrum48__get_Memory, Spectrum48__get_FrameCount, Spectrum48__get_ScreenBuffer, Spectrum48__RunFrame, Spectrum48__InsertTape_Z3F6BC7B1, Spectrum48__LoadRom_Z3F6BC7B1, Spectrum48_$ctor } from "./Jetpac.Core/Spectrum.js";
-import { setItem, item, fill } from "./fable_modules/fable-library-js.5.13.0/Array.js";
+import { setItem, item, fill } from "./fable_modules/fable-library-js.5.17.0/Array.js";
 import { RegisterFile__Pc } from "./Jetpac.Core/Registers.js";
 import { Z80__CycleCount, Z80__ExecuteOne, Z80__get_Regs } from "./Jetpac.Core/Z80.js";
-import { fromUInt64, toInt64_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
+import { fromUInt64, toInt64_unchecked } from "./fable_modules/fable-library-js.5.17.0/BigInt.js";
 
 export let AssetProvider = createAtom((key) => toFail(printf("Boot.AssetProvider not set for %s"))(key));
 

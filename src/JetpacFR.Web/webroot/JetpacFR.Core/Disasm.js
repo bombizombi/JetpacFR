@@ -1,9 +1,9 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { record_type, int32_type, string_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { max, min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { printf, toText, join, substring } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { item, map } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { record_type, int32_type, string_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { max, min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { printf, toText, join, substring } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { item, map } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 export class Insn extends Record {
     constructor(Text$, Length) {
@@ -274,7 +274,7 @@ function renderBase(get$, pc, ix) {
     const op = ~~at(0) | 0;
     const rp = ((op >> 4) & 3) | 0;
     const cc = ((op >> 3) & 7) | 0;
-    const target = () => ((((pc + 2) + s8(at(1))) & 65535) | 0);
+    const target = () => (((((pc + 2) + s8(at(1))) & 65535) & 65535) | 0);
     let text;
     let matchResult;
     switch (op) {

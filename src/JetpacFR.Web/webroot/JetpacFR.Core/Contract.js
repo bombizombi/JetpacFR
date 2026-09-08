@@ -1,14 +1,14 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { bool_type, int64_type, tuple_type, list_type, record_type, string_type, int32_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { bool_type, int64_type, tuple_type, list_type, record_type, string_type, int32_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { RegSnapshot_$reflection } from "../TraceTypesWeb.js";
-import { map as map_1, head, isEmpty, empty as empty_1, ofArray } from "../fable_modules/fable-library-js.5.13.0/List.js";
+import { map as map_1, head, isEmpty, empty as empty_1, ofArray } from "../fable_modules/fable-library-js.5.17.0/List.js";
 import { disasmMemory } from "./Disasm.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { fromInt32, op_Division, toInt64_unchecked, toInt32_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { map, empty, singleton, collect, delay, toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { List_distinct, distinct } from "../fable_modules/fable-library-js.5.13.0/Seq2.js";
-import { numberHash, stringHash } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { fromInt32, op_Division, toInt64_unchecked, toInt32_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { map, empty, singleton, collect, delay, toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { List_distinct, distinct } from "../fable_modules/fable-library-js.5.17.0/Seq2.js";
+import { numberHash, stringHash } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 
 export class ContractInsn extends Record {
     constructor(Address, Text$, Length, Executions, AvgCycles) {

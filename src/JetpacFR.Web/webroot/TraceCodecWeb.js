@@ -1,7 +1,7 @@
 
-import { fill, item, setItem } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { Exception, copyToArray } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { printf, toFail } from "./fable_modules/fable-library-js.5.13.0/String.js";
+import { fill, item, setItem } from "./fable_modules/fable-library-js.5.17.0/Array.js";
+import { Exception, copyToArray } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { printf, toFail } from "./fable_modules/fable-library-js.5.17.0/String.js";
 import { Trace, PortEvent, MemWriteEvent, RegSnapshot, TraceEntry } from "./TraceTypesWeb.js";
 
 const magic = new Uint8Array(["J".charCodeAt(0) & 0xFF, "P".charCodeAt(0) & 0xFF, "T".charCodeAt(0) & 0xFF, "R".charCodeAt(0) & 0xFF]);

@@ -1,6 +1,6 @@
 
-import { item, fill, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { item, fill, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 
 /**
  * Port of specbolt's keyboard matrix (peripherals/Keyboard.cpp). Only the

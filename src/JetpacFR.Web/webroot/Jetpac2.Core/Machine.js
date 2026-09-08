@@ -1,18 +1,18 @@
 
-import { FSharpRef, Union, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { uint8_type, string_type, record_type, bool_type, int32_type, int64_type, union_type, class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { clear, curry2, disposeSafe, getEnumerator, Exception, Lazy, defaultOf, equals } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { copy, copyTo, item, initialize } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { FSharpRef, Union, Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { uint8_type, string_type, record_type, bool_type, int32_type, int64_type, union_type, class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { clear, curry2, disposeSafe, getEnumerator, Exception, Lazy, defaultOf, equals } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { copy, copyTo, item, initialize } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 import { Keyboard__SetKey_289F56A, Keyboard__In_Z524259A4, Keyboard_$ctor } from "./Keyboard.js";
 import { SchedulerTask_$ctor_43314A15, Scheduler__Reset_Z524259C1, Scheduler__Tick_Z524259C1, Scheduler__get_Cycles, Scheduler__Schedule_79A1460, Scheduler_$ctor } from "./Timing.js";
 import { VideoConstants_CyclesPerScanLine, VideoScreen__NextScanLine, VideoScreen__SetState_289F56A, VideoScreen__SetBorder_Z524259A4, VideoScreen_$ctor_Z3F6BC7B1 } from "./Screen.js";
-import { op_Addition, op_Multiply, equals as equals_1, op_Modulus, toInt32_unchecked, op_Division, op_Subtraction, fromInt32, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { getItemFromDict, tryGetValue } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
-import { toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { printf, toText, replace, substring } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { parse } from "../fable_modules/fable-library-js.5.13.0/Int32.js";
-import { parse as parse_1 } from "../fable_modules/fable-library-js.5.13.0/Long.js";
+import { op_Addition, op_Multiply, equals as equals_1, op_Modulus, toInt32_unchecked, op_Division, op_Subtraction, fromInt32, toInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { getItemFromDict, tryGetValue } from "../fable_modules/fable-library-js.5.17.0/MapUtil.js";
+import { toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { printf, toText, replace, substring } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { parse } from "../fable_modules/fable-library-js.5.17.0/Int32.js";
+import { parse as parse_1 } from "../fable_modules/fable-library-js.5.17.0/Long.js";
 
 /**
  * Port of JetpacFSharp (Jetpac.Core) Flags — specbolt's flag register.
@@ -197,7 +197,7 @@ export function Alu_adc16(lhs, rhs, carryIn) {
     const intermediate = (((lhs & 65535) + (rhs & 65535)) + (carryIn ? 1 : 0)) | 0;
     const carry = (intermediate > 65535) ? Flags_Carry() : (new Flags(0));
     const result = (intermediate & 65535) | 0;
-    const halfCarry = (((lhs & 4095) + (rhs & 4095)) > 4095) ? Flags_HalfCarry() : (new Flags(0));
+    const halfCarry = ((((lhs & 4095) + (rhs & 4095)) + (carryIn ? 1 : 0)) > 4095) ? Flags_HalfCarry() : (new Flags(0));
     const flags35 = Flags_op_BitwiseAnd_603E7D40(Flags_$ctor_Z524259A4((result >> 8) & 255), Flags_op_BitwiseOr_603E7D40(Flags_Flag5(), Flags_Flag3()));
     const negative = ((result & 32768) !== 0) ? Flags_Sign() : (new Flags(0));
     const zero = (result === 0) ? Flags_Zero() : (new Flags(0));
@@ -720,9 +720,9 @@ export class Machine {
         this.irqMode_ = 0;
         this.overrideHook = ((_arg_1) => undefined);
         this.frameEnd = (0n);
-        this["videoTask@389"] = (new Lazy(() => Machine__videoTask(this)));
-        this["videoTask@389-1"] = this["videoTask@389"].Value;
-        Scheduler__Schedule_79A1460(this.scheduler, this["videoTask@389-1"], toInt64_unchecked(fromInt32(0)));
+        this["videoTask@535"] = (new Lazy(() => Machine__videoTask(this)));
+        this["videoTask@535-1"] = this["videoTask@535"].Value;
+        Scheduler__Schedule_79A1460(this.scheduler, this["videoTask@535-1"], toInt64_unchecked(fromInt32(0)));
         void (this.outHandlers.push((port) => ((value) => {
             if ((port & 255) === 254) {
                 VideoScreen__SetBorder_Z524259A4(this.video, value & 7);
@@ -736,7 +736,7 @@ export class Machine {
         })));
         void (this.inHandlers.push((port_1) => Keyboard__In_Z524259A4(this.keyboard, port_1)));
         void (this.inHandlers.push((port_2) => (((port_2 & 1) !== 0) ? undefined : (191 | (this.earLevel ? 64 : 0)))));
-        this["init@359"] = 1;
+        this["init@500"] = 1;
     }
 }
 
@@ -771,7 +771,7 @@ function Machine__RunCoHooks(this$) {
     const hooks = item(RegisterFile__Pc(this$.regs) & 65535, this$.coHooks);
     const count = hooks.length | 0;
     let i = 0;
-    while (i < count) {
+    while ((i < count) && (i < hooks.length)) {
         const enumerator = getEnumerator(item(i, hooks)[1](this$));
         try {
             while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
@@ -1086,6 +1086,7 @@ function Machine__HandleInterrupt(this$) {
         RegisterFile__SetSp_Z524259A4(this$.regs, (RegisterFile__Sp(this$.regs) - 2) & 65535);
         Machine__storeRamByte(this$, RegisterFile__Sp(this$.regs), RegisterFile__Pc(this$.regs) & 255);
         Machine__storeRamByte(this$, (RegisterFile__Sp(this$.regs) + 1) & 65535, (RegisterFile__Pc(this$.regs) >> 8) & 255);
+        Machine__PassTime_Z524259A4(this$, 6);
         const matchValue = this$.irqMode_ | 0;
         switch (matchValue) {
             case 0:
@@ -1095,6 +1096,7 @@ function Machine__HandleInterrupt(this$) {
             }
             case 2: {
                 const addr = (255 | ((RegisterFile__I(this$.regs) << 8) & 65280)) | 0;
+                Machine__PassTime_Z524259A4(this$, 6);
                 RegisterFile__SetPc_Z524259A4(this$.regs, (~~item(addr, this$.memory) | (~~item((addr + 1) & 65535, this$.memory) << 8)) & 65535);
                 break;
             }
@@ -1157,7 +1159,7 @@ export function Machine_set_GeneratedStep_5007B66A(v) {
  */
 export function Machine__ResetClock_Z373037E0(this$, cycles, videoNextTime) {
     Scheduler__Reset_Z524259C1(this$.scheduler, cycles);
-    Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@389-1"], toInt64_unchecked(op_Subtraction(videoNextTime, cycles)));
+    Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@535-1"], toInt64_unchecked(op_Subtraction(videoNextTime, cycles)));
 }
 
 export function Machine__LoadState_5EF83E14(this$, bytes, regsText) {
@@ -1236,6 +1238,7 @@ export function Machine__LoadState_5EF83E14(this$, bytes, regsText) {
     this$.iff1_ = boolv("iff1", false);
     this$.iff2_ = boolv("iff2", false);
     this$.irqMode_ = (hex("im", 0) | 0);
+    this$.halted_ = boolv("halted", false);
     this$.irqPending_ = boolv("irq", false);
     this$.border = (hex("border", 0) | 0);
     VideoScreen__SetBorder_Z524259A4(this$.video, this$.border);
@@ -1295,7 +1298,7 @@ export function Machine__videoTask(this$) {
         if (VideoScreen__NextScanLine(this$.video)) {
             this$.irqPending_ = true;
         }
-        Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@389"].Value, toInt64_unchecked(fromInt32(VideoConstants_CyclesPerScanLine)));
+        Scheduler__Schedule_79A1460(this$.scheduler, this$["videoTask@535"].Value, toInt64_unchecked(fromInt32(VideoConstants_CyclesPerScanLine)));
     });
 }
 

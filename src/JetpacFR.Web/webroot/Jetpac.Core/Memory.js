@@ -1,8 +1,8 @@
 
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, record_type, uint8_type, int32_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { copyTo, setItem, item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, record_type, uint8_type, int32_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { copyTo, setItem, item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { disposeSafe, getEnumerator } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 
 export class MemoryWrite extends Record {
     constructor(Address, OldValue, NewValue) {

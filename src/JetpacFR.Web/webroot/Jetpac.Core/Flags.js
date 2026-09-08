@@ -1,7 +1,7 @@
 
-import { printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { printf, toText } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 
 /**
  * The Z80 flag register, ported from specbolt (z80/common/include/z80/common/Flags.hpp).

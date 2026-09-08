@@ -1,16 +1,16 @@
 
-import { Record, Union } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { tuple_type, array_type, option_type, string_type, record_type, bool_type, int32_type, union_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { min, max } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { reverse, cons, empty, map as map_2, filter, choose, toArray as toArray_1, tryFind } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { find, contains, item, map as map_1, setItem, fill, max as max_1 } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { safeHash, equals, disposeSafe, getEnumerator, comparePrimitives } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { Record, Union } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { tuple_type, array_type, option_type, string_type, record_type, bool_type, int32_type, union_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { min, max } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { reverse, cons, empty, map as map_2, filter, choose, toArray as toArray_1, tryFind } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { find, contains, item, map as map_1, setItem, fill, max as max_1 } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { safeHash, equals, disposeSafe, getEnumerator, comparePrimitives } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 import { CommentKind } from "../ControlTypesWeb.js";
-import { map, delay, toArray } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { rangeDouble } from "../fable_modules/fable-library-js.5.13.0/Range.js";
-import { Array_distinct } from "../fable_modules/fable-library-js.5.13.0/Seq2.js";
+import { map, delay, toArray } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { rangeDouble } from "../fable_modules/fable-library-js.5.17.0/Range.js";
+import { Array_distinct } from "../fable_modules/fable-library-js.5.17.0/Seq2.js";
 import { disasmMemory } from "./Disasm.js";
-import { printf, toText, join } from "../fable_modules/fable-library-js.5.13.0/String.js";
+import { printf, toText, join } from "../fable_modules/fable-library-js.5.17.0/String.js";
 
 /**
  * Semantic kind of one pixel row (Mixed = several kinds sampled).
@@ -157,11 +157,13 @@ export function render(blocks, comments, instrStarts, mem, counts, selfMod, view
     try {
         while (enumerator["System.Collections.IEnumerator.MoveNext"]()) {
             const m = enumerator["System.Collections.Generic.IEnumerator`1.get_Current"]();
-            const hi = (equals(m.Kind, CommentKind.Line) ? (m.Addr + 1) : max(m.Addr, m.EndExcl)) | 0;
-            const lo = min(65535, m.Addr) | 0;
-            const hi_1 = min(65536, hi) | 0;
-            for (let a_1 = lo; a_1 <= (hi_1 - 1); a_1++) {
-                setItem(covered, a_1, true);
+            if (!equals(m.Kind, CommentKind.Frames)) {
+                const hi = (equals(m.Kind, CommentKind.Line) ? (m.Addr + 1) : max(m.Addr, m.EndExcl)) | 0;
+                const lo = min(65535, m.Addr) | 0;
+                const hi_1 = min(65536, hi) | 0;
+                for (let a_1 = lo; a_1 <= (hi_1 - 1); a_1++) {
+                    setItem(covered, a_1, true);
+                }
             }
         }
     }

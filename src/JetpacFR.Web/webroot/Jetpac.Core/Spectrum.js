@@ -1,23 +1,23 @@
 
-import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, record_type, list_type, uint8_type, int32_type, int64_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, record_type, list_type, uint8_type, int32_type, int64_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { Memory__SetPageTable_4F10E657, Memory__SetRomFlags_5907F3E1, Memory__LoadBytes_6BA4C033, Memory__Read_Z524259A4, Memory__get_AddressSpace, Memory__AddWriteHandler_48E2F4A1, Memory_$ctor_Z524259A4, MemoryWrite_$reflection } from "./Memory.js";
-import { clear, Lazy, defaultOf } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { clear, Lazy, defaultOf } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 import { VideoConstants_CyclesPerScanLine, Video__NextScanLine, Video__SetState_289F56A, Video__BlitTo, Video__SetBorder_Z524259A4, Video_$ctor_44195B56 } from "./Video.js";
 import { Keyboard__SetKey_289F56A, Keyboard__In_Z524259A4, Keyboard_$ctor } from "./Keyboard.js";
 import { SchedulerTask_$ctor_5D8E2020, Scheduler__Reset_Z6EF827B6, Scheduler__Schedule_Z9FDE619, Scheduler_$ctor } from "./Scheduler.js";
-import { Z80__Interrupt, Z80__set_Halted_Z1FBCCD16, Z80__set_IrqMode_Z524259A4, Z80__set_Iff2_Z1FBCCD16, Z80__set_Iff1_Z1FBCCD16, Z80__ResetInterruptState, Z80__get_Halted, Z80__get_IrqMode, Z80__get_Iff2, Z80__get_Iff1, Z80__get_Regs, Z80__ExecuteOne, Z80__AddInHandler_16BB63F5, Z80__CycleCount, Z80__AddOutHandler_Z5F57DC44, Z80_$ctor_Z31E0EE2A } from "./Z80.js";
+import { Z80__set_Halted_Z1FBCCD16, Z80__Interrupt, Z80__set_IrqMode_Z524259A4, Z80__set_Iff2_Z1FBCCD16, Z80__set_Iff1_Z1FBCCD16, Z80__ResetInterruptState, Z80__get_IrqPending, Z80__get_Halted, Z80__get_IrqMode, Z80__get_Iff2, Z80__get_Iff1, Z80__get_Regs, Z80__ExecuteOne, Z80__AddInHandler_16BB63F5, Z80__CycleCount, Z80__AddOutHandler_Z5F57DC44, Z80_$ctor_Z31E0EE2A } from "./Z80.js";
 import { Tape__PassTime_Z524259A4, Tape__NextTransition, Tape__Play, Tape__InsertTzx_Z3F6BC7B1, Tape__SetLevel_Z1FBCCD16, Tape__Stop, Tape__Playing, Tape__Level, Tape_$ctor } from "./Tape.js";
 import { EnsureInstalled } from "./Z80Ops.js";
-import { fromInt32, compare, equals, op_Modulus, toInt32_unchecked, toUInt64_unchecked, op_Subtraction, op_Division, op_Addition, op_Multiply, fromUInt64, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
+import { fromInt32, compare, equals, op_Modulus, toInt32_unchecked, toUInt64_unchecked, op_Subtraction, op_Division, op_Addition, op_Multiply, fromUInt64, toInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
 import { R8, RegisterFile__Get_2EC184DD, RegisterFile__SetWz_Z524259A4, RegisterFile__SetR_Z524259A4, RegisterFile__SetI_Z524259A4, RegisterFile__SetPc_Z524259A4, RegisterFile__SetSp_Z524259A4, RegisterFile__Set_488BADFE, RegisterFile__Wz, RegisterFile__R, RegisterFile__I, RegisterFile__Sp, RegisterFile__Iy, RegisterFile__Ix, R16, RegisterFile__Get_6F21F62, RegisterFile__Pc } from "./Registers.js";
-import { getItemFromDict, tryGetValue, addToSet } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
-import { toFail, replace, substring, printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { item, copyTo, copy } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { parse } from "../fable_modules/fable-library-js.5.13.0/Int32.js";
-import { parse as parse_1 } from "../fable_modules/fable-library-js.5.13.0/Long.js";
+import { getItemFromDict, tryGetValue, addToSet } from "../fable_modules/fable-library-js.5.17.0/MapUtil.js";
+import { toFail, replace, substring, printf, toText } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { item, copyTo, copy } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { parse } from "../fable_modules/fable-library-js.5.17.0/Int32.js";
+import { parse as parse_1 } from "../fable_modules/fable-library-js.5.17.0/Long.js";
 
 /**
  * Port of specbolt's Spectrum 48K wiring (spectrum/include/spectrum/Spectrum.hpp,
@@ -65,9 +65,9 @@ export class Spectrum48 {
         this.lastBRead = 0;
         this.readsInARow = 0;
         this["videoTask@41"] = (new Lazy(() => Spectrum48__videoTask(this)));
-        this["tapeTask@47"] = (new Lazy(() => Spectrum48__tapeTask(this)));
+        this["tapeTask@48"] = (new Lazy(() => Spectrum48__tapeTask(this)));
         this["videoTask@41-1"] = this["videoTask@41"].Value;
-        this["tapeTask@47-1"] = this["tapeTask@47"].Value;
+        this["tapeTask@48-1"] = this["tapeTask@48"].Value;
         this["init@15"] = 1;
         EnsureInstalled();
         Memory__AddWriteHandler_48E2F4A1(this.memory, (event) => {
@@ -218,10 +218,11 @@ export function Spectrum48__SaveState(this$) {
     const arg_16 = Z80__get_Iff2(this$.z80);
     const arg_17 = Z80__get_IrqMode(this$.z80) | 0;
     const arg_18 = Z80__get_Halted(this$.z80);
-    const arg_19 = this$.border | 0;
-    const arg_20 = this$.beeper;
-    const arg_21 = Tape__Level(this$.tape);
-    regsText = toText(printf("af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\n"))(arg)(arg_1)(arg_2)(arg_3)(arg_4)(arg_5)(arg_6)(arg_7)(arg_8)(arg_9)(arg_10)(arg_11)(arg_12)(arg_13)(arg_14)(arg_15)(arg_16)(arg_17)(arg_18)(arg_19)(arg_20)(arg_21)(cycles)(videoNextTime)(nextWrap);
+    const arg_19 = Z80__get_IrqPending(this$.z80);
+    const arg_20 = this$.border | 0;
+    const arg_21 = this$.beeper;
+    const arg_22 = Tape__Level(this$.tape);
+    regsText = toText(printf("af=%X\nbc=%X\nde=%X\nhl=%X\naf2=%X\nbc2=%X\nde2=%X\nhl2=%X\nix=%X\niy=%X\nsp=%X\npc=%X\ni=%X\nr=%X\nwz=%X\niff1=%b\niff2=%b\nim=%d\nhalted=%b\nirq=%b\nborder=%d\nbeeper=%b\ntapeEar=%b\ncycles=%d\nvideoNextTime=%d\nnextWrap=%d\n"))(arg)(arg_1)(arg_2)(arg_3)(arg_4)(arg_5)(arg_6)(arg_7)(arg_8)(arg_9)(arg_10)(arg_11)(arg_12)(arg_13)(arg_14)(arg_15)(arg_16)(arg_17)(arg_18)(arg_19)(arg_20)(arg_21)(arg_22)(cycles)(videoNextTime)(nextWrap);
     return [copy(Memory__get_AddressSpace(this$.memory)), regsText];
 }
 
@@ -299,6 +300,9 @@ export function Spectrum48__LoadState_5EF83E14(this$, bytes, regsText) {
     Z80__set_Iff1_Z1FBCCD16(this$.z80, boolv("iff1", false));
     Z80__set_Iff2_Z1FBCCD16(this$.z80, boolv("iff2", false));
     Z80__set_IrqMode_Z524259A4(this$.z80, hex("im", 0));
+    if (boolv("irq", false)) {
+        Z80__Interrupt(this$.z80);
+    }
     Z80__set_Halted_Z1FBCCD16(this$.z80, boolv("halted", false));
     this$.border = (hex("border", 0) | 0);
     Video__SetBorder_Z524259A4(this$.video, this$.border);
@@ -404,7 +408,7 @@ function Spectrum48__Play(this$) {
     Tape__Play(this$.tape);
     if (Tape__NextTransition(this$.tape) !== 0) {
         this$.tapeLastTime = Z80__CycleCount(this$.z80);
-        Scheduler__Schedule_Z9FDE619(this$.scheduler, this$["tapeTask@47-1"], toUInt64_unchecked(fromInt32(Tape__NextTransition(this$.tape))));
+        Scheduler__Schedule_Z9FDE619(this$.scheduler, this$["tapeTask@48-1"], toUInt64_unchecked(fromInt32(Tape__NextTransition(this$.tape))));
     }
 }
 
@@ -493,7 +497,7 @@ export function Spectrum48__tapeTask(this$) {
         Tape__PassTime_Z524259A4(this$.tape, ~~toInt32_unchecked(toUInt64_unchecked(op_Subtraction(cycle, this$.tapeLastTime))));
         this$.tapeLastTime = cycle;
         if (Tape__NextTransition(this$.tape) !== 0) {
-            Scheduler__Schedule_Z9FDE619(this$.scheduler, this$["tapeTask@47"].Value, toUInt64_unchecked(fromInt32(Tape__NextTransition(this$.tape))));
+            Scheduler__Schedule_Z9FDE619(this$.scheduler, this$["tapeTask@48"].Value, toUInt64_unchecked(fromInt32(Tape__NextTransition(this$.tape))));
         }
     });
 }

@@ -10,6 +10,9 @@
     <Compile Include="TimelineSelector.fs" />
     <Compile Include="FlameGraph.fs" />
     <Compile Include="ControlMap.fs" />
+    <Compile Include="CheatEngineWindow.fs" />
+    <Compile Include="GameOnlyView.fs" />
+    <Compile Include="LauncherView.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
 

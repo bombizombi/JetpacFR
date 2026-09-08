@@ -1,12 +1,12 @@
 
-import { Union, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { class_type, union_type, record_type, int32_type, array_type, uint8_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { forAll2, item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { equals, Exception } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { trimEnd, toText, printf, toFail } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { item as item_1, length, collect, empty, singleton, ofSeq } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { get_UTF8 } from "../fable_modules/fable-library-js.5.13.0/Encoding.js";
-import { min, max } from "../fable_modules/fable-library-js.5.13.0/Double.js";
+import { Union, Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { class_type, union_type, record_type, int32_type, array_type, uint8_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { forAll2, item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { equals, Exception } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { trimEnd, toText, printf, toFail } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { item as item_1, length, collect, empty, singleton, ofSeq } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { get_UTF8 } from "../fable_modules/fable-library-js.5.17.0/Encoding.js";
+import { min, max } from "../fable_modules/fable-library-js.5.17.0/Double.js";
 
 export const TapeModule_PilotCycles = 2168;
 
@@ -447,6 +447,8 @@ function Tape__Next(this$) {
             this$.nextTransition = (this$.bitCycles | 0);
             const matchValue_1 = Tape__CurrentBlock(this$);
             if (matchValue_1 == null) {
+                this$.state = TapeModule_State.Idle;
+                this$.nextTransition = 0;
             }
             else {
                 const block = matchValue_1;

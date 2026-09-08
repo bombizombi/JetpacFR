@@ -1,22 +1,22 @@
 
-import { equals, round, Exception, int32ToString, disposeSafe, getEnumerator, comparePrimitives, defaultOf, createAtom } from "./fable_modules/fable-library-js.5.13.0/Util.js";
-import { Operators_IsNull } from "./fable_modules/fable-library-js.5.13.0/FSharp.Core.js";
-import { tryFind as tryFind_1, max as max_1, fill, initialize, setItem, item as item_1 } from "./fable_modules/fable-library-js.5.13.0/Array.js";
-import { tryFind, isEmpty, truncate, map as map_1, length as length_1, iterate, ofArray, singleton, empty } from "./fable_modules/fable-library-js.5.13.0/List.js";
-import { add, remove, FSharpSet__get_Count, toList as toList_1, FSharpSet__Contains, empty as empty_1 } from "./fable_modules/fable-library-js.5.13.0/Set.js";
-import { TraceSession_$ctor_28C3603C, TraceSession__get_CycleCount, TraceSession__get_Frame, EntryCache_save, EntryCache_tryLoad, TraceSession__get_ReplayEventCount, TraceSession__get_WarmStart, TraceSession__DrainBeeperSamples_Z524259C1, TraceSession__RunFrame, TraceSession__get_Regs, TraceSession__get_Memory, TraceSession__get_ScreenBuffer, TraceSession__get_Recorder, TraceSession__SetKey_289F56A } from "./SessionWeb.js";
+import { equals, round, Exception, int32ToString, clear, disposeSafe, getEnumerator, comparePrimitives, defaultOf, createAtom } from "./fable_modules/fable-library-js.5.17.0/Util.js";
+import { Operators_IsNull } from "./fable_modules/fable-library-js.5.17.0/FSharp.Core.js";
+import { tryFind as tryFind_1, fold as fold_1, max as max_1, map as map_1, fill, initialize, setItem, item as item_1 } from "./fable_modules/fable-library-js.5.17.0/Array.js";
+import { tryFind, isEmpty, truncate, map as map_2, length as length_1, iterate, ofArray, singleton, empty } from "./fable_modules/fable-library-js.5.17.0/List.js";
+import { add, remove, FSharpSet__get_Count, toList as toList_1, FSharpSet__Contains, empty as empty_1 } from "./fable_modules/fable-library-js.5.17.0/Set.js";
+import { TraceSession_$ctor_28C3603C, TraceSession__get_CycleCount, TraceSession__get_Frame, TraceSession__FlushReplayCache, EntryCache_save, EntryCache_tryLoad, TraceSession__get_ReplayEventCount, TraceSession__get_WarmStart, TraceSession__DrainBeeperSamples_Z524259C1, TraceSession__RunFrame, TraceSession__get_Regs, TraceSession__get_Memory, TraceSession__get_ScreenBuffer, TraceSession__get_Recorder, TraceSession__SetKey_289F56A } from "./SessionWeb.js";
 import { TraceRecorder__set_RecordEnabled_Z1FBCCD16, TraceRecorder__get_SelfModCount, TraceRecorder__get_PerPcCount, TraceRecorder__get_Capacity, TraceRecorder__get_RecordEnabled, TraceRecorder__get_SegmentCounts, TraceQuery_nearestSnapshotBefore, TraceRecorder__get_SelfModified, TraceRecorder__Build, TraceRecorder__get_EntryCount } from "./TraceTypesWeb.js";
-import { min, max } from "./fable_modules/fable-library-js.5.13.0/Double.js";
+import { min, max } from "./fable_modules/fable-library-js.5.17.0/Double.js";
 import { disasmBytes, disasmMemory } from "./JetpacFR.Core/Disasm.js";
-import { toFail, substring, printf, toText, join } from "./fable_modules/fable-library-js.5.13.0/String.js";
-import { fold, iterateIndexed, map, delay, toList } from "./fable_modules/fable-library-js.5.13.0/Seq.js";
-import { rangeDouble } from "./fable_modules/fable-library-js.5.13.0/Range.js";
+import { toFail, substring, printf, toText, join } from "./fable_modules/fable-library-js.5.17.0/String.js";
+import { fold, iterateIndexed, map, delay, toList } from "./fable_modules/fable-library-js.5.17.0/Seq.js";
+import { rangeDouble } from "./fable_modules/fable-library-js.5.17.0/Range.js";
 import { RegisterFile__Pc } from "./Jetpac2.Core/Machine.js";
-import { getItemFromDict, tryGetValue } from "./fable_modules/fable-library-js.5.13.0/MapUtil.js";
-import { toString, FSharpRef } from "./fable_modules/fable-library-js.5.13.0/Types.js";
-import { parse } from "./fable_modules/fable-library-js.5.13.0/Int32.js";
-import { toFloat64, fromUInt8, op_Addition, fromInt32, op_Multiply, op_Division, toInt64_unchecked, toInt32_unchecked } from "./fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { defaultArg, value as value_28 } from "./fable_modules/fable-library-js.5.13.0/Option.js";
+import { getItemFromDict, tryGetValue } from "./fable_modules/fable-library-js.5.17.0/MapUtil.js";
+import { toString, FSharpRef } from "./fable_modules/fable-library-js.5.17.0/Types.js";
+import { parse } from "./fable_modules/fable-library-js.5.17.0/Int32.js";
+import { toFloat64, fromUInt8, op_Addition, fromInt32, op_Multiply, op_Division, toInt64_unchecked, toInt32_unchecked } from "./fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { defaultArg, value as value_36 } from "./fable_modules/fable-library-js.5.17.0/Option.js";
 import { extract } from "./JetpacFR.Core/Contract.js";
 import { generate } from "./JetpacFR.Core/Prompt.js";
 import { mine } from "./JetpacFR.Core/Miner.js";
@@ -26,8 +26,8 @@ import { WarmState, WarmMemoryB64, TzxB64, RomB64, decode as decode_1 } from "./
 import { LiftedRoutines_registryHook } from "./Jetpac3.Core/LiftedRoutines.js";
 import { defaultSession } from "./ScriptWeb.js";
 import { run } from "./JetpacFR.Core/Validation.js";
-import { createCancellationToken } from "./fable_modules/fable-library-js.5.13.0/Async.js";
-import { ControlFileModule_fromJson, ControlFileModule_empty, ControlComment, CommentKind, ControlFileModule_upsert, ControlFileModule_renameBlockAt, ControlFileModule_mergeWithNext, ControlFileModule_splitBlockAt, BlockKind, ControlFileModule_setKindAt, ControlFileModule_blockAt, ControlFile, ControlFileModule_toJson } from "./ControlTypesWeb.js";
+import { createCancellationToken } from "./fable_modules/fable-library-js.5.17.0/Async.js";
+import { ControlFileModule_empty, ControlComment, CommentKind, ControlFileModule_upsert, ControlFileModule_renameBlockAt, ControlFileModule_mergeWithNext, ControlFileModule_splitBlockAt, BlockKind, ControlFileModule_setKindAt, ControlFileModule_blockAt, ControlFileModule_fromJson, ControlFileModule_kindToString, ControlFile, ControlFileModule_toJson } from "./ControlTypesWeb.js";
 import { addrY, render } from "./JetpacFR.Core/CtrlMapModel.js";
 
 export const Dom_document = document;
@@ -140,6 +140,8 @@ const App_hiBg = "#2E3444";
 const App_mono = "Consolas, monospace";
 
 const App_heatLut = ["#08080C", "#0A1E4A", "#0A3A5E", "#0A5C6A", "#12865E", "#3AA83C", "#96B82C", "#D8A022", "#E86618", "#F03828"];
+
+export let App_currentProjectId = createAtom(undefined);
 
 let App_statusText = defaultOf();
 
@@ -672,6 +674,12 @@ function App_riskColor(risk) {
     }
 }
 
+export const App_heatLutR = map_1((c) => (parse(substring(c, 1, 2), 511, false, 32, 16) & 0xFF), App_heatLut, Uint8Array);
+
+export const App_heatLutG = map_1((c) => (parse(substring(c, 3, 2), 511, false, 32, 16) & 0xFF), App_heatLut, Uint8Array);
+
+export const App_heatLutB = map_1((c) => (parse(substring(c, 5, 2), 511, false, 32, 16) & 0xFF), App_heatLut, Uint8Array);
+
 function App_refreshHeatmap() {
     let counts;
     const matchValue = App_currentTrace();
@@ -686,20 +694,17 @@ function App_refreshHeatmap() {
     for (let y_1 = 0; y_1 <= 255; y_1++) {
         for (let x_1 = 0; x_1 <= 255; x_1++) {
             const c = item_1(i, counts) | 0;
-            const col = item_1((c <= 0) ? 0 : min(9, ~~(9 * (Math.log10(c) / logMax))), App_heatLut);
+            const li = ((c <= 0) ? 0 : ((logMax <= 0) ? 9 : min(9, ~~(9 * (Math.log10(c) / logMax))))) | 0;
             const p = (i * 4) | 0;
-            const r = parse(substring(col, 1, 2), 511, false, 32, 16) | 0;
-            const g = parse(substring(col, 3, 2), 511, false, 32, 16) | 0;
-            const b = parse(substring(col, 5, 2), 511, false, 32, 16) | 0;
             if (item_1(i, selfMod)) {
-                buf[p]=(~~((b + 192) / 2) & 0xFF);
-                buf[(p + 1)]=(~~((g + 48) / 2) & 0xFF);
-                buf[(p + 2)]=(~~((r + 240) / 2) & 0xFF);
+                buf[p]=(~~((~~item_1(li, App_heatLutR) + 240) / 2) & 0xFF);
+                buf[(p + 1)]=(~~((~~item_1(li, App_heatLutG) + 48) / 2) & 0xFF);
+                buf[(p + 2)]=(~~((~~item_1(li, App_heatLutB) + 192) / 2) & 0xFF);
             }
             else {
-                buf[p]=(b & 0xFF);
-                buf[(p + 1)]=(g & 0xFF);
-                buf[(p + 2)]=(r & 0xFF);
+                buf[p]=item_1(li, App_heatLutR);
+                buf[(p + 1)]=item_1(li, App_heatLutG);
+                buf[(p + 2)]=item_1(li, App_heatLutB);
             }
             buf[(p + 3)]=255;
             i = ((i + 1) | 0);
@@ -726,10 +731,12 @@ function App_refreshHeatmap() {
 function App_segmentsOf(t) {
     const n = max(1, ~~(t.Entries.length / 512)) | 0;
     const segs = new Int32Array(512);
+    let i = 0;
     const arr = t.Entries;
     for (let idx = 0; idx <= (arr.length - 1); idx++) {
-        const e = item_1(idx, arr);
-        setItem(segs, min(511, ~~(~~e.Tick / n)), (item_1(min(511, ~~(~~e.Tick / n)), segs) + 1) | 0);
+        item_1(idx, arr);
+        setItem(segs, min(511, ~~(i / n)), (item_1(min(511, ~~(i / n)), segs) + 1) | 0);
+        i = ((i + 1) | 0);
     }
     return segs;
 }
@@ -749,9 +756,9 @@ function App_refreshStrip() {
             const b = (60 + ~~(v * 60)) | 0;
             for (let sy = 0; sy <= 23; sy++) {
                 const p = (((sy * 512) + sx) * 4) | 0;
-                buf[p]=(b & 0xFF);
+                buf[p]=(r & 0xFF);
                 buf[(p + 1)]=(g & 0xFF);
-                buf[(p + 2)]=(r & 0xFF);
+                buf[(p + 2)]=(b & 0xFF);
                 buf[(p + 3)]=255;
             }
         }
@@ -778,7 +785,7 @@ function App_refreshCursorLabel() {
     }
     else {
         const c = max(0, min(App_cursor, n - 1)) | 0;
-        App_cursorLabel.textContent = ((arg_1 = ((n - 1) | 0), (arg_2 = (~~item_1(c, value_28(App_currentTrace()).Entries).Pc | 0), toText(printf("instr %d / %d   pc=%04X"))(c)(arg_1)(arg_2))));
+        App_cursorLabel.textContent = ((arg_1 = ((n - 1) | 0), (arg_2 = (~~item_1(c, value_36(App_currentTrace()).Entries).Pc | 0), toText(printf("instr %d / %d   pc=%04X"))(c)(arg_1)(arg_2))));
     }
 }
 
@@ -890,7 +897,7 @@ function App_maxDepth(columns) {
 
 function App_showRoutineDetail(r) {
     let arg_12, arg_13, arg_14;
-    const loops = map_1((tupledArg) => toText(printf("%04X->%04X x%d"))(tupledArg[0])(tupledArg[1])(tupledArg[2]), truncate(5, r.LoopExtents));
+    const loops = map_2((tupledArg) => toText(printf("%04X->%04X x%d"))(tupledArg[0])(tupledArg[1])(tupledArg[2]), truncate(5, r.LoopExtents));
     App_routineDetail.textContent = ((arg_12 = join("; ", r.Reasons), (arg_13 = (isEmpty(loops) ? "" : ("\nloops: " + join(", ", loops))), (arg_14 = (length_1(r.InputSamples) | 0), toText(printf("%04X  (%s)\ncalls=%d  span=%04X-%04X\nincl=%d  excl=%d tstates\nself-modifying=%b  overlapping=%b\n%s%s\ninput samples: %d"))(r.Entry)(r.Risk)(r.CallCount)(r.SpanLo)(r.SpanHi)(r.InclusiveTStates)(r.ExclusiveTStates)(r.SelfModifying)(r.Overlapping)(arg_12)(arg_13)(arg_14)))));
 }
 
@@ -948,7 +955,7 @@ function App_refreshTray() {
 }
 
 function App_drawGraph() {
-    Dom_clear(App_graphNodes);
+    clear(App_graphNodes);
     if (isEmpty(App_minedRoutines)) {
         App_graphCanvas.width = 400;
         App_graphCanvas.height = 60;
@@ -1196,6 +1203,8 @@ function App_mineNow() {
             App_selectedEntries = empty_1({
                 Compare: (x, y) => (comparePrimitives(x, y) | 0),
             });
+            App_activeRoutine = undefined;
+            App_routineDetail.textContent = "";
             App_refreshRoutines();
             App_refreshTray();
             App_drawGraph();
@@ -1311,25 +1320,32 @@ function App_loadTrace() {
             reader.onload = (() => {
                 let arg, arg_1;
                 const buf = reader.result;
-                const bytes = Array.from(new Uint8Array(buf));
+                const bytes = new Uint8Array(buf);
                 try {
                     const t = decode(bytes);
-                    App_loaded = t;
-                    App_cursor = 0;
-                    App_markerPc = (~~item_1(0, t.Entries).Pc | 0);
-                    App_syncSlider();
-                    App_refreshAll();
-                    const patternInput = mine(t);
-                    const routines = patternInput[0];
-                    App_minedRoutines = routines;
-                    App_minedEdges = patternInput[1];
-                    App_selectedEntries = empty_1({
-                        Compare: (x, y) => (comparePrimitives(x, y) | 0),
-                    });
-                    App_refreshRoutines();
-                    App_refreshTray();
-                    App_drawGraph();
-                    App_statusText.textContent = ((arg = (t.Entries.length | 0), (arg_1 = (length_1(routines) | 0), toText(printf("loaded %d instructions; mined %d routines"))(arg)(arg_1))));
+                    if (t.Entries.length === 0) {
+                        App_statusText.textContent = "load failed: trace has no instructions";
+                    }
+                    else {
+                        const patternInput = mine(t);
+                        const routines = patternInput[0];
+                        App_loaded = t;
+                        App_minedRoutines = routines;
+                        App_minedEdges = patternInput[1];
+                        App_selectedEntries = empty_1({
+                            Compare: (x, y) => (comparePrimitives(x, y) | 0),
+                        });
+                        App_activeRoutine = undefined;
+                        App_routineDetail.textContent = "";
+                        App_cursor = 0;
+                        App_markerPc = (~~item_1(0, t.Entries).Pc | 0);
+                        App_refreshRoutines();
+                        App_refreshTray();
+                        App_drawGraph();
+                        App_syncSlider();
+                        App_refreshAll();
+                        App_statusText.textContent = ((arg = (t.Entries.length | 0), (arg_1 = (length_1(routines) | 0), toText(printf("loaded %d instructions; mined %d routines"))(arg)(arg_1))));
+                    }
                 }
                 catch (ex) {
                     App_statusText.textContent = ("load failed: " + ex.message);
@@ -1354,6 +1370,7 @@ function App_startGame() {
 }
 
 export function App_start() {
+    App_currentProjectId("minimal");
     AssetProvider((key) => ((key === "rom") ? decode_1(RomB64) : ((key === "tzx") ? decode_1(TzxB64) : toFail(printf("unknown asset key %s"))(key))));
     const matchValue = EntryCache_tryLoad("rom", "tzx");
     if (matchValue == null) {
@@ -1468,19 +1485,27 @@ export function App_start() {
         }
     }, 30);
     Dom_setInterval(() => {
-        let arg_1, arg_2, arg_3, arg_4, arg_5, array_1, array, arg_6, arg_7;
+        let arg_1, arg_2, arg_3, arg_4, arg_5, arg_6, arg_7;
         if (App_session != null) {
             const s = App_session;
+            TraceSession__FlushReplayCache(s);
             if (App_running) {
-                App_statusText.textContent = ((arg_1 = (TraceSession__get_Frame(s) | 0), (arg_2 = (toFloat64(TraceSession__get_CycleCount(s)) / 1000000), (arg_3 = (TraceRecorder__get_EntryCount(TraceSession__get_Recorder(s)) | 0), (arg_4 = (TraceRecorder__get_Capacity(TraceSession__get_Recorder(s)) | 0), (arg_5 = (((array_1 = ((array = TraceRecorder__get_PerPcCount(TraceSession__get_Recorder(s)), array.filter((c) => (c > 0)))), array_1.length)) | 0), (arg_6 = (TraceRecorder__get_SelfModCount(TraceSession__get_Recorder(s)) | 0), (arg_7 = (TraceRecorder__get_RecordEnabled(TraceSession__get_Recorder(s)) ? "ON" : "OFF"), toText(printf("frame=%d  tick=%.2fM  instr=%d/%d  distinct-pc=%d  selfmod=%d  rec=%s"))(arg_1)(arg_2)(arg_3)(arg_4)(arg_5)(arg_6)(arg_7)))))))));
+                App_statusText.textContent = ((arg_1 = (TraceSession__get_Frame(s) | 0), (arg_2 = (toFloat64(TraceSession__get_CycleCount(s)) / 1000000), (arg_3 = (TraceRecorder__get_EntryCount(TraceSession__get_Recorder(s)) | 0), (arg_4 = (TraceRecorder__get_Capacity(TraceSession__get_Recorder(s)) | 0), (arg_5 = (fold_1((n_1, c) => {
+                    if (c > 0) {
+                        return (n_1 + 1) | 0;
+                    }
+                    else {
+                        return n_1 | 0;
+                    }
+                }, 0, TraceRecorder__get_PerPcCount(TraceSession__get_Recorder(s))) | 0), (arg_6 = (TraceRecorder__get_SelfModCount(TraceSession__get_Recorder(s)) | 0), (arg_7 = (TraceRecorder__get_RecordEnabled(TraceSession__get_Recorder(s)) ? "ON" : "OFF"), toText(printf("frame=%d  tick=%.2fM  instr=%d/%d  distinct-pc=%d  selfmod=%d  rec=%s"))(arg_1)(arg_2)(arg_3)(arg_4)(arg_5)(arg_6)(arg_7)))))))));
             }
             App_refreshHeatmap();
             App_refreshStrip();
             if (App_running) {
                 App_syncingSlider = true;
-                const n_1 = TraceRecorder__get_EntryCount(TraceSession__get_Recorder(s)) | 0;
-                if (n_1 > 1) {
-                    App_slider.max = (n_1 - 1);
+                const n_2 = TraceRecorder__get_EntryCount(TraceSession__get_Recorder(s)) | 0;
+                if (n_2 > 1) {
+                    App_slider.max = (n_2 - 1);
                     App_slider.disabled = false;
                 }
                 App_syncingSlider = false;
@@ -1765,16 +1790,35 @@ export function App_start() {
         App_refreshTray();
         App_drawGraph();
     }));
-    Dom_window.addEventListener("keydown", ((e_4) => {
-        const key_1 = e_4.key;
-        App_setKeyFor(key_1, true);
-        if ((key_1 === " ") ? true : key_1.startsWith("Arrow")) {
-            e_4.preventDefault();
+    const isEditableTarget = (e_4) => {
+        const t_4 = e_4.target;
+        const tag = toString(t_4.tagName);
+        if (((tag === "INPUT") ? true : (tag === "TEXTAREA")) ? true : (tag === "SELECT")) {
+            return true;
+        }
+        else {
+            return toString(t_4.isContentEditable) === "true";
+        }
+    };
+    Dom_window.addEventListener("keydown", ((e_5) => {
+        const key_1 = e_5.key;
+        if (isEditableTarget(e_5)) {
+        }
+        else {
+            App_setKeyFor(key_1, true);
+            if ((key_1 === " ") ? true : key_1.startsWith("Arrow")) {
+                e_5.preventDefault();
+            }
         }
     }));
-    Dom_window.addEventListener("keyup", ((e_5) => {
-        App_setKeyFor(toString(e_5.key), false);
+    Dom_window.addEventListener("keyup", ((e_6) => {
+        if (isEditableTarget(e_6)) {
+        }
+        else {
+            App_setKeyFor(toString(e_6.key), false);
+        }
     }));
+    const controlKey = () => ("jetpacfr.control." + defaultArg(App_currentProjectId(), "minimal"));
     let control = undefined;
     const saveControlLocal = () => {
         if (control == null) {
@@ -1782,7 +1826,7 @@ export function App_start() {
         else {
             const c_1 = control;
             const local = Dom_window.localStorage;
-            local.setItem("jetpacfr.control.minimal", ControlFileModule_toJson(c_1));
+            local.setItem(controlKey(), ControlFileModule_toJson(c_1));
             control = (new ControlFile(c_1.ImageFile, c_1.Start, c_1.EndExcl, c_1.EntryPc, c_1.ActiveVersion, c_1.Blocks, c_1.Comments, false));
         }
     };
@@ -1799,13 +1843,13 @@ export function App_start() {
     let chipRectA = [0, 0, 0, 0];
     let chipRectB = [0, 0, 0, 0];
     const tlFrameCount = () => {
-        let t_4;
+        let t_5;
         const matchValue_6 = App_currentTrace();
-        let matchResult_2, t_5;
+        let matchResult_2, t_6;
         if (matchValue_6 != null) {
-            if ((t_4 = matchValue_6, t_4.FrameTicks.length > 0)) {
+            if ((t_5 = matchValue_6, t_5.FrameTicks.length > 0)) {
                 matchResult_2 = 0;
-                t_5 = matchValue_6;
+                t_6 = matchValue_6;
             }
             else {
                 matchResult_2 = 1;
@@ -1816,19 +1860,19 @@ export function App_start() {
         }
         switch (matchResult_2) {
             case 0:
-                return t_5.FrameTicks.length | 0;
+                return t_6.FrameTicks.length | 0;
             default:
                 return 300;
         }
     };
     const entryAtFrame = (f) => {
-        let t_6;
+        let t_7;
         const matchValue_7 = App_currentTrace();
-        let matchResult_3, t_7;
+        let matchResult_3, t_8;
         if (matchValue_7 != null) {
-            if ((t_6 = matchValue_7, (t_6.Entries.length > 0) && (t_6.FrameTicks.length > 0))) {
+            if ((t_7 = matchValue_7, (t_7.Entries.length > 0) && (t_7.FrameTicks.length > 0))) {
                 matchResult_3 = 0;
-                t_7 = matchValue_7;
+                t_8 = matchValue_7;
             }
             else {
                 matchResult_3 = 1;
@@ -1839,14 +1883,14 @@ export function App_start() {
         }
         switch (matchResult_3) {
             case 0: {
-                const last = item_1(t_7.FrameTicks.length - 1, t_7.FrameTicks);
-                const tick = (f <= 0) ? 0 : ((f >= t_7.FrameTicks.length) ? last : item_1(f, t_7.FrameTicks));
+                const last = item_1(t_8.FrameTicks.length - 1, t_8.FrameTicks);
+                const tick = (f <= 0) ? 0 : ((f >= t_8.FrameTicks.length) ? last : item_1(f, t_8.FrameTicks));
                 let lo = 0;
-                let hi = t_7.Entries.length - 1;
-                let res = t_7.Entries.length - 1;
+                let hi = t_8.Entries.length - 1;
+                let res = t_8.Entries.length - 1;
                 while (lo <= hi) {
                     const mid = ~~((lo + hi) / 2) | 0;
-                    if (item_1(mid, t_7.Entries).Tick >= tick) {
+                    if (item_1(mid, t_8.Entries).Tick >= tick) {
                         res = (mid | 0);
                         hi = ((mid - 1) | 0);
                     }
@@ -1907,7 +1951,7 @@ export function App_start() {
             while (true) {
                 const v = v_mut, base10 = base10_mut;
                 const m = v / base10;
-                const matchValue_8 = tryFind_1((n_2) => (n_2 >= (m - 1E-09)), nice);
+                const matchValue_8 = tryFind_1((n_3) => (n_3 >= (m - 1E-09)), nice);
                 if (matchValue_8 == null) {
                     if (base10 >= 1000000000) {
                         return v;
@@ -1937,15 +1981,15 @@ export function App_start() {
         tlCtx.lineWidth = 1;
         tlCtx.fillStyle = "#8A8A92";
         tlCtx.font = "8px Consolas";
-        let t_8 = 0;
-        while (t_8 <= len) {
-            const x_5 = (t_8 / len) * w;
+        let t_9 = 0;
+        while (t_9 <= len) {
+            const x_5 = (t_9 / len) * w;
             tlCtx.beginPath();
             tlCtx.moveTo(x_5, (bottom - 3));
             tlCtx.lineTo(x_5, (bottom + 1));
             tlCtx.stroke();
-            tlCtx.fillText(int32ToString(t_8), min(max(2, x_5 - 8), w - 20), (h - 4));
-            t_8 = ((t_8 + step_1) | 0);
+            tlCtx.fillText(int32ToString(t_9), min(max(2, x_5 - 8), w - 20), (h - 4));
+            t_9 = ((t_9 + step_1) | 0);
         }
     };
     const tlSetRange = (which_1, r_2) => {
@@ -1961,9 +2005,9 @@ export function App_start() {
         const w_1 = tlCanvas.width;
         return ~~round((min(max(x_6, 0), w_1) / w_1) * max(1, tlLen)) | 0;
     };
-    const tlX = (e_6) => {
+    const tlX = (e_7) => {
         const rect = tlCanvas.getBoundingClientRect();
-        return (e_6.clientX - rect.left) * (tlCanvas.width / rect.width);
+        return (e_7.clientX - rect.left) * (tlCanvas.width / rect.width);
     };
     const inChip = (r_3, x_7, y_5) => {
         const ry = r_3[1];
@@ -1975,11 +2019,11 @@ export function App_start() {
             return false;
         }
     };
-    tlCanvas.addEventListener("mousedown", ((e_8) => {
-        const x_8 = tlX(e_8);
+    tlCanvas.addEventListener("mousedown", ((e_9) => {
+        const x_8 = tlX(e_9);
         let y_6;
         const rect_1 = tlCanvas.getBoundingClientRect();
-        y_6 = (e_8.clientY - rect_1.top);
+        y_6 = (e_9.clientY - rect_1.top);
         tlStartX = x_8;
         tlMoved = false;
         if (inChip(chipRectA, x_8, y_6)) {
@@ -1996,8 +2040,8 @@ export function App_start() {
             App_syncSlider();
         }
     }));
-    tlCanvas.addEventListener("mousemove", ((e_9) => {
-        const x_9 = tlX(e_9);
+    tlCanvas.addEventListener("mousemove", ((e_10) => {
+        const x_9 = tlX(e_10);
         const tlChipDrag_1 = tlChipDrag;
         const tlDragAnchor_1 = tlDragAnchor;
         if (tlChipDrag_1 == null) {
@@ -2067,17 +2111,6 @@ export function App_start() {
         brushA = false;
         brushStyle();
     }));
-    Dom_window.addEventListener("keydown", ((e_10) => {
-        const k = toString(e_10.key);
-        if ((k === "a") ? true : (k === "A")) {
-            brushA = true;
-            brushStyle();
-        }
-        else if ((k === "b") ? true : (k === "B")) {
-            brushA = false;
-            brushStyle();
-        }
-    }));
     let previewFrom = 0;
     let previewSpan = 0;
     let previewTicks = 0;
@@ -2087,8 +2120,8 @@ export function App_start() {
         const fStart = patternInput[0] | 0;
         const fEnd = patternInput[1] | 0;
         const label_1 = which_4 ? "A" : "B";
-        const n_4 = tlFrameCount() | 0;
-        if (((fEnd - 1) < n_4) && ((fEnd - 1) >= 0)) {
+        const n_5 = tlFrameCount() | 0;
+        if (((fEnd - 1) < n_5) && ((fEnd - 1) >= 0)) {
             App_pauseGame();
             previewFrom = (max(0, fStart) | 0);
             previewSpan = (max(0, (fEnd - 1) - previewFrom) | 0);
@@ -2100,7 +2133,7 @@ export function App_start() {
             App_statusText.textContent = toText(printf("preview %s: frames %d..%d over 1s (cursor sweep)"))(label_1)(fStart)(fEnd);
         }
         else {
-            App_statusText.textContent = toText(printf("preview %s: range outside the recording (%d frames)"))(label_1)(n_4);
+            App_statusText.textContent = toText(printf("preview %s: range outside the recording (%d frames)"))(label_1)(n_5);
         }
     };
     Dom_byId("btnPreviewA").addEventListener("click", ((_arg_26) => {
@@ -2191,8 +2224,8 @@ export function App_start() {
                 }
                 else {
                     const patternInput_2 = item_1(min(9, heat), heatLutI);
-                    const t_11 = 0.15 + ((0.65 * heat) / 9);
-                    const mix = (x_10, y_7) => (~~round(x_10 + ((y_7 - x_10) * t_11)) | 0);
+                    const t_12 = 0.15 + ((0.65 * heat) / 9);
+                    const mix = (x_10, y_7) => (~~round(x_10 + ((y_7 - x_10) * t_12)) | 0);
                     const arg_39 = mix(br, patternInput_2[0]) | 0;
                     const arg_40 = mix(bgc, patternInput_2[1]) | 0;
                     const arg_41 = mix(bb, patternInput_2[2]) | 0;
@@ -2259,13 +2292,13 @@ export function App_start() {
         return (cmViewStart + ~~min((y_10 / h_3) * (cmViewEnd - cmViewStart), (cmViewEnd - cmViewStart) - 1)) | 0;
     };
     const cmNavigate = (addr_2) => {
-        let t_12;
+        let t_13;
         const matchValue_10 = App_currentTrace();
-        let matchResult_5, t_13;
+        let matchResult_5, t_14;
         if (matchValue_10 != null) {
-            if ((t_12 = matchValue_10, ((t_12.Entries.length > 0) && (addr_2 < t_12.FirstIndexAtPc.length)) && (item_1(addr_2, t_12.FirstIndexAtPc) >= 0))) {
+            if ((t_13 = matchValue_10, ((t_13.Entries.length > 0) && (addr_2 < t_13.FirstIndexAtPc.length)) && (item_1(addr_2, t_13.FirstIndexAtPc) >= 0))) {
                 matchResult_5 = 0;
-                t_13 = matchValue_10;
+                t_14 = matchValue_10;
             }
             else {
                 matchResult_5 = 1;
@@ -2276,7 +2309,7 @@ export function App_start() {
         }
         switch (matchResult_5) {
             case 0: {
-                App_cursor = (item_1(addr_2, t_13.FirstIndexAtPc) | 0);
+                App_cursor = (item_1(addr_2, t_14.FirstIndexAtPc) | 0);
                 App_refreshAll();
                 App_syncSlider();
                 break;
@@ -2286,28 +2319,268 @@ export function App_start() {
             }
         }
     };
-    cmCanvas.addEventListener("mousedown", ((e_12) => {
-        const addr_3 = cmAddrAt(cmXy(e_12)[1]) | 0;
-        cmDragAddr = addr_3;
-        cmNavigate(addr_3);
-    }));
-    cmCanvas.addEventListener("mousemove", ((e_13) => {
-        let option_3, b_2;
-        const y_12 = cmXy(e_13)[1];
-        if (cmDragAddr == null) {
-            const addr_5 = cmAddrAt(y_12) | 0;
-            const blockTxt = (control == null) ? "" : defaultArg((option_3 = ControlFileModule_blockAt(control, addr_5), (option_3 != null) ? ((b_2 = option_3, toText(printf(" %s (%A)"))(b_2.Name)(b_2.Kind))) : undefined), " <unmapped>");
-            const counts = cmCounts();
-            const n_5 = ((addr_5 < counts.length) ? item_1(addr_5, counts) : 0) | 0;
-            cmCanvas.title = toText(printf("0x%04X%s (%d executions)"))(addr_5)(blockTxt)(n_5);
+    let projects = defaultOf();
+    let selectedIdx = -1;
+    const projAt = (i_1) => (projects[i_1]);
+    let openSelected = () => {
+    };
+    const renderLauncher = () => {
+        const list = Dom_byId("launcherList");
+        list.innerHTML = "";
+        if (Operators_IsNull(projects)) {
+            const row_2 = Dom_el("div");
+            row_2.className = "hint";
+            row_2.style.padding = "10px";
+            row_2.textContent = "games/index.json not found - the launcher needs a projects index";
+            Dom_append(list, row_2);
         }
         else {
-            const addr_4 = cmAddrAt(y_12) | 0;
-            cmDragAddr = addr_4;
-            cmNavigate(addr_4);
+            const n_6 = projects.length | 0;
+            for (let i_2 = 0; i_2 <= (n_6 - 1); i_2++) {
+                let arg_46, arg_47;
+                const g = projAt(i_2);
+                const id = toString(g.id);
+                const name_1 = toString(g.name);
+                const isWeb = g.web;
+                const isDef = g.default;
+                const row_3 = Dom_el("div");
+                row_3.className = ((i_2 === selectedIdx) ? "proj-row sel" : "proj-row");
+                const title = Dom_el("div");
+                title.className = "proj-title";
+                title.textContent = ((arg_46 = (isDef ? "  - auto-load default" : ""), toText(printf("%s (%s)%s"))(name_1)(id)(arg_46)));
+                Dom_append(row_3, title);
+                const chips = Dom_el("div");
+                chips.className = "proj-chips";
+                const chip = (cls, text) => {
+                    const s_6 = Dom_el("span");
+                    s_6.className = cls;
+                    s_6.textContent = text;
+                    Dom_append(chips, s_6);
+                };
+                if (isWeb) {
+                    chip("chip-on", "deployed to web");
+                }
+                else {
+                    chip("chip-off", "not deployed to web");
+                }
+                chip(g.trace ? "chip-on" : "chip-off", g.trace ? "trace: yes" : "trace: none");
+                chip(g.keys ? "chip-on" : "chip-off", g.keys ? "key script: yes" : "key script: no");
+                chip(g.control ? "chip-on" : "chip-off", g.control ? "control file: yes" : "control file: no");
+                chip(g.ce ? "chip-on" : "chip-off", g.ce ? "CE program: yes" : "CE program: no");
+                chip("chip-on", (arg_47 = toString(g.boot), toText(printf("boot: %s"))(arg_47)));
+                Dom_append(row_3, chips);
+                row_3.addEventListener("click", ((_arg_29) => {
+                    selectedIdx = (i_2 | 0);
+                    renderLauncher();
+                }));
+                row_3.addEventListener("dblclick", ((_arg_30) => {
+                    openSelected();
+                }));
+                Dom_append(list, row_3);
+            }
+        }
+    };
+    const refreshNamesList = () => {
+        let arg_59, arg_60;
+        const list_1 = Dom_byId("namesList");
+        const count_1 = Dom_byId("namesCount");
+        list_1.innerHTML = "";
+        const mkRow = (text_1, color_1, addr_3) => {
+            const row_4 = Dom_el("div");
+            row_4.className = "name-row";
+            row_4.textContent = text_1;
+            row_4.style.color = color_1;
+            row_4.addEventListener("click", ((_arg_31) => {
+                let t_15;
+                if (addr_3 < 0) {
+                }
+                else {
+                    const matchValue_11 = App_currentTrace();
+                    let matchResult_6, t_16;
+                    if (matchValue_11 != null) {
+                        if ((t_15 = matchValue_11, ((t_15.Entries.length > 0) && (addr_3 < t_15.FirstIndexAtPc.length)) && (item_1(addr_3, t_15.FirstIndexAtPc) >= 0))) {
+                            matchResult_6 = 0;
+                            t_16 = matchValue_11;
+                        }
+                        else {
+                            matchResult_6 = 1;
+                        }
+                    }
+                    else {
+                        matchResult_6 = 1;
+                    }
+                    switch (matchResult_6) {
+                        case 0: {
+                            App_cursor = (item_1(addr_3, t_16.FirstIndexAtPc) | 0);
+                            App_refreshAll();
+                            App_syncSlider();
+                            App_statusText.textContent = toText(printf("jumped to 0x%04X"))(addr_3);
+                            break;
+                        }
+                        case 1: {
+                            App_statusText.textContent = toText(printf("0x%04X has not executed in this trace"))(addr_3);
+                            break;
+                        }
+                    }
+                }
+            }));
+            Dom_append(list_1, row_4);
+        };
+        if (control != null) {
+            const c_4 = control;
+            const enumerator_3 = getEnumerator(c_4.Blocks);
+            try {
+                while (enumerator_3["System.Collections.IEnumerator.MoveNext"]()) {
+                    const b_2 = enumerator_3["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                    mkRow(toText(printf("block    %04X..%04X  %s"))(b_2.Start)(b_2.EndExcl)(b_2.Name), App_cyan, b_2.Start);
+                }
+            }
+            finally {
+                disposeSafe(enumerator_3);
+            }
+            const enumerator_4 = getEnumerator(c_4.Comments);
+            try {
+                while (enumerator_4["System.Collections.IEnumerator.MoveNext"]()) {
+                    let arg_56;
+                    const m_2 = enumerator_4["System.Collections.Generic.IEnumerator`1.get_Current"]();
+                    const span_2 = (m_2.EndExcl > m_2.Addr) ? toText(printf("%04X..%04X"))(m_2.Addr)(m_2.EndExcl) : toText(printf("%04X"))(m_2.Addr);
+                    let color_2;
+                    const matchValue_12 = m_2.Kind;
+                    color_2 = ((matchValue_12.tag === 1) ? App_yellow : ((matchValue_12.tag === 3) ? App_orange : App_normal));
+                    mkRow((arg_56 = ControlFileModule_kindToString(m_2.Kind), toText(printf("%-7s %s  %s"))(arg_56)(span_2)(m_2.Text)), color_2, m_2.Addr);
+                }
+            }
+            finally {
+                disposeSafe(enumerator_4);
+            }
+            count_1.textContent = ((arg_59 = (length_1(c_4.Blocks) | 0), (arg_60 = (length_1(c_4.Comments) | 0), toText(printf("%d blocks, %d comments"))(arg_59)(arg_60))));
+        }
+        else {
+            mkRow("no control file loaded - use New / Imp in the control map", App_dim, -1);
+            count_1.textContent = "";
+        }
+    };
+    openSelected = (() => {
+        if (selectedIdx >= 0) {
+            const g_1 = projAt(selectedIdx);
+            const id_1 = toString(g_1.id);
+            const name_2 = toString(g_1.name);
+            if (!g_1.web) {
+                App_statusText.textContent = toText(printf("%s is not deployed to the web build yet - copy its web assets into webroot/games/%s and regenerate games/index.json"))(name_2)(id_1);
+            }
+            else {
+                const switch$ = (App_currentProjectId() == null) ? true : (App_currentProjectId() !== id_1);
+                App_currentProjectId(id_1);
+                Dom_byId("launcher").style.display = "none";
+                if (App_currentProjectId() != null) {
+                    Dom_byId("btnMenu").style.display = "inline-block";
+                }
+                if (switch$) {
+                    control = undefined;
+                    const local_1 = Dom_window.localStorage;
+                    let matchValue_14;
+                    try {
+                        matchValue_14 = (local_1.getItem(controlKey()));
+                    }
+                    catch (matchValue_13) {
+                        matchValue_14 = defaultOf();
+                    }
+                    if (equals(matchValue_14, defaultOf())) {
+                        const path = toText(printf("games/%s/control.json"))(id_1);
+                        const p_1 = fetch(path).then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null });
+                        p_1.then((txt) => {
+                            if (!Operators_IsNull(txt)) {
+                                try {
+                                    control = ControlFileModule_fromJson(toString(txt));
+                                    cmRender();
+                                    refreshNamesList();
+                                    App_statusText.textContent = toText(printf("control file loaded from %s"))(path);
+                                }
+                                catch (ex_1) {
+                                    App_statusText.textContent = ("stored control.json ignored: " + ex_1.message);
+                                }
+                            }
+                        });
+                    }
+                    else {
+                        try {
+                            control = ControlFileModule_fromJson(toString(matchValue_14));
+                            cmRender();
+                            refreshNamesList();
+                        }
+                        catch (ex_2) {
+                            App_statusText.textContent = ("stored control ignored: " + ex_2.message);
+                        }
+                    }
+                    App_statusText.textContent = toText(printf("%s opened"))(name_2);
+                }
+            }
+        }
+    });
+    const showLauncher = () => {
+        Dom_byId("launcher").style.display = "flex";
+        Dom_byId("btnMenu").style.display = "none";
+        App_statusText.textContent = "main menu";
+        const p = fetch('games/index.json').then(function (r) { return r.ok ? r.json() : null }).catch(function () { return null });
+        p.then((list_2) => {
+            projects = list_2;
+            selectedIdx = -1;
+            if (!Operators_IsNull(projects)) {
+                const n_7 = projects.length | 0;
+                let defIdx = -1;
+                let webIdx = -1;
+                for (let i_3 = 0; i_3 <= (n_7 - 1); i_3++) {
+                    const g_2 = projAt(i_3);
+                    if (g_2.default) {
+                        defIdx = (i_3 | 0);
+                    }
+                    if ((webIdx === -1) && g_2.web) {
+                        webIdx = (i_3 | 0);
+                    }
+                }
+                selectedIdx = ((((defIdx >= 0) && projAt(defIdx).web) ? defIdx : ((webIdx >= 0) ? webIdx : ((defIdx >= 0) ? defIdx : ((n_7 > 0) ? 0 : -1)))) | 0);
+            }
+            renderLauncher();
+        });
+    };
+    Dom_byId("btnLauncherOpen").addEventListener("click", ((_arg_32) => {
+        openSelected();
+    }));
+    Dom_byId("btnLauncherRescan").addEventListener("click", ((_arg_33) => {
+        showLauncher();
+    }));
+    Dom_byId("btnMenu").addEventListener("click", ((_arg_34) => {
+        App_pauseGame();
+        showLauncher();
+    }));
+    Dom_byId("btnNamesRefresh").addEventListener("click", ((_arg_35) => {
+        refreshNamesList();
+    }));
+    Dom_byId("tabbar").addEventListener("click", ((_arg_36) => {
+        refreshNamesList();
+    }));
+    cmCanvas.addEventListener("mousedown", ((e_12) => {
+        const addr_4 = cmAddrAt(cmXy(e_12)[1]) | 0;
+        cmDragAddr = addr_4;
+        cmNavigate(addr_4);
+    }));
+    cmCanvas.addEventListener("mousemove", ((e_13) => {
+        let option_3, b_3;
+        const y_12 = cmXy(e_13)[1];
+        if (cmDragAddr == null) {
+            const addr_6 = cmAddrAt(y_12) | 0;
+            const blockTxt = (control == null) ? "" : defaultArg((option_3 = ControlFileModule_blockAt(control, addr_6), (option_3 != null) ? ((b_3 = option_3, toText(printf(" %s (%A)"))(b_3.Name)(b_3.Kind))) : undefined), " <unmapped>");
+            const counts = cmCounts();
+            const n_8 = ((addr_6 < counts.length) ? item_1(addr_6, counts) : 0) | 0;
+            cmCanvas.title = toText(printf("0x%04X%s (%d executions)"))(addr_6)(blockTxt)(n_8);
+        }
+        else {
+            const addr_5 = cmAddrAt(y_12) | 0;
+            cmDragAddr = addr_5;
+            cmNavigate(addr_5);
         }
     }));
-    Dom_window.addEventListener("mouseup", ((_arg_29) => {
+    Dom_window.addEventListener("mouseup", ((_arg_37) => {
         cmDragAddr = undefined;
     }));
     cmCanvas.addEventListener("wheel", ((e_14) => {
@@ -2326,82 +2599,82 @@ export function App_start() {
         return cmRender();
     }));
     cmCanvas.addEventListener("contextmenu", ((e_15) => {
-        let arg_54, arg_55;
+        let arg_76, arg_77;
         e_15.preventDefault();
-        const addr_6 = cmAddrAt(cmXy(e_15)[1]) | 0;
+        const addr_7 = cmAddrAt(cmXy(e_15)[1]) | 0;
         if (control != null) {
             const menu = Dom_byId("ctrlMenu");
             Dom_clear(menu);
-            const addItem = (txt, act) => {
+            const addItem = (txt_1, act) => {
                 const item = Dom_el("div");
-                item.textContent = txt;
-                item.addEventListener("click", ((_arg_30) => {
+                item.textContent = txt_1;
+                item.addEventListener("click", ((_arg_38) => {
                     if (control == null) {
                     }
                     else {
-                        const c_5 = control;
-                        control = act(c_5);
+                        const c_7 = control;
+                        control = act(c_7);
                         saveControlLocal();
                         App_refreshDisasm();
                         cmRender();
-                        App_statusText.textContent = toText(printf("%s @ %04X"))(txt)(addr_6);
+                        App_statusText.textContent = toText(printf("%s @ %04X"))(txt_1)(addr_7);
                     }
                     menu.style.display = "none";
                 }));
                 Dom_append(menu, item);
             };
-            addItem("kind: code", (c_6) => ControlFileModule_setKindAt(c_6, addr_6, BlockKind.Code));
-            addItem("kind: data", (c_7) => ControlFileModule_setKindAt(c_7, addr_6, BlockKind.Data));
-            addItem("kind: gap", (c_8) => ControlFileModule_setKindAt(c_8, addr_6, BlockKind.Gap));
+            addItem("kind: code", (c_8) => ControlFileModule_setKindAt(c_8, addr_7, BlockKind.Code));
+            addItem("kind: data", (c_9) => ControlFileModule_setKindAt(c_9, addr_7, BlockKind.Data));
+            addItem("kind: gap", (c_10) => ControlFileModule_setKindAt(c_10, addr_7, BlockKind.Gap));
             Dom_append(menu, Dom_el("hr"));
             const split = Dom_el("div");
             split.textContent = "split block here";
-            split.addEventListener("click", ((_arg_31) => {
-                let s_6;
+            split.addEventListener("click", ((_arg_39) => {
+                let s_7;
                 if (control == null) {
                 }
                 else {
-                    const c_9 = control;
-                    if ((instrStartsCache == null) ? true : ((s_6 = instrStartsCache, (addr_6 < s_6.length) && item_1(addr_6, s_6)))) {
-                        control = ControlFileModule_splitBlockAt(c_9, addr_6);
+                    const c_11 = control;
+                    if ((instrStartsCache == null) ? true : ((s_7 = instrStartsCache, (addr_7 < s_7.length) && item_1(addr_7, s_7)))) {
+                        control = ControlFileModule_splitBlockAt(c_11, addr_7);
                         saveControlLocal();
                         cmRender();
-                        App_statusText.textContent = toText(printf("block split at %04X"))(addr_6);
+                        App_statusText.textContent = toText(printf("block split at %04X"))(addr_7);
                     }
                     else {
-                        App_statusText.textContent = toText(printf("%04X is not an instruction start"))(addr_6);
+                        App_statusText.textContent = toText(printf("%04X is not an instruction start"))(addr_7);
                     }
                 }
                 menu.style.display = "none";
             }));
             Dom_append(menu, split);
-            addItem("merge into next block", (c_10) => ControlFileModule_mergeWithNext(c_10, addr_6));
-            addItem("rename block...", (c_11) => {
-                const name_1 = Dom_window.prompt("block name", "");
-                return (Operators_IsNull(name_1) ? true : (name_1.trim().length === 0)) ? c_11 : ControlFileModule_renameBlockAt(c_11, addr_6, name_1.trim());
+            addItem("merge into next block", (c_12) => ControlFileModule_mergeWithNext(c_12, addr_7));
+            addItem("rename block...", (c_13) => {
+                const name_3 = Dom_window.prompt("block name", "");
+                return (Operators_IsNull(name_3) ? true : (name_3.trim().length === 0)) ? c_13 : ControlFileModule_renameBlockAt(c_13, addr_7, name_3.trim());
             });
-            addItem("line comment...", (c_12) => {
-                const txt_1 = Dom_window.prompt(toText(printf("comment at %04X"))(addr_6), "");
-                return Operators_IsNull(txt_1) ? c_12 : ControlFileModule_upsert(c_12, new ControlComment(CommentKind.Line, addr_6, 0, -1, txt_1));
+            addItem("line comment...", (c_14) => {
+                const txt_2 = Dom_window.prompt(toText(printf("comment at %04X"))(addr_7), "");
+                return Operators_IsNull(txt_2) ? c_14 : ControlFileModule_upsert(c_14, new ControlComment(CommentKind.Line, addr_7, 0, -1, txt_2));
             });
-            addItem("range over block...", (c_13) => {
-                const txt_2 = Dom_window.prompt("comment text for the whole block", "");
-                if (Operators_IsNull(txt_2)) {
-                    return c_13;
+            addItem("range over block...", (c_15) => {
+                const txt_3 = Dom_window.prompt("comment text for the whole block", "");
+                if (Operators_IsNull(txt_3)) {
+                    return c_15;
                 }
                 else {
-                    const matchValue_11 = ControlFileModule_blockAt(c_13, addr_6);
-                    if (matchValue_11 == null) {
-                        return c_13;
+                    const matchValue_15 = ControlFileModule_blockAt(c_15, addr_7);
+                    if (matchValue_15 == null) {
+                        return c_15;
                     }
                     else {
-                        const b_3 = matchValue_11;
-                        return ControlFileModule_upsert(c_13, new ControlComment(CommentKind.Range$, b_3.Start, b_3.EndExcl, -1, txt_2));
+                        const b_4 = matchValue_15;
+                        return ControlFileModule_upsert(c_15, new ControlComment(CommentKind.Range$, b_4.Start, b_4.EndExcl, -1, txt_3));
                     }
                 }
             });
-            menu.style.left = ((arg_54 = (~~e_15.clientX | 0), toText(printf("%dpx"))(arg_54)));
-            menu.style.top = ((arg_55 = (~~e_15.clientY | 0), toText(printf("%dpx"))(arg_55)));
+            menu.style.left = ((arg_76 = (~~e_15.clientX | 0), toText(printf("%dpx"))(arg_76)));
+            menu.style.top = ((arg_77 = (~~e_15.clientY | 0), toText(printf("%dpx"))(arg_77)));
             menu.style.display = "block";
         }
         else {
@@ -2424,28 +2697,55 @@ export function App_start() {
             App_refreshAll();
             App_syncSlider();
         }
-        catch (ex_1) {
-            App_statusText.textContent = ("boot failed: " + ex_1.message);
+        catch (ex_3) {
+            App_statusText.textContent = ("boot failed: " + ex_3.message);
         }
     }, 30);
     Dom_setInterval(() => {
-        const n_6 = tlFrameCount() | 0;
-        if (n_6 !== tlLen) {
-            tlLen = (n_6 | 0);
+        const bar = Dom_byId("modeBar");
+        if (App_session == null) {
+            bar.textContent = "booting...";
+            bar.style.color = App_dim;
+        }
+        else {
+            const recOn = App_chkRec.checked;
+            if (App_running) {
+                if (recOn) {
+                    bar.textContent = "● RECORDING - live play, new trace";
+                    bar.style.color = App_red;
+                }
+                else {
+                    bar.textContent = "running live - not recording";
+                    bar.style.color = App_dim;
+                }
+            }
+            else if (recOn) {
+                bar.textContent = "paused - recording armed, press Run to capture";
+                bar.style.color = App_red;
+            }
+            else {
+                bar.textContent = "paused";
+                bar.style.color = App_dim;
+            }
+        }
+        const n_9 = tlFrameCount() | 0;
+        if (n_9 !== tlLen) {
+            tlLen = (n_9 | 0);
             tlRender();
         }
     }, 100);
-    Dom_byId("btnCtrlNew").addEventListener("click", ((_arg_32) => {
+    showLauncher();
+    Dom_byId("btnCtrlNew").addEventListener("click", ((_arg_40) => {
         control = ControlFileModule_empty(16384, 65536);
         cmRender();
         App_statusText.textContent = "empty control file created over $4000-$FFFF";
     }));
-    Dom_byId("btnCtrlSave").addEventListener("click", ((_arg_33) => {
+    Dom_byId("btnCtrlSave").addEventListener("click", ((_arg_41) => {
         if (control == null) {
             App_statusText.textContent = "no control file - click New first";
         }
         else if (control.Dirty) {
-            const c_15 = control;
+            const c_17 = control;
             saveControlLocal();
             App_statusText.textContent = "control saved to browser storage";
         }
@@ -2453,7 +2753,7 @@ export function App_start() {
             App_statusText.textContent = "control unchanged";
         }
     }));
-    Dom_byId("btnCtrlDl").addEventListener("click", ((_arg_34) => {
+    Dom_byId("btnCtrlDl").addEventListener("click", ((_arg_42) => {
         if (control == null) {
             App_statusText.textContent = "no control file - click New first";
         }
@@ -2468,42 +2768,62 @@ export function App_start() {
             App_statusText.textContent = "control.json downloaded";
         }
     }));
-    Dom_byId("btnCtrlImport").addEventListener("click", ((_arg_35) => {
+    Dom_byId("btnCtrlImport").addEventListener("click", ((_arg_43) => {
         document.getElementById('ctrlFileInput').click();
     }));
     Dom_byId("ctrlFileInput").addEventListener("change", ((e_17) => {
         const file = e_17.target.files[0];
         if (!Operators_IsNull(file)) {
             const reader = new FileReader();
-            reader.onload = ((_arg_36) => {
-                const text = reader.result;
+            reader.onload = ((_arg_44) => {
+                const text_2 = reader.result;
                 try {
-                    control = ControlFileModule_fromJson(text);
+                    control = ControlFileModule_fromJson(text_2);
                     cmRender();
                     App_statusText.textContent = "control file imported";
                 }
-                catch (ex_2) {
-                    App_statusText.textContent = ("import failed: " + ex_2.message);
+                catch (ex_4) {
+                    App_statusText.textContent = ("import failed: " + ex_4.message);
                 }
             });
             reader.readAsText(file);
         }
     }));
-    const local_1 = Dom_window.localStorage;
-    const matchValue_12 = local_1.getItem("jetpacfr.control.minimal");
-    if (equals(matchValue_12, defaultOf())) {
-        const p = fetch('games/minimal/control.json').then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null });
-        p.then((txt_3) => {
-            if (!Operators_IsNull(txt_3) && (control == null)) {
-                control = ControlFileModule_fromJson(toString(txt_3));
-                cmRender();
-                App_statusText.textContent = "control file loaded from games/minimal/control.json";
+    const local_2 = Dom_window.localStorage;
+    let matchValue_17;
+    try {
+        matchValue_17 = (local_2.getItem(controlKey()));
+    }
+    catch (matchValue_16) {
+        matchValue_17 = defaultOf();
+    }
+    if (equals(matchValue_17, defaultOf())) {
+        let path_1;
+        const arg_79 = defaultArg(App_currentProjectId(), "minimal");
+        path_1 = toText(printf("games/%s/control.json"))(arg_79);
+        const p_2 = fetch(path_1).then(function (r) { return r.ok ? r.text() : null }).catch(function () { return null });
+        p_2.then((txt_4) => {
+            let arg_78;
+            if (!Operators_IsNull(txt_4) && (control == null)) {
+                try {
+                    control = ControlFileModule_fromJson(toString(txt_4));
+                    cmRender();
+                    App_statusText.textContent = ((arg_78 = defaultArg(App_currentProjectId(), "minimal"), toText(printf("control file loaded from games/%s/control.json"))(arg_78)));
+                }
+                catch (ex_5) {
+                    App_statusText.textContent = ("stored control.json ignored: " + ex_5.message);
+                }
             }
         });
     }
     else {
-        control = ControlFileModule_fromJson(toString(matchValue_12));
-        cmRender();
+        try {
+            control = ControlFileModule_fromJson(toString(matchValue_17));
+            cmRender();
+        }
+        catch (ex_6) {
+            App_statusText.textContent = ("stored control ignored: " + ex_6.message);
+        }
     }
 }
 

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "jetpac",
+    "name": "Jetpac",
+    "default": true,
+    "boot": "auto",
+    "web": false,
+    "trace": true,
+    "keys": true,
+    "control": true,
+    "ce": false
+  },
+  {
+    "id": "manic",
+    "name": "manic",
+    "default": false,
+    "boot": "auto",
+    "web": false,
+    "trace": false,
+    "keys": false,
+    "control": false,
+    "ce": false
+  },
+  {
+    "id": "manicminer",
+    "name": "Manic Miner",
+    "default": false,
+    "boot": "auto",
+    "web": false,
+    "trace": true,
+    "keys": true,
+    "control": false,
+    "ce": false
+  },
+  {
+    "id": "minimal",
+    "name": "Minimal",
+    "default": false,
+    "boot": "program",
+    "web": true,
+    "trace": true,
+    "keys": true,
+    "control": false,
+    "ce": true
+  },
+  {
+    "id": "synthetic",
+    "name": "Synthetic (test fixture)",
+    "default": false,
+    "boot": "manual",
+    "web": false,
+    "trace": false,
+    "keys": false,
+    "control": false,
+    "ce": false
+  }
+]

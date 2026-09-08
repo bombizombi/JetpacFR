@@ -1,17 +1,18 @@
 
-import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { uint32_type, class_type, array_type, record_type, string_type, bool_type, list_type, tuple_type, int64_type, int32_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
+import { FSharpRef, Record } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { uint32_type, class_type, array_type, record_type, string_type, bool_type, list_type, tuple_type, int64_type, int32_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
 import { TraceQuery_nearestSnapshotBefore, RegSnapshot_$reflection } from "../TraceTypesWeb.js";
-import { Dictionary } from "../fable_modules/fable-library-js.5.13.0/MutableMap.js";
-import { compareArrays, comparePrimitives, defaultOf, arrayHash, equalArrays } from "../fable_modules/fable-library-js.5.13.0/Util.js";
-import { addToSet, tryGetValue } from "../fable_modules/fable-library-js.5.13.0/MapUtil.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
-import { max, min } from "../fable_modules/fable-library-js.5.13.0/Double.js";
-import { fromUInt8, op_Addition, toInt64_unchecked } from "../fable_modules/fable-library-js.5.13.0/BigInt.js";
-import { filter, sortBy, fold, delay, exists, map, sortByDescending, toList } from "../fable_modules/fable-library-js.5.13.0/Seq.js";
-import { printf, toText } from "../fable_modules/fable-library-js.5.13.0/String.js";
-import { filter as filter_1, map as map_1, empty, tail, head, isEmpty, cons, reverse, sortByDescending as sortByDescending_1 } from "../fable_modules/fable-library-js.5.13.0/List.js";
-import { FSharpSet__Contains, ofList } from "../fable_modules/fable-library-js.5.13.0/Set.js";
+import { CallOps_isRet, CallOps_isCall } from "./Flame.js";
+import { Dictionary } from "../fable_modules/fable-library-js.5.17.0/MutableMap.js";
+import { compareArrays, comparePrimitives, defaultOf, arrayHash, equalArrays } from "../fable_modules/fable-library-js.5.17.0/Util.js";
+import { addToSet, tryGetValue } from "../fable_modules/fable-library-js.5.17.0/MapUtil.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
+import { max, min } from "../fable_modules/fable-library-js.5.17.0/Double.js";
+import { fromUInt8, op_Addition, toInt64_unchecked } from "../fable_modules/fable-library-js.5.17.0/BigInt.js";
+import { filter, sortBy, fold, delay, exists, map, sortByDescending, toList } from "../fable_modules/fable-library-js.5.17.0/Seq.js";
+import { printf, toText } from "../fable_modules/fable-library-js.5.17.0/String.js";
+import { filter as filter_1, map as map_1, empty, tail, head, isEmpty, cons, reverse, sortByDescending as sortByDescending_1 } from "../fable_modules/fable-library-js.5.17.0/List.js";
+import { FSharpSet__Contains, ofList } from "../fable_modules/fable-library-js.5.17.0/Set.js";
 
 export class Routine extends Record {
     constructor(Entry, SpanLo, SpanHi, CallCount, InclusiveTStates, ExclusiveTStates, CallSites, LoopExtents, WriteRanges, InputSamples, ExitSamples, SelfModifying, Overlapping, Score, Risk, Reasons) {
@@ -52,46 +53,9 @@ export function CallEdge_$reflection() {
     return record_type("JetpacFR.Core.Miner.CallEdge", [], CallEdge, () => [["Caller", int32_type], ["Callee", int32_type], ["Count", int32_type]]);
 }
 
-function isCallOp(b0) {
-    switch (b0) {
-        case 196:
-        case 204:
-        case 205:
-        case 212:
-        case 220:
-        case 228:
-        case 236:
-        case 244:
-        case 252:
-            return true;
-        default:
-            return false;
-    }
-}
+const isCallOp = CallOps_isCall;
 
-function isRetOp(b0, b1) {
-    switch (b0) {
-        case 192:
-        case 200:
-        case 201:
-        case 208:
-        case 216:
-        case 224:
-        case 232:
-        case 240:
-        case 248:
-            return true;
-        case 237:
-            if (b1 === 69) {
-                return true;
-            }
-            else {
-                return b1 === 77;
-            }
-        default:
-            return false;
-    }
-}
+const isRetOp = (b) => ((b_1) => CallOps_isRet(b, b_1));
 
 class Frame extends Record {
     constructor(Entry, SpanLo, SpanHi, Exclusive, Inclusive) {
@@ -221,7 +185,7 @@ export function mine(trace) {
                     void (stack.push(new Frame(callee, callee, callee, 0n, 0n)));
                 }
             }
-            else if (isRetOp(b0, e.B1) && (e.Taken === 1)) {
+            else if (isRetOp(b0)(e.B1) && (e.Taken === 1)) {
                 if (stack.length > 0) {
                     const f = item(stack.length - 1, stack);
                     stack.splice(stack.length - 1, 1);

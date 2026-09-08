@@ -1,12 +1,12 @@
 
-import { Union } from "../fable_modules/fable-library-js.5.13.0/Types.js";
-import { union_type } from "../fable_modules/fable-library-js.5.13.0/Reflection.js";
-import { Exception, equals } from "../fable_modules/fable-library-js.5.13.0/Util.js";
+import { Union } from "../fable_modules/fable-library-js.5.17.0/Types.js";
+import { union_type } from "../fable_modules/fable-library-js.5.17.0/Reflection.js";
+import { Exception, equals } from "../fable_modules/fable-library-js.5.17.0/Util.js";
 import { RegisterFile__Iy, RegisterFile__Ix, RegisterFile__Sp, RegisterFile__SetSp_Z524259A4, RegisterFile__Exx, RegisterFile__Ex_Z1C3BEB40, RegisterFile__R, RegisterFile__I, RegisterFile__SetR_Z524259A4, RegisterFile__SetI_Z524259A4, RegisterFile__SetPc_Z524259A4, RegisterFile__Pc, RegisterFile__SetWz_Z524259A4, RegisterFile__Set_488BADFE, RegisterFile__Get_6F21F62, RegisterFile__Set_Z54B079DF, RegisterFile__Get_2EC184DD, RegisterFile__Wz, R8, R16 } from "./Registers.js";
 import { Z80Dispatch_set_Run_3708BEA5, Z80__ReadOpcode, Z80__Push16_Z524259A4, Z80__set_Iff2_Z1FBCCD16, Z80__Halt, Z80__Branch_Z524259A4, Z80__set_IrqMode_Z524259A4, Z80__Pop16, Z80__get_Iff2, Z80__set_Iff1_Z1FBCCD16, Z80__ReadImmediate16, Z80__Out_Z37302880, Z80__In_Z524259A4, Z80__SetFlags_Z7353D318, Z80__Flags, Z80__PassTime_Z524259A4, Z80__Write_Z37302880, Z80__ReadImmediate, Z80__get_Regs, Z80__Read_Z524259A4 } from "./Z80.js";
 import { Flags_op_LogicalNot_Z7353D318, Flags_Subtract, Flags_HalfCarry, Flags__get_half_carry, Flags_Overflow, Flags_Flag5, Flags, Flags_Flag3, Flags_Carry, Flags_Zero, Flags_Sign, Flags_op_BitwiseOr_Z51621B00, Flags_op_BitwiseAnd_Z51621B00, Flags__get_sign, Flags__get_parity, Flags__get_carry, Flags__get_zero } from "./Flags.js";
 import { ccf, scf, cpl, daa, fastRotate8, fastRotateCircular8, dec8, inc8, add16, iff2FlagsFor, adc16, sbc16, parityFlagsFor, bit as bit_1, shiftLogical8, shiftArithmetic8, rotate8, Direction, rotateCircular8, cmp8, or8, xor8, and8, sub8, add8 } from "./Alu.js";
-import { item } from "../fable_modules/fable-library-js.5.13.0/Array.js";
+import { item } from "../fable_modules/fable-library-js.5.17.0/Array.js";
 
 export class HlSet extends Union {
     constructor(tag, fields) {
