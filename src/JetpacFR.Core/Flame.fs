@@ -320,3 +320,182 @@ module FlameWalker =
         MaxDepth = depth
         Entries = Some entries
         EntryTicks = Some ticks }
+
+/// Zoom-independent column model for the flame graph (the LOD pyramid). The
+/// window is bucketed into one cell per frame (level 0); each cell holds its
+/// dominant function (by covered T-states) and how much of the cell that
+/// function covers. Coarser levels halve the cell count. Painting at any
+/// zoom then costs O(visible cells) instead of O(rectangles) - a
+/// multi-hour trace paints exactly like a two-second one. Pure arrays, no
+/// WPF types: the web client renders the same runs on a canvas.
+module FlameLod =
+
+  /// One pyramid level: granularity 2^Shift frames per cell, row-major over
+  /// depths (index = depth * Cols + cell). Parallel arrays, Fable-friendly.
+  type Level =
+    { Shift: int
+      Cols: int
+      /// Dominant entry address per cell (-1 = uncovered).
+      Funcs: int[]
+      /// T-states the dominant function covers inside each cell.
+      Dominated: int64[]
+      /// T-states covered by any function inside each cell (0 = idle).
+      Covered: int64[] }
+
+  type Lod =
+    { Levels: Level[] // levels[0] = one cell per frame
+      FrameTicks: int64[]
+      EndTick: int64 }
+
+  let empty : Lod = { Levels = [||]; FrameTicks = [||]; EndTick = 1L }
+
+  /// Frame cell a tick falls into: how many boundaries are <= tick.
+  let private cellOf (frameTicks: int64[]) (t: int64) : int =
+    let rec search lo hi =
+      if lo > hi then lo
+      else
+        let mid = (lo + hi) >>> 1
+        if frameTicks[mid] <= t then search (mid + 1) hi else search lo (mid - 1)
+    min frameTicks.Length (search 0 (frameTicks.Length - 1) + 1)
+
+  /// The tick range covered by one cell of `level`.
+  let cellTickRange (lod: Lod) (level: Level) (cell: int) : int64 * int64 =
+    let first = cell <<< level.Shift
+    let lastExcl = min lod.FrameTicks.Length ((cell + 1) <<< level.Shift)
+    let startT = if first <= 0 then 0L else lod.FrameTicks[first - 1]
+    let endT = if lastExcl >= lod.FrameTicks.Length then lod.EndTick else lod.FrameTicks[lastExcl - 1]
+    startT, max startT endT
+
+  /// The level-`shift` cell containing `tick`.
+  let cellAt (lod: Lod) (shift: int) (t: int64) : int =
+    (cellOf lod.FrameTicks t) >>> shift
+
+  /// Finest level whose cells are at least `minPx` wide at `ppTick`.
+  let pickLevel (lod: Lod) (ppTick: float) (minPx: float) : int =
+    let rec go k =
+      if k >= lod.Levels.Length - 1 then k
+      else
+        let a, b = cellTickRange lod lod.Levels[k] 0
+        if float (b - a) * ppTick >= minPx then k else go (k + 1)
+    go 0
+
+  /// Build the pyramid from a walked window: O(rects * overlapped cells)
+  /// once for level 0, then linear per coarser level. Rects arrive sorted by
+  /// start and same-depth invocations are sequential (one stack), so the
+  /// streaming per-cell max yields the true dominant function.
+  let build (w: FlameWindow) : Lod =
+    if w.FrameTicks.Length = 0 || w.MaxDepth = 0 then empty
+    else
+      let cols0 = w.FrameTicks.Length
+      let depthMax = w.MaxDepth
+      let size = cols0 * depthMax
+      let funcs = Array.create size -1
+      let dom = Array.zeroCreate<int64> size
+      let cov = Array.zeroCreate<int64> size
+      for r in w.Rects do
+        let len = r.EndTick - r.StartTick
+        if len > 0L && r.Depth < depthMax then
+          let mutable c = cellOf w.FrameTicks r.StartTick
+          let cEnd = min (cols0 - 1) (cellOf w.FrameTicks (max r.StartTick (r.EndTick - 1L)))
+          while c <= cEnd do
+            let cStart = if c = 0 then 0L else w.FrameTicks[c - 1]
+            let cStop = w.FrameTicks[c]
+            let o = min r.EndTick cStop - max r.StartTick cStart
+            if o > 0L then
+              let idx = r.Depth * cols0 + c
+              cov[idx] <- cov[idx] + o
+              if funcs[idx] = int r.Entry then dom[idx] <- dom[idx] + o
+              elif o > dom[idx] then
+                dom[idx] <- o
+                funcs[idx] <- int r.Entry
+            c <- c + 1
+      // Coarser levels: pair cells up; the dominant side carries over (same
+      // -function time sums, otherwise the larger side - an approximation
+      // that only mis-ranks cells where three functions interleave evenly).
+      let levels = ResizeArray<Level>()
+      let rec addLevel (shift: int) (cols: int) (f: int[]) (d: int64[]) (cv: int64[]) =
+        levels.Add { Shift = shift; Cols = cols; Funcs = f; Dominated = d; Covered = cv }
+        if cols > 1 then
+          let nc = (cols + 1) / 2
+          let nf = Array.create (nc * depthMax) -1
+          let nd = Array.zeroCreate<int64> (nc * depthMax)
+          let ncv = Array.zeroCreate<int64> (nc * depthMax)
+          for depth in 0 .. depthMax - 1 do
+            for j in 0 .. nc - 1 do
+              let dst = depth * nc + j
+              let baseIdx = depth * cols
+              let i0 = baseIdx + (j * 2)
+              // An odd cell count leaves the last pair short one cell:
+              // treat the missing half as uncovered (-1 / 0).
+              let hasSecond = (j * 2 + 1) < cols
+              let f0, d0, c0 = f[i0], d[i0], cv[i0]
+              let f1, d1, c1 =
+                if hasSecond then f[baseIdx + (j * 2 + 1)], d[baseIdx + (j * 2 + 1)], cv[baseIdx + (j * 2 + 1)]
+                else -1, 0L, 0L
+              let t = c0 + c1
+              ncv[dst] <- t
+              if t = 0L then ()
+              elif f0 = f1 then
+                nf[dst] <- f0
+                nd[dst] <- d0 + d1
+              elif f1 < 0 then
+                nf[dst] <- f0; nd[dst] <- d0
+              elif f0 < 0 then
+                nf[dst] <- f1; nd[dst] <- d1
+              elif d0 >= d1 then
+                nf[dst] <- f0; nd[dst] <- d0
+              else
+                nf[dst] <- f1; nd[dst] <- d1
+          addLevel (shift + 1) nc nf nd ncv
+      addLevel 0 cols0 funcs dom cov
+      { Levels = levels.ToArray()
+        FrameTicks = w.FrameTicks
+        EndTick = w.EndTick }
+
+  /// Coverage bucket for painting: -1 idle, else 0-3 by the dominant
+  /// function's share of the cell (3 = >= 75%, full color).
+  let inline bucket (level: Level) (idx: int) : int =
+    let c = level.Covered[idx]
+    if c <= 0L then -1
+    else
+      let share = float level.Dominated[idx] / float c
+      if share >= 0.75 then 3
+      elif share >= 0.5 then 2
+      elif share >= 0.25 then 1
+      else 0
+
+  /// Run-length encode the visible cells of one depth row at one level:
+  /// adjacent cells merge while function and coverage bucket match. Returns
+  /// parallel arrays (funcs, buckets, cellStarts, cellLens) - the painter
+  /// turns each run into one rectangle, so drawn geometry is bounded by
+  /// pixels, not by the number of invocations in the trace.
+  let runs (lod: Lod) (level: Level) (depth: int) (cellFrom: int) (cellTo: int) : int[] * int[] * int[] * int[] =
+    let cellTo = min cellTo level.Cols
+    let funcs = ResizeArray<int>()
+    let buckets = ResizeArray<int>()
+    let starts = ResizeArray<int>()
+    let lens = ResizeArray<int>()
+    let mutable runFunc = -2
+    let mutable runBucket = -2
+    let mutable runStart = cellFrom
+    let mutable c = cellFrom
+    while c < cellTo do
+      let idx = depth * level.Cols + c
+      let f = level.Funcs[idx]
+      let b = bucket level idx
+      if f <> runFunc || b <> runBucket then
+        if runFunc <> -2 then
+          funcs.Add runFunc
+          buckets.Add runBucket
+          starts.Add runStart
+          lens.Add (c - runStart)
+        runFunc <- f
+        runBucket <- b
+        runStart <- c
+      c <- c + 1
+    if runFunc <> -2 && cellTo > runStart then
+      funcs.Add runFunc
+      buckets.Add runBucket
+      starts.Add runStart
+      lens.Add (cellTo - runStart)
+    funcs.ToArray(), buckets.ToArray(), starts.ToArray(), lens.ToArray()

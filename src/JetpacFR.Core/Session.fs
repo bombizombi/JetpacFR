@@ -272,6 +272,13 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     if frameNumber < 0 || frameNumber > this.TimelineExtent then
       invalidOp (sprintf "no state at frame %d (history last=%d, timeline count=%d)" frameNumber history.LastFrame stateTimeline.Count)
     let buffer = Array.zeroCreate<byte> 0x10000
+    // Below the timeline's start with no executed history to restore
+    // (scrubbing left of a recording that starts mid-game): land on the
+    // timeline's first state instead of throwing.
+    let frameNumber =
+      if (frameNumber <= history.LastFrame && history.IsRestorable frameNumber)
+         || stateTimeline.CoversFrame frameNumber then frameNumber
+      else max frameNumber stateTimeline.StartFrame
     let text, keys =
       if frameNumber <= history.LastFrame && history.IsRestorable frameNumber then
         history.Restore(frameNumber, buffer)
@@ -297,6 +304,11 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
   member this.ParkAtInstruction(frame: int, steps: int) =
     if frame <= 0 then invalidOp "no state before frame 0"
     this.JumpTo(frame - 1)
+    if this.Frame <> frame - 1 then
+      // JumpTo clamps to the earliest restorable state (recordings that
+      // start mid-game). The exact prefix re-execution this contract needs
+      // is then impossible - refuse rather than park on a wrong state.
+      invalidOp (sprintf "state before frame %d is not restorable (timeline starts at %d)" (frame - 1) this.Frame)
     if steps > 0 then
       // The frame's logged keys apply directly on the port (replay
       // semantics) without logging: the key script must stay untouched.

@@ -62,6 +62,63 @@ module Audio =
     waveOut.Stop()
     waveOut.Dispose()
 
+/// Per-game CE image registration shared by the launcher and the main
+/// window: the launcher reports CE availability before the main window is
+/// ever constructed, so registration lives here instead of in its ctor.
+/// New game = new games/<id> fsproj + a line here.
+module GameImages =
+  let register () =
+    GameRegistry.register
+      { GameId = "minimal"
+        Name = "Minimal"
+        Memory = fst (MinimalGame.Game.entryState MinimalGame.Image.binary)
+        BaseAddress = 0x8000
+        Program = MinimalGame.Image.program
+        EntryState = snd (MinimalGame.Game.entryState MinimalGame.Image.binary) }
+
+/// Game-project discovery shared by the launcher window and the main
+/// window's game combo.
+module Projects =
+  /// Walk up from the app base directory to the first folder containing a
+  /// games/ directory (the manifests live at the repository root).
+  let findGamesDir () =
+    let rec walk (d: System.IO.DirectoryInfo) =
+      let candidate = System.IO.Path.Combine(d.FullName, "games")
+      if System.IO.Directory.Exists candidate then candidate
+      else
+        match d.Parent with
+        | null -> ""
+        | parent -> walk parent
+    walk (System.IO.DirectoryInfo AppContext.BaseDirectory)
+
+  /// All game manifests. With no reachable games/ folder the explicit
+  /// Jetpac fallback keeps the app usable without manifests.
+  let discover () : GameManifest list =
+    let games = Manifest.discover (findGamesDir ())
+    if List.isEmpty games then
+      [ { GameId = "jetpac"
+          ManifestPath = ""
+          GameDirectory = Directory.GetCurrentDirectory()
+          Name = "Jetpac"
+          Default = true
+          Rom = LocalAssets.find "48.rom"
+          Tzx = LocalAssets.find "Jetpac.tzx"
+          Boot = "auto"
+          Script = None
+          ProgramBin = None
+          ProgramAddress = None } ]
+    else games
+
+  /// The project the app auto-loads on startup: the manifest flagged
+  /// default, else Jetpac, else the first discovered project.
+  let startupOf (games: GameManifest list) : GameManifest =
+    match games |> List.tryFind (fun g -> g.Default) with
+    | Some g -> g
+    | None ->
+      match games |> List.tryFind (fun g -> g.GameId = "jetpac") with
+      | Some g -> g
+      | None -> List.head games
+
 /// One row of the disassembly lists (execution + memory modes).
 type DisasmRow =
   { Tag: string
@@ -107,16 +164,9 @@ type MainWindow() as self =
   let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
 
   /// Walk up from the app base directory to the first folder containing a
-  /// games/ directory (the manifests live at the repository root).
-  let findGamesDir () =
-    let rec walk (d: System.IO.DirectoryInfo) =
-      let candidate = System.IO.Path.Combine(d.FullName, "games")
-      if System.IO.Directory.Exists candidate then candidate
-      else
-        match d.Parent with
-        | null -> ""
-        | parent -> walk parent
-    walk (System.IO.DirectoryInfo AppContext.BaseDirectory)
+  /// games/ directory (the manifests live at the repository root). Shared
+  /// with the launcher window (Projects.findGamesDir).
+  let findGamesDir () = Projects.findGamesDir ()
 
   // ---- palette -----------------------------------------------------------
   let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
@@ -194,6 +244,10 @@ type MainWindow() as self =
 
   // ---- controls ----------------------------------------------------------
   let gameImage = Image()
+  /// Mode bar under the screen: says whether the frames on screen come from
+  /// a scripted replay of a saved trace or from live play being recorded
+  /// (red) - after boot it is otherwise hard to tell the two apart.
+  let modeLabel = TextBlock(FontFamily = mono, FontSize = 12.0, Margin = Thickness(0.0, 6.0, 0.0, 0.0))
   let heatImage = Image()
   let stripImage = Image()
   let gfxImage = Image()
@@ -355,6 +409,29 @@ type MainWindow() as self =
   /// thumb to the right edge instead of showing replay progress.
   let mutable replayExtent = 0
 
+  /// Recompute the mode bar under the screen from the live session state.
+  /// Cheap and idempotent; called on the UI timer so every state change
+  /// (Run/Pause/Replay/rec toggle/boot) shows up within ~100 ms without
+  /// having to instrument each individual handler.
+  let updateModeLabel () =
+    let set text brush bold =
+      modeLabel.Text <- text
+      modeLabel.Foreground <- brush
+      modeLabel.FontWeight <- if bold then FontWeights.Bold else FontWeights.Normal
+    match ceGame, session with
+    | Some _, _ -> set "compiled F# port - no trace recorded" dim false
+    | None, Some s when s.Replaying || replaying ->
+      set "\u25B6 REPLAYING saved trace (keys scripted, nothing new recorded)" orange true
+    | None, Some s ->
+      let recOn = s.Recorder.RecordEnabled
+      if running then
+        if recOn then set "\u25CF RECORDING - live play, new trace" red true
+        else set "running live - not recording" dim false
+      elif s.ReplayFinished then set "replay finished - parked at recording end" orange false
+      elif recOn then set "paused - recording armed, press Run to capture" red false
+      else set "paused" dim false
+    | None, None -> set "booting..." dim false
+
   // ---- control-file GUI state --------------------------------------------
   let mutable control: ControlFile option = None
   let mutable controlGameDir = ""
@@ -467,7 +544,7 @@ type MainWindow() as self =
   /// or switch to memory view synced to this instruction. `refresh`
   /// re-renders whichever code surface is showing. `target` anchors the
   /// popup - without a placement target an IsOpen menu never displays.
-  let openRowMenu (target: FrameworkElement) (addr: int) (instrIdx: int) (refresh: unit -> unit) =
+  let openRowMenu (target: FrameworkElement) (addr: int) (instrIdx: int) (refresh: unit -> unit) (jumpToPrevExec: int -> unit) =
     let hasComment =
       match control with
       | Some c -> ControlFile.commentAt c addr |> Option.isSome
@@ -491,6 +568,8 @@ type MainWindow() as self =
     if instrIdx >= 0 then
       mk (sprintf "exec comment at instruction #%d" instrIdx) (fun _ ->
         setText { Kind = Exec; Addr = 0; EndExcl = 0; InstrIndex = instrIdx; Text = "" })
+      mk (sprintf "jump to previous execution of %04X in trace" addr) (fun _ ->
+        jumpToPrevExec instrIdx)
     if hasComment then
       mk (sprintf "edit comment at %04X (loads it into the comment box)" addr) (fun _ ->
         match control with
@@ -593,6 +672,17 @@ type MainWindow() as self =
     match b with
     | 0xCDuy | 0xC4uy | 0xCCuy | 0xD4uy | 0xDCuy | 0xE4uy | 0xECuy | 0xF4uy | 0xFCuy -> true
     | _ -> false
+
+  /// Signed displacement byte (JR/DJNZ operands).
+  let s8 (b: byte) = int (sbyte b)
+
+  /// Relative-jump target of the instruction at `addr`, if it is one
+  /// (JR / JR cc / DJNZ). Absolute jumps and calls are not relative.
+  let relJumpTarget (addr: int) (mem: byte[]) : int option =
+    match mem[addr &&& 0xFFFF] with
+    | 0x18uy | 0x20uy | 0x28uy | 0x30uy | 0x38uy | 0x10uy ->
+      Some ((addr + 2 + s8 mem[(addr + 1) &&& 0xFFFF]) &&& 0xFFFF)
+    | _ -> None
 
   let isRet (b: byte) =
     match b with
@@ -820,6 +910,37 @@ type MainWindow() as self =
         | None -> Array.zeroCreate<int> 0x10000
 
 
+  /// Code-window branch annotation: when the instruction is a call or jump
+  /// with an address operand and the control file names the target, the row
+  /// text gains a bracketed symbol - `CALL 0x7308 [name]`, `JP 0x4000
+  /// [start]`, `JR -5 [loop]`. Absolute targets (CD / C4-class calls,
+  /// C3 / C2-class jumps) are the little-endian bytes 1-2; relative targets
+  /// (JR / DJNZ, one signed byte) resolve against the instruction's own
+  /// address. Register-indirect jumps (JP (HL)) have no operand and gain
+  /// nothing.
+  let branchAnnotation (addr: int) (b0: byte) (b1: byte) (b2: byte) : string =
+    let s8 (b: byte) = int (sbyte b)
+    let imm16 = (int b1) ||| ((int b2) <<< 8)
+    let target =
+      match b0 with
+      | 0xC3uy -> Some imm16                                       // JP nn
+      | 0xCDuy -> Some imm16                                       // CALL nn
+      | 0x18uy | 0x20uy | 0x28uy | 0x30uy | 0x38uy ->              // JR [cc], DJNZ
+        Some ((addr + 2 + s8 b1) &&& 0xFFFF)
+      | _ ->
+        if b0 &&& 0xC7uy = 0xC4uy then Some imm16                  // CALL cc,nn
+        elif b0 &&& 0xC7uy = 0xC2uy then Some imm16                // JP cc,nn
+        else None
+    match target with
+    | Some t ->
+      match control with
+      | Some c ->
+        match ControlFile.symbolAt c t with
+        | Some n -> sprintf " [%s]" n
+        | None -> ""
+      | None -> ""
+    | None -> ""
+
   let rowFor (t: Trace) (e: TraceEntry) (idx: int) (isCurrent: bool) : DisasmRow =
     let comment =
       match control with
@@ -855,6 +976,7 @@ type MainWindow() as self =
         match Jetpac3.Core.LiftedRoutines.folded (int e.Pc) with
         | Some insns -> String.concat "; " insns
         | None -> insn.Text
+      let text = text + branchAnnotation (int e.Pc) e.B0 e.B1 e.B2
       let brush =
         if isCall e.B0 then cyan
         elif isRet e.B0 then yellow
@@ -1051,7 +1173,10 @@ type MainWindow() as self =
 
   /// One row of the linear memory sweep. The active-brush selection is
   /// passed in by the caller (computed once per refresh, never per row).
-  let memRowFor (mem: byte[]) (addr: int) (sel: (BrushId * Set<int>) option) : DisasmRow =
+  /// `labelFor` resolves jump-target labels for the window being rendered:
+  /// a relative jump whose target has a label gains ` [label_71B0]` (or the
+  /// user symbol's name).
+  let memRowFor (mem: byte[]) (addr: int) (sel: (BrushId * Set<int>) option) (labelFor: int -> string option) : DisasmRow =
     let insn = Disasm.disasmMemory mem addr
     let hex =
       [ for i in 0 .. insn.Length - 1 -> sprintf "%02X" mem[(addr + i) &&& 0xFFFF] ]
@@ -1061,12 +1186,18 @@ type MainWindow() as self =
       | Some c -> ControlFile.commentAt c addr |> Option.defaultValue ""
       | None -> ""
     let cm = if comment <> "" then sprintf "  ; %s" comment else ""
+    let ann = branchAnnotation addr mem[addr] mem[(addr + 1) &&& 0xFFFF] mem[(addr + 2) &&& 0xFFFF]
+    let jr =
+      relJumpTarget addr mem
+      |> Option.bind labelFor
+      |> Option.map (sprintf " [%s]")
+      |> Option.defaultValue ""
     let tint =
       match sel with
       | Some (which, s) when s.Contains addr ->
         (match which with A -> tintA :> Brush | B -> tintB :> Brush)
       | _ -> null
-    { Tag = sprintf "  %04X  %-11s  %s%s" addr hex insn.Text cm
+    { Tag = sprintf "  %04X  %-11s  %s%s%s%s" addr hex insn.Text jr ann cm
       Brush =
         if addr = memCursor then bright
         elif (currentCounts())[addr] > 0 then cyan
@@ -1075,6 +1206,39 @@ type MainWindow() as self =
       IsCurrent = addr = memCursor
       Addr = addr
       InstrIdx = -1 }
+
+  /// A label line placed before the row it names: function starts render as
+  /// `fun_73B2:` (or the user symbol), jump targets as `label_71B0:`.
+  let labelRowFor (a: int) (name: string) : DisasmRow =
+    { Tag = sprintf "  %04X         %s:" a name
+      Brush = (if name.StartsWith "label_" then dim else cyan)
+      Tint = null
+      IsCurrent = false
+      Addr = a
+      InstrIdx = -1 }
+
+  /// Labels for one memory-mode window: user symbols and code-block starts
+  /// become function labels (`fun_73B2` unless named), and every relative
+  /// jump target found in the window becomes `label_XXXX`. Registration
+  /// order gives precedence: symbol > block start > jump target.
+  let windowLabels (addrs: ResizeArray<int>) (targets: int list) : (int -> string option) =
+    let dict = System.Collections.Generic.Dictionary<int, string>()
+    let register a name =
+      if dict.ContainsKey a |> not then dict[a] <- name
+    match control with
+    | Some c ->
+      for (a, n) in c.Symbols do register a n
+      for b in c.Blocks do
+        if b.Kind = Code then
+          let n =
+            match ControlFile.symbolAt c b.Start with
+            | Some s -> s
+            | None -> if b.Name.StartsWith "block_" then sprintf "fun_%04X" b.Start else b.Name
+          register b.Start n
+    | None -> ()
+    for t in targets do
+      register t (sprintf "label_%04X" t)
+    fun a -> match dict.TryGetValue a with true, n -> Some n | _ -> None
   /// Cached "byte is an instruction start" bitmap for the control map,
   /// rebuilt lazily but at most once per second (self-modifying code
   /// shifts boundaries; a 64K decode sweep is a few ms).
@@ -1184,7 +1348,7 @@ type MainWindow() as self =
             p.Children.Add header |> ignore
             let mutable a = b.Start
             while a < b.EndExcl do
-              let row = memRowFor mem a sel
+              let row = memRowFor mem a sel (fun _ -> None)
               let tb =
                 TextBlock(
                   Text = row.Tag, FontFamily = mono, FontSize = 11.5,
@@ -1383,7 +1547,7 @@ type MainWindow() as self =
       Dispatcher.CurrentDispatcher.Invoke(
         DispatcherPriority.Render, System.Action(fun () -> ())) |> ignore
       try
-        buildGraph (fun addr -> openRowMenu codeGraphCanvas addr -1 refreshDisasm)
+        buildGraph (fun addr -> openRowMenu codeGraphCanvas addr -1 refreshDisasm ignore)
       finally
         Mouse.OverrideCursor <- prevCursor
     elif disasmModeMemory then
@@ -1403,7 +1567,7 @@ type MainWindow() as self =
           for b in blocks do
             let mutable a = b.Start
             while a < b.EndExcl do
-              rows.Add(memRowFor mem a (Some (which, sel)))
+              rows.Add(memRowFor mem a (Some (which, sel)) (fun _ -> None))
               a <- a + max 1 (Disasm.disasmMemory mem a).Length
           // A memory jump places the cursor row at 2/5 of the viewport (the
           // selection list is long; without this the target can sit outside
@@ -1455,10 +1619,32 @@ type MainWindow() as self =
               | Some t -> t
               | None -> memCursor
           memViewTop <- Some memTop
+          // Pass 1: collect the window's instruction addresses plus every
+          // relative-jump target - those become label_XXXX labels. Pass 2
+          // emits label lines before the rows they name.
+          let addrs = ResizeArray<int>()
+          let targets = ResizeArray<int>()
           let mutable cur = memTop
-          while rows.Count < 41 do
-            rows.Add(memRowFor mem cur None)
-            cur <- (cur + (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
+          while addrs.Count < 41 do
+            addrs.Add cur
+            (match mem[cur] with
+             | 0x18uy | 0x20uy | 0x28uy | 0x30uy | 0x38uy | 0x10uy ->
+               targets.Add (relJumpTarget cur mem |> Option.defaultValue cur)
+             | _ -> ())
+            cur <- (cur + max 1 (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
+          let labelFor = windowLabels addrs (List.ofSeq targets)
+          let mutable emitted = 0
+          let mutable i = 0
+          while emitted < 41 && i < addrs.Count do
+            let a = addrs[i]
+            i <- i + 1
+            match labelFor a with
+            | Some name ->
+              rows.Add(labelRowFor a name)
+              emitted <- emitted + 1
+            | None -> ()
+            rows.Add(memRowFor mem a None labelFor)
+            emitted <- emitted + 1
           // A memory jump places the cursor row at 2/5 of the viewport;
           // wheel moves and row clicks keep the viewport still.
           pendingScrollToRow <-
@@ -2113,6 +2299,111 @@ type MainWindow() as self =
   let stepFwd10 () = seek 10
   let stepFwd100 () = seek 100
 
+  /// Park the session machine exactly on the trace entry under the cursor:
+  /// restore the state after frame - 1 and re-execute the frame prefix with
+  /// recording suppressed - memory, registers and the screen become the
+  /// exact state of that moment (the same mechanism the flame seek uses).
+  /// Best effort: when the frame is outside restorable history (deep live
+  /// frames, a loaded trace with no stored states) the step stays
+  /// display-only and says so.
+  let syncToCursor () =
+    match session, currentTrace () with
+    | Some s, Some t when t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
+      let c = max 0 (min cursor (t.Entries.Length - 1))
+      let frameNo = frameOfEntry t c
+      // First entry of that frame: boundary [frame - 2] ends frame - 1
+      // (0-padded window leads read as the window's first entry).
+      let firstInFrame =
+        if frameNo < 2 || frameNo - 2 >= t.FrameTicks.Length then 0
+        else
+          let tick' = t.FrameTicks[frameNo - 2]
+          let rec s2 (lo: int) (hi: int) =
+            if lo >= hi then lo
+            else
+              let mid = (lo + hi) / 2
+              if t.Entries[mid].Tick < tick' then s2 (mid + 1) hi else s2 lo mid
+          s2 0 t.Entries.Length
+      // Steps count real instructions: an interrupt marker shares its Step
+      // with the vector instruction.
+      let mutable steps = 0
+      for k in firstInFrame .. c do
+        if t.Entries[k].Length > 0uy then steps <- steps + 1
+      if steps > 0 then
+        try
+          s.ParkAtInstruction(frameNo, steps)
+          presentGame ()
+          showLiveRegs s |> ignore
+        with ex ->
+          statusText.Text <- sprintf "no state for frame %d (%s) - step is display-only" frameNo ex.Message
+    | _ -> ()
+
+  /// Debugger-style stepping: move the trace cursor, then park the machine
+  /// on the new entry so registers, memory and the screen reflect the exact
+  /// state of that moment (recording stays suppressed; Run resumes live
+  /// execution from the parked position). Step into = the next executed
+  /// entry. Step over = when the cursor sits on a call, land on its return
+  /// site: the next executed entry at the call's fall-through address (a
+  /// not-taken conditional call therefore just advances one). If the routine
+  /// never returns inside the recorded trace, the cursor parks on the last
+  /// entry instead.
+  let stepInto () =
+    pauseGame ()
+    seek 1
+    syncToCursor ()
+  let stepBack () =
+    pauseGame ()
+    seek -1
+    syncToCursor ()
+  let stepOver () =
+    pauseGame ()
+    match currentTrace () with
+    | Some t when t.Entries.Length > 0 ->
+      let c = max 0 (min cursor (t.Entries.Length - 1))
+      let e = t.Entries[c]
+      if e.Length > 0uy && isCall e.B0 && c < t.Entries.Length - 1 then
+        let fallThrough = (int e.Pc + int e.Length) &&& 0xFFFF
+        let mutable k = c + 1
+        while k < t.Entries.Length && int t.Entries[k].Pc <> fallThrough do
+          k <- k + 1
+        seek (min (t.Entries.Length - 1) k - c)
+      else seek 1
+    | _ -> ()
+    syncToCursor ()
+
+  /// "Jump to previous execution of this instruction" (code row menu): scan
+  /// the browsed trace backwards from the clicked entry for the same PC, and
+  /// report execution counts in the status line - total, before, and after
+  /// are computed in one forward pass (a 4M-entry sweep is a few
+  /// milliseconds, fine for a menu click). The machine is parked on the
+  /// landed entry, so state is exact like the step buttons.
+  let jumpToPrevExecFromIndex (idx: int) =
+    match currentTrace () with
+    | Some t when t.Entries.Length > 0 && idx >= 0 && idx < t.Entries.Length ->
+      let pc = int t.Entries[idx].Pc
+      let mutable total = 0
+      let mutable before = 0
+      for i in 0 .. t.Entries.Length - 1 do
+        if int t.Entries[i].Pc = pc then
+          total <- total + 1
+          if i < idx then before <- before + 1
+      let after = total - before
+      let mutable k = idx - 1
+      while k >= 0 && int t.Entries[k].Pc <> pc do k <- k - 1
+      if k >= 0 then
+        pauseGame ()
+        cursor <- k
+        refreshAll ()
+        syncSlider ()
+        syncToCursor ()
+        statusText.Text <-
+          sprintf "prev exec of %04X: instr #%d (was #%d) - total %d, %d before, %d after"
+            pc k idx total before after
+      else
+        statusText.Text <-
+          sprintf "no previous execution of %04X before instr #%d - total %d, %d before, %d after"
+            pc idx total before after
+    | _ -> statusText.Text <- "trace changed - reopen the menu"
+
   let toggleCinema () =
     buildTraceNow ()
     if cinemaPlaying then
@@ -2175,11 +2466,121 @@ type MainWindow() as self =
           (if s.Recorder.RecordEnabled then "ON" else "OFF") s.KeyLog.Count
     | None -> ()
 
-  // ---- construction ------------------------------------------------------
+  // ---- startup picker (the window's first content) -----------------------
+  // The window opens as "ZX Spectrum Game Changer": centered project list
+  // with saved-trace and per-project status chips. Open/Enter/double-click
+  // REPLACES this window's content with the emulator UI below - the same
+  // window is reused, no second window is ever created.
   do
-    self.Title <- "JetpacFR - reversing lab"
+    GameImages.register () // CE availability for the status chips
+    self.Title <- "ZX Spectrum Game Changer"
+    self.Width <- 820.0
+    self.Height <- 640.0
+    self.WindowStartupLocation <- WindowStartupLocation.CenterScreen
+
+    let mutable selectedGame: GameManifest option = None
+    let mutable games = Projects.discover ()
+    let startupGame = Projects.startupOf games
+
+    /// One status chip: green when present/sized, dim when absent.
+    let chip (parent: #Panel) (text: string) (present: bool) =
+      let tb = TextBlock(Text = text, Foreground = (if present then green else dim), FontFamily = mono, FontSize = 12.0, Margin = Thickness(0.0, 0.0, 18.0, 0.0), VerticalAlignment = VerticalAlignment.Center)
+      parent.Children.Add tb |> ignore
+
+    /// Build one list row for a game project: name line + status chips.
+    let buildRow (g: GameManifest) =
+      let border = Border(Background = panel, CornerRadius = CornerRadius(6.0), Padding = Thickness(12.0, 8.0, 12.0, 8.0), Margin = Thickness(4.0))
+      let col = StackPanel()
+      let title =
+        sprintf "%s   (%s)" g.Name g.GameId
+        |> fun s -> if g.Default then s + "  - auto-load default" else s
+      col.Children.Add(TextBlock(Text = title, Foreground = normal, FontSize = 16.0, FontWeight = FontWeights.SemiBold, Margin = Thickness(0.0, 0.0, 0.0, 6.0))) |> ignore
+      let status = StackPanel(Orientation = Orientation.Horizontal)
+      let tracePath = Path.Combine(g.GameDirectory, StateTimelineStore.FileName)
+      let fi = FileInfo(tracePath)
+      if fi.Exists then
+        chip status (sprintf "trace: %.1f MB" (float fi.Length / (1024.0 * 1024.0))) true
+      else chip status "trace: none" false
+      chip status (sprintf "key script: %s" (if FileInfo(ReplayStore.path g).Exists then "yes" else "no")) (FileInfo(ReplayStore.path g).Exists)
+      chip status (sprintf "control file: %s" (if FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists then "yes" else "no")) (FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists)
+      chip status (sprintf "CE program: %s" (if GameRegistry.tryFind g.GameId |> Option.isSome then "yes" else "no")) (GameRegistry.tryFind g.GameId |> Option.isSome)
+      chip status (sprintf "boot: %s" g.Boot) true
+      col.Children.Add status |> ignore
+      border.Child <- col
+      ListBoxItem(Content = border, Tag = g, Padding = Thickness(2.0))
+
+    let root = DockPanel(Margin = Thickness(20.0))
+
+    // header
+    let header = StackPanel(Margin = Thickness(0.0, 0.0, 0.0, 14.0))
+    header.Children.Add(TextBlock(Text = "ZX Spectrum Game Changer", Foreground = normal, FontSize = 26.0, FontWeight = FontWeights.Bold)) |> ignore
+    header.Children.Add(TextBlock(Text = "Pick a project and open it. The preselected entry is the project the app auto-loads on startup; choosing another one boots that project the exact same way.", Foreground = dim, FontSize = 13.0, Margin = Thickness(0.0, 6.0, 0.0, 0.0), TextWrapping = TextWrapping.Wrap)) |> ignore
+    DockPanel.SetDock(header, Dock.Top)
+    root.Children.Add header |> ignore
+
+    // project list
+    let list = ListBox(Background = panel, BorderThickness = Thickness(0.0))
+    let refill () =
+      list.Items.Clear ()
+      for g in games do list.Items.Add (buildRow g) |> ignore
+    let gameAt (index: int) =
+      match list.Items[index] with
+      | :? ListBoxItem as it -> Some(it.Tag :?> GameManifest)
+      | _ -> None
+    let reselectDefault () =
+      list.SelectedIndex <- games |> List.findIndex (fun g -> g.GameId = startupGame.GameId)
+    list.SelectionChanged.Add(fun _ ->
+      selectedGame <- (if list.SelectedIndex >= 0 then gameAt list.SelectedIndex else None))
+    list.MouseDoubleClick.Add(fun _ ->
+      match selectedGame with
+      | Some g -> self.BuildEmulator g
+      | None -> ())
+    refill ()
+    // Preselect exactly what the app auto-loads on startup.
+    reselectDefault ()
+
+    // big buttons, each with a one-line explanation of what it does
+    let btnRow = Grid(Margin = Thickness(0.0, 14.0, 0.0, 0.0))
+    for i in 0 .. 2 do
+      btnRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
+    let buttonColumn (col: int) (caption: string) (explanation: string) (isDefault: bool) (onClick: unit -> unit) =
+      let stack = StackPanel(Margin = Thickness((if col = 0 then 0.0 else 8.0), 0.0, 0.0, 0.0))
+      Grid.SetColumn(stack, col)
+      let b = Button(Content = caption, Height = 52.0, MinWidth = 200.0, FontSize = 16.0, FontWeight = FontWeights.SemiBold, IsDefault = isDefault)
+      b.Click.Add(fun _ -> onClick ())
+      stack.Children.Add b |> ignore
+      stack.Children.Add(TextBlock(Text = explanation, Foreground = dim, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = Thickness(2.0, 5.0, 2.0, 0.0))) |> ignore
+      btnRow.Children.Add stack |> ignore
+    buttonColumn 0 "Open project" "Boot the selected project exactly like the automatic startup: boot to game entry, load its saved trace and autoplay it. (Enter, or double-click the row)" true (fun () ->
+      match selectedGame with
+      | Some g -> self.BuildEmulator g
+      | None -> ())
+    buttonColumn 1 "Rescan" "Re-read the games folder: picks up newly added projects, traces and status changes without restarting the app." false (fun () ->
+      games <- Projects.discover ()
+      refill ()
+      reselectDefault ())
+    buttonColumn 2 "Exit" "Close the app without opening a project. No recording is lost: timelines are only written by the emulator." false (fun () ->
+      self.Close ())
+    DockPanel.SetDock(btnRow, Dock.Bottom)
+    root.Children.Add btnRow |> ignore
+    // Child order matters in a DockPanel: header top, buttons bottom, and
+    // the list LAST so LastChildFill makes it fill the remaining space.
+    root.Children.Add list |> ignore
+
+    self.Content <- root
+
+  // ---- construction ------------------------------------------------------
+  /// Build the emulator UI into this window (replacing the picker content)
+  /// and boot `game`: boot to entry, load its saved trace, autoplay.
+  member self.BuildEmulator (game: GameManifest) : unit =
+    self.Title <- "JetpacFR - Game Changer"
     self.Width <- 1560.0
     self.Height <- 900.0
+    // The window was shown at picker size: resize and recenter in place
+    // (WindowStartupLocation no longer applies to a shown window).
+    let workArea = SystemParameters.WorkArea
+    self.Left <- workArea.Left + (workArea.Width - self.Width) / 2.0
+    self.Top <- workArea.Top + (workArea.Height - self.Height) / 2.0
     self.Background <- bg
 
     gameImage.Source <- gameBitmap
@@ -2187,6 +2588,13 @@ type MainWindow() as self =
     gameImage.Width <- 320.0
     gameImage.Height <- 256.0
     RenderOptions.SetBitmapScalingMode(gameImage, BitmapScalingMode.NearestNeighbor)
+    // Clicking the screen takes keyboard focus: emulator keys are read at
+    // window level, but a focused Button eats Space/Enter (Spectrum fire and
+    // Enter) for its own click, and text boxes are filtered out entirely.
+    // Focusable + no focus visual = an explicit "control the game" gesture.
+    gameImage.Focusable <- true
+    gameImage.FocusVisualStyle <- null
+    gameImage.MouseLeftButtonDown.Add(fun _ -> gameImage.Focus () |> ignore)
 
     heatImage.Source <- heatBmp
     heatImage.Width <- 256.0
@@ -2279,6 +2687,7 @@ type MainWindow() as self =
     // left column: game + registers
     let left = StackPanel(Margin = Thickness(8.0))
     left.Children.Add(gameImage) |> ignore
+    left.Children.Add(modeLabel) |> ignore
     let regHeader = TextBlock(Text = "registers (nearest snapshot)", Foreground = dim, FontSize = 12.0, Margin = Thickness(0.0, 8.0, 0.0, 2.0))
     left.Children.Add(regHeader) |> ignore
     left.Children.Add(regGrid) |> ignore
@@ -2372,11 +2781,15 @@ type MainWindow() as self =
     let cmtPaneInner = StackPanel(Margin = Thickness(4.0))
     let cmtPaneTitle = TextBlock(Text = "comments (click a code line or use arrows)", Foreground = dim, FontSize = 11.0, Margin = Thickness(0.0, 0.0, 0.0, 2.0))
     let cmtPaneRows = StackPanel()
+    // Capped + scrollable: comment rows must never grow the pane (the code
+    // window above shares the space, so growth read as jumpiness).
+    let cmtPaneRowsScroll = ScrollViewer(VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 92.0)
+    cmtPaneRowsScroll.Content <- cmtPaneRows
     let cmtPaneAddBox = TextBox(Width = 300.0, Height = 20.0)
-    let cmtPaneAddBtn = Button(Content = "add line comment", Width = 116.0)
+    let cmtPaneAddBtn = Button(Content = "add line comment", Width = 132.0)
     cmtPaneBorder.Child <- cmtPaneInner
     cmtPaneInner.Children.Add cmtPaneTitle |> ignore
-    cmtPaneInner.Children.Add cmtPaneRows |> ignore
+    cmtPaneInner.Children.Add cmtPaneRowsScroll |> ignore
     let cmtPaneAddRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 2.0, 0.0, 0.0))
     cmtPaneAddRow.Children.Add cmtPaneAddBox |> ignore
     cmtPaneAddRow.Children.Add cmtPaneAddBtn |> ignore
@@ -2386,9 +2799,19 @@ type MainWindow() as self =
 
     let mutable paneAddr: int option = None
     let mutable paneControl: obj = null
+    /// The line comment selected for editing in the pane's single text box
+    /// (None = the box adds a new comment at the cursor).
+    let mutable editingComment: ControlComment option = None
     let rec rebuildCommentPane (force: bool) =
       let controlRef = control |> Option.map box |> Option.defaultValue null
       if force || paneAddr <> Some memCursor || not (Object.ReferenceEquals(paneControl, controlRef)) then
+        // The editing selection is address-bound: moving the cursor away
+        // leaves edit mode (the drafted text stays in the box).
+        match editingComment with
+        | Some m when m.Addr <> memCursor ->
+          editingComment <- None
+          cmtPaneAddBtn.Content <- "add line comment"
+        | _ -> ()
         paneAddr <- Some memCursor
         paneControl <- controlRef
         cmtPaneRows.Children.Clear()
@@ -2397,27 +2820,35 @@ type MainWindow() as self =
         | None ->
           cmtPaneRows.Children.Add(TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)) |> ignore
         | Some c ->
-          let mkRow (label: string) (labelColor: Brush) (text: string) (readOnly: bool) (original: ControlComment option) =
+          // Comment rows are read-only one-liners: clicking a line comment
+          // loads it into the single editor below (whose button turns into
+          // "update comment"), so rows never carry text boxes and the pane
+          // height stays bounded.
+          let mkRow (label: string) (labelColor: Brush) (text: string) (original: ControlComment option) =
             let row = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
             let tag = TextBlock(Text = label, Foreground = labelColor, FontSize = 11.0, VerticalAlignment = VerticalAlignment.Center, MinWidth = 150.0)
             row.Children.Add tag |> ignore
-            let box = TextBox(Text = text, Width = 300.0, Height = 20.0, IsReadOnly = readOnly)
-            row.Children.Add box |> ignore
+            let body = TextBlock(Text = text, Foreground = normal, FontSize = 11.0, VerticalAlignment = VerticalAlignment.Center)
+            row.Children.Add body |> ignore
             match original with
             | Some m ->
-              let commit () =
-                control <- Some(ControlFile.replaceComment c m box.Text)
-                refreshDisasm ()
-                rebuildCommentPane true
-              let apply = Button(Content = "apply", Width = 48.0, Margin = Thickness(4.0, 0.0, 0.0, 0.0))
-              apply.Click.Add(fun _ -> commit ())
-              let del = Button(Content = "del", Width = 38.0, Margin = Thickness(2.0, 0.0, 0.0, 0.0))
+              row.Cursor <- Cursors.Hand
+              row.MouseLeftButtonDown.Add(fun _ ->
+                Seq.cast<Panel> cmtPaneRows.Children
+                |> Seq.iter (fun el -> el.Background <- null)
+                row.Background <- hiBgBrush
+                editingComment <- Some m
+                cmtPaneAddBox.Text <- m.Text
+                cmtPaneAddBtn.Content <- "update comment")
+              let del = Button(Content = "del", Width = 38.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
               del.Click.Add(fun _ ->
+                if editingComment = Some m then
+                  editingComment <- None
+                  cmtPaneAddBox.Text <- ""
+                  cmtPaneAddBtn.Content <- "add line comment"
                 control <- Some(ControlFile.removeComment c m)
                 refreshDisasm ()
                 rebuildCommentPane true)
-              box.KeyDown.Add(fun e -> if e.Key = Key.Enter then commit ())
-              row.Children.Add apply |> ignore
               row.Children.Add del |> ignore
             | None -> ()
             cmtPaneRows.Children.Add row |> ignore
@@ -2429,19 +2860,28 @@ type MainWindow() as self =
           if List.isEmpty lines && List.isEmpty (covering Range) && List.isEmpty (covering Name) then
             cmtPaneRows.Children.Add(TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)) |> ignore
           for m in lines do
-            mkRow "line" normal m.Text false (Some m)
+            mkRow "line" normal m.Text (Some m)
           for m in covering Range do
-            mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text true None
+            mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
           for m in covering Name do
-            mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text true None
-    cmtPaneAddBtn.Click.Add(fun _ ->
+            mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
+    let commitComment () =
       match control with
       | Some c ->
-        control <- Some(ControlFile.addLine c memCursor cmtPaneAddBox.Text)
-        cmtPaneAddBox.Text <- ""
+        match editingComment with
+        | Some m ->
+          control <- Some(ControlFile.replaceComment c m cmtPaneAddBox.Text)
+          editingComment <- None
+          cmtPaneAddBox.Text <- ""
+          cmtPaneAddBtn.Content <- "add line comment"
+        | None ->
+          control <- Some(ControlFile.addLine c memCursor cmtPaneAddBox.Text)
+          cmtPaneAddBox.Text <- ""
         refreshDisasm ()
         rebuildCommentPane true
-      | None -> statusText.Text <- "no control file - click New ctrl first")
+      | None -> statusText.Text <- "no control file - click New ctrl first"
+    cmtPaneAddBtn.Click.Add(fun _ -> commitComment ())
+    cmtPaneAddBox.KeyDown.Add(fun e -> if e.Key = Key.Enter then commitComment ())
     // pane lights up while it owns the keyboard
     cmtPaneInner.GotKeyboardFocus.Add(fun _ -> cmtPaneBorder.BorderBrush <- cyan)
     cmtPaneInner.LostKeyboardFocus.Add(fun _ -> cmtPaneBorder.BorderBrush <- dim)
@@ -2478,10 +2918,46 @@ type MainWindow() as self =
     // Above it sits the flame graph in a resizable row (GridSplitter): both
     // share the horizontal time domain with the timeline selector, so the
     // flame is the zoomable big-picture view of the same timeline.
+    // Stepping toolbar over the code pane: moves the trace cursor (F10/F11
+    // keys mirror the buttons; execution mode only). Memory mode has no
+    // trace cursor, so the buttons no-op there for now.
+    let stepBackBtn = Button(Content = "Step back", Width = 76.0, ToolTip = "one instruction back; parks the machine there (registers, memory, screen)")
+    let stepIntoBtn = Button(Content = "Step into (F11)", Width = 104.0, ToolTip = "advance to the next executed instruction; parks the machine there")
+    let stepOverBtn = Button(Content = "Step over (F10)", Width = 104.0, ToolTip = "when the cursor is on a call, advance to its return site; parks the machine there")
+    stepBackBtn.Click.Add(fun _ -> stepBack ())
+    stepIntoBtn.Click.Add(fun _ -> stepInto ())
+    stepOverBtn.Click.Add(fun _ -> stepOver ())
+    let stepRow = StackPanel(Orientation = Orientation.Horizontal)
+    for b in [ stepIntoBtn :> FrameworkElement; stepOverBtn :> FrameworkElement; stepBackBtn :> FrameworkElement ] do
+      b.Margin <- Thickness(2.0)
+      stepRow.Children.Add b |> ignore
+    // jump helpers (handlers wired later - they need focusCodeView)
+    let jumpPcBtn = Button(Content = "Jump To PC", ToolTip = "execution mode: re-center the view on the current instruction; memory mode: jump to the machine's live PC")
+    let jumpAddrLabel =
+      TextBlock(Text = "Jump To Address:", VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(10.0, 0.0, 4.0, 0.0), Foreground = normal)
+    let jumpAddrBox =
+      TextBox(Width = 64.0, FontFamily = mono, Background = panel, Foreground = normal,
+              VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 2.0, 2.0, 2.0),
+              ToolTip = "hex address, e.g. 7309 or 0x7309 - Enter or Go jumps")
+    let jumpGoBtn = Button(Content = "Go", Width = 40.0, ToolTip = "execution mode: first execution of the address in the trace; memory mode: the address itself")
+    jumpPcBtn.Margin <- Thickness(2.0)
+    jumpGoBtn.Margin <- Thickness(2.0, 2.0, 2.0, 2.0)
+    stepRow.Children.Add jumpPcBtn |> ignore
+    stepRow.Children.Add jumpAddrLabel |> ignore
+    stepRow.Children.Add jumpAddrBox |> ignore
+    stepRow.Children.Add jumpGoBtn |> ignore
+
     let codeHost = Grid()
+    codeHost.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
+    codeHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star)))
+    Grid.SetRow(stepRow, 0)
+    codeHost.Children.Add stepRow |> ignore
+    Grid.SetRow(disasmList, 1)
     codeHost.Children.Add disasmList |> ignore
     graphScroll.Content <- codeGraphCanvas
     graphScroll.Visibility <- Visibility.Collapsed
+    Grid.SetRow(graphScroll, 1)
     codeHost.Children.Add graphScroll |> ignore
     let lowerHost = Grid()
     lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star), MinHeight = 70.0))
@@ -2624,13 +3100,118 @@ type MainWindow() as self =
     refreshGfx ()
 
     let funcTab = TabItem(Header = "Functions")
-    let funcPanel = DockPanel()
+    let funcPanel = DockPanel(Margin = Thickness(4.0))
     let funcTop = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
     mineBtn.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
     funcTop.Children.Add mineBtn |> ignore
     routineCountLabel.Foreground <- dim
     routineCountLabel.VerticalAlignment <- VerticalAlignment.Center
     funcTop.Children.Add routineCountLabel |> ignore
+    // The tab's content was never assembled (unlike Scan/Contract/Theater,
+    // which all set .Content) - the Mine button and the routine list were
+    // built but never parented, so the tab rendered empty.
+    DockPanel.SetDock(funcTop, Dock.Top)
+    funcPanel.Children.Add funcTop |> ignore
+    routineDetail.Foreground <- dim
+    routineDetail.FontFamily <- mono
+    routineDetail.FontSize <- 11.0
+    routineDetail.TextWrapping <- TextWrapping.Wrap
+    DockPanel.SetDock(routineDetail, Dock.Bottom)
+    funcPanel.Children.Add routineDetail |> ignore
+    funcPanel.Children.Add routineList |> ignore // last child fills the pane
+    funcTab.Content <- funcPanel
+
+    // Mass comments: a mass-comment batch (Comment A / B / A-only / B-only)
+    // stamps the SAME text onto many addresses, so groups are recovered by
+    // grouping Line comments on their text. Selecting a group and jumping
+    // finds the earliest executed instruction of the region - the moment the
+    // compared ranges first diverge.
+    let massTab = TabItem(Header = "Mass comments")
+    let massPanel = DockPanel(Margin = Thickness(4.0))
+    let massList = ListBox()
+    let massRefreshBtn = Button(Content = "Refresh list", Width = 100.0)
+    let massFindBtn =
+      Button(Content = "Find first execution in trace", Width = 200.0,
+             ToolTip = "jump the trace cursor (and park the machine) on the earliest executed instruction whose address carries this comment group")
+    let massHint =
+      TextBlock(Text = "select a group, then find its first execution",
+                Foreground = dim, FontSize = 11.0, VerticalAlignment = VerticalAlignment.Center)
+    let mutable massGroupsCache: (string * Set<int>) list = []
+    let refreshMassList () =
+      let groups =
+        match control with
+        | None -> []
+        | Some c ->
+          c.Comments
+          |> List.filter (fun m -> m.Kind = CommentKind.Line && not (String.IsNullOrWhiteSpace m.Text))
+          |> List.groupBy (fun m -> m.Text.Trim())
+          |> List.map (fun (txt, ms) -> txt, (ms |> List.map (fun m -> m.Addr) |> Set.ofList))
+          |> List.sortByDescending (fun (_, a) -> Set.count a)
+      massGroupsCache <- groups
+      let rows = ResizeArray<DisasmRow>()
+      for txt, addrs in groups do
+        rows.Add
+          { Tag = sprintf "%s   -   %d addrs, trace-defined (span %04X..%04X)" txt (Set.count addrs) (Set.minElement addrs) (Set.maxElement addrs)
+            Brush = cyan
+            Tint = null
+            IsCurrent = false
+            Addr = -1
+            InstrIdx = -1 }
+      massList.ItemsSource <- rows
+    /// Comment operations call this: the list only refreshes while its tab
+    /// is the visible one (it re-reads on tab selection otherwise).
+    let refreshMassIfVisible () =
+      if right.SelectedItem = massTab then refreshMassList ()
+    let findFirstInRegion () =
+      match massList.SelectedIndex with
+      | i when i >= 0 && i < List.length massGroupsCache ->
+        let _, addrs = List.item i massGroupsCache
+        match currentTrace () with
+        | Some t when t.Entries.Length > 0 ->
+          // Entries are time-ordered, so the smallest entry index over the
+          // region's first-execution indices IS the first execution.
+          let best =
+            (Int32.MaxValue, addrs)
+            ||> Set.fold (fun best a ->
+              if a < t.FirstIndexAtPc.Length && t.FirstIndexAtPc[a] >= 0 then min best t.FirstIndexAtPc[a] else best)
+          if best = Int32.MaxValue then
+            statusText.Text <- "none of the region's addresses executed in this trace"
+          else
+            pauseGame ()
+            cursor <- best
+            refreshAll ()
+            syncSlider ()
+            syncToCursor ()
+            statusText.Text <-
+              sprintf "first execution of region: instr #%d, frame %d, pc=%04X"
+                best (frameOfEntry t best) (int t.Entries[best].Pc)
+        | _ -> statusText.Text <- "no trace - play the game first"
+      | _ -> statusText.Text <- "select a comment group first"
+    let massTemplate = DataTemplate()
+    let massFactory = FrameworkElementFactory(typeof<TextBlock>)
+    massFactory.SetValue(TextBlock.TextProperty, Binding("Tag"))
+    massFactory.SetValue(TextBlock.FontFamilyProperty, mono)
+    massFactory.SetValue(TextBlock.FontSizeProperty, 11.5)
+    massFactory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
+    massTemplate.VisualTree <- massFactory
+    massList.ItemTemplate <- massTemplate
+    massList.Background <- panel
+    massList.BorderThickness <- Thickness(0.0)
+    massList.Foreground <- normal
+    massRefreshBtn.Click.Add(fun _ -> refreshMassList ())
+    massFindBtn.Click.Add(fun _ -> findFirstInRegion ())
+    let massTop = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+    massRefreshBtn.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
+    massTop.Children.Add massRefreshBtn |> ignore
+    massTop.Children.Add massHint |> ignore
+    DockPanel.SetDock(massTop, Dock.Top)
+    massPanel.Children.Add massTop |> ignore
+    let massBottom = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 4.0, 0.0, 0.0))
+    massBottom.Children.Add massFindBtn |> ignore
+    DockPanel.SetDock(massBottom, Dock.Bottom)
+    massPanel.Children.Add massBottom |> ignore
+    massPanel.Children.Add massList |> ignore // last child fills the pane
+    massTab.Content <- massPanel
     let scanTab = TabItem(Header = "Scan")
     let scanPanel = DockPanel(Margin = Thickness(4.0))
     let scanTop = WrapPanel()
@@ -2741,10 +3322,15 @@ type MainWindow() as self =
     right.Items.Add heatTab |> ignore
     right.Items.Add gfxTab |> ignore
     right.Items.Add funcTab |> ignore
+    right.Items.Add massTab |> ignore
     right.Items.Add graphTab |> ignore
     right.Items.Add scanTab |> ignore
     right.Items.Add contractTab |> ignore
     right.Items.Add theaterTab |> ignore
+    // The mass-comment list reads the control file on demand: refresh when
+    // the tab becomes visible (and via its Refresh button).
+    right.SelectionChanged.Add(fun _ ->
+      if right.SelectedItem = massTab then refreshMassList ())
     // toolbar
     let toolbar = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(8.0))
     let runBtn = Button(Content = "Run")
@@ -3068,15 +3654,8 @@ type MainWindow() as self =
       | _ -> ())
 
     // game selection + manual boot + script export
-    // CE registry: one registration per game project the desktop shell
-    // references. New game = new games/<id> fsproj + a line here.
-    GameRegistry.register
-      { GameId = "minimal"
-        Name = "Minimal"
-        Memory = fst (MinimalGame.Game.entryState MinimalGame.Image.binary)
-        BaseAddress = 0x8000
-        Program = MinimalGame.Image.program
-        EntryState = snd (MinimalGame.Game.entryState MinimalGame.Image.binary) }
+    // CE registry moved to GameImages.register (the launcher needs it
+    // before this window is constructed).
     gamesList <- Manifest.discover (findGamesDir ())
     if List.isEmpty gamesList then
       // Fallback: no games/ folder reachable from the app; the explicit
@@ -3095,13 +3674,9 @@ type MainWindow() as self =
             ProgramAddress = None } ]
     gameCombo.ItemsSource <- gamesList
     gameCombo.DisplayMemberPath <- "Name"
-    let startupGame =
-      match gamesList |> List.tryFind (fun g -> g.Default) with
-      | Some g -> g
-      | None ->
-        match gamesList |> List.tryFind (fun g -> g.GameId = "jetpac") with
-        | Some g -> g
-        | None -> List.head gamesList
+    // The project picked in the startup picker (this method is only
+    // reached through the picker, so there is no fallback choice).
+    let startupGame = game
     let startupIndex = gamesList |> List.findIndex (fun g -> g.GameId = startupGame.GameId)
     engineCombo.Items.Add("Interpreter") |> ignore
     engineCombo.Items.Add("CE") |> ignore
@@ -3137,6 +3712,11 @@ type MainWindow() as self =
         cursor <- 0 // the old cursor indexed the previous game's trace
         execViewCenter <- 0
         execViewHold <- false
+        // Brush ranges are frame numbers of the PREVIOUS game's timeline:
+        // stale brushes drive auto-build/jump/preview into ranges the new
+        // session cannot serve.
+        timeline.RangeA <- { Start = 0L; End = 0L }
+        timeline.RangeB <- { Start = 0L; End = 0L }
         memCursor <- 0x8000
         memCursorReason <- "game switch"
         memViewTop <- None
@@ -3390,6 +3970,41 @@ type MainWindow() as self =
           syncSlider ()
         | _ -> ()
 
+    // Hex address jump (code pane toolbar). Bare numbers are hex here.
+    let parseHexAddr (s: string) : int option =
+      let t = s.Trim().ToLowerInvariant()
+      let t = if t.StartsWith("0x") then t.Substring 2 elif t.StartsWith("$") then t.Substring 1 else t
+      match Int32.TryParse(t, Globalization.NumberStyles.HexNumber, Globalization.CultureInfo.InvariantCulture) with
+      | true, v when v >= 0 && v <= 0xFFFF -> Some v
+      | _ -> None
+    let jumpToPc () =
+      if disasmModeMemory then
+        match session with
+        | Some s ->
+          gotoMemCursor ((int (s.Regs.Pc ()) &&& 0xFFFF)) "pc jump"
+          refreshDisasm ()
+        | None -> statusText.Text <- "no live machine - PC jump needs a running session"
+      else
+        match currentTrace () with
+        | Some t when t.Entries.Length > 0 ->
+          execViewHold <- false // drop the wheel/click anchor: recenter on the cursor
+          refreshDisasm ()
+        | _ -> statusText.Text <- "no trace - play the game first"
+    let jumpToAddress () =
+      match parseHexAddr jumpAddrBox.Text with
+      | None -> statusText.Text <- "enter a hex address (e.g. 7309 or 0x7309)"
+      | Some raw ->
+        let addr = raw &&& 0xFFFF
+        if disasmModeMemory then focusCodeView "address jump" addr
+        else
+          match currentTrace () with
+          | Some t when addr < t.FirstIndexAtPc.Length && t.FirstIndexAtPc[addr] >= 0 ->
+            focusCodeView "address jump" addr
+          | _ -> statusText.Text <- sprintf "no execution recorded at 0x%04X in this trace" addr
+    jumpPcBtn.Click.Add(fun _ -> jumpToPc ())
+    jumpGoBtn.Click.Add(fun _ -> jumpToAddress ())
+    jumpAddrBox.KeyDown.Add(fun e -> if e.Key = Key.Enter then jumpToAddress ())
+
     // click/drag scrubs the code views to the address under the cursor
     controlMap.AddressClicked.Add(fun addr -> focusCodeView "memory map click" addr)
 
@@ -3530,14 +4145,21 @@ type MainWindow() as self =
 
     /// Build (or reuse) the flame window for frames [f0, f1Exclusive).
     /// Heavy build runs on a worker; the result lands via the dispatcher.
+    /// A cache hit whose detail tier was trimmed is treated as a miss and
+    /// rebuilt: without entries there is no browsable trace and no exact
+    /// flame-cursor mapping (clicking a code row could not move the cursor
+    /// line onto the timeline). The auto-build coverage check still counts
+    /// trimmed windows as covered, so background rebuilds never loop.
     let rec buildFlameRange (f0: int) (f1Exclusive: int) (zoom: bool) =
       match session with
       | Some s when f1Exclusive - 1 >= f0 ->
-        match flameCache.TryGet(f0, f1Exclusive - 1) with
+        let hit =
+          flameCache.TryGet(f0, f1Exclusive - 1)
+          |> Option.filter (fun w -> w.Entries.IsSome)
+        match hit with
         | Some w ->
-          // Keep the browsable trace in step with the shown window (a
-          // trimmed cache hit has no detail tier, so the pane falls back to
-          // the live trace) - also keeps the flame cursor mapping exact.
+          // Keep the browsable trace in step with the shown window - also
+          // keeps the flame cursor mapping exact.
           flameTrace <- traceOfWindow w
           clampCursor ()
           flameCtrl.SetWindow w
@@ -3832,6 +4454,7 @@ type MainWindow() as self =
            else Some (ControlFile.upsert c m))
         statusText.Text <- sprintf "comment added (%s)" (ControlFile.kindToString m.Kind)
         refreshDisasm ()
+        refreshMassIfVisible ()
       | None -> statusText.Text <- "no control file - click New ctrl first"
     idxCmtBtn.Click.Add(fun _ ->
       match currentTrace () with
@@ -3863,7 +4486,7 @@ type MainWindow() as self =
       match findRow e.OriginalSource with
       | Some row when row.Addr >= 0 ->
         e.Handled <- true
-        openRowMenu disasmList row.Addr row.InstrIdx refreshDisasm
+        openRowMenu disasmList row.Addr row.InstrIdx refreshDisasm jumpToPrevExecFromIndex
       | _ -> ())
     nameBeforeBtn.Click.Add(fun _ ->
       match currentTrace (), control with
@@ -3893,6 +4516,7 @@ type MainWindow() as self =
             control <- Some { cc with Dirty = true }
             statusText.Text <- sprintf "%d line comments added" pcs.Length
             refreshDisasm ()
+            refreshMassIfVisible ()
       | _ -> statusText.Text <- "no trace/control"
     nameABtn.Click.Add(fun _ -> regionComments A Name)
     nameBBtn.Click.Add(fun _ -> regionComments B Name)
@@ -3925,6 +4549,7 @@ type MainWindow() as self =
           control <- Some { cc with Dirty = true }
           statusText.Text <- sprintf "%d B-only comments added" onlyB.Length
           refreshDisasm ()
+          refreshMassIfVisible ()
         | None -> statusText.Text <- "no control file"
       | None -> ())
     cmtANotB.Click.Add(fun _ ->
@@ -3941,6 +4566,7 @@ type MainWindow() as self =
           control <- Some { cc with Dirty = true }
           statusText.Text <- sprintf "%d A-only comments added" onlyA.Length
           refreshDisasm ()
+          refreshMassIfVisible ()
         | None -> statusText.Text <- "no control file"
       | None -> ())
 
@@ -4195,6 +4821,14 @@ type MainWindow() as self =
       || e.OriginalSource :? ComboBox
     self.KeyDown.Add(fun e ->
       if isTextEntry e then ()
+      // Debugger stepping: F10 over, F11 into - execution mode only (the
+      // memory view has no trace cursor to move).
+      elif e.Key = Key.F10 && not disasmModeMemory && not disasmModeGraph then
+        e.Handled <- true
+        stepOver ()
+      elif e.Key = Key.F11 && not disasmModeMemory && not disasmModeGraph then
+        e.Handled <- true
+        stepInto ()
       else
         match ceGame with
         | Some c -> List.iter (fun (r, b) -> c.SetKey(r, b, true)) (keyMap e.Key)
@@ -4336,7 +4970,9 @@ type MainWindow() as self =
             (int seconds / 60) (int seconds % 60) mb mbPerSec (mbPerSec * 60.0)
       | _ -> recStatsLabel.Text <- "")
     // comment pane follows the cursor and control-file changes
-    uiTimer.Tick.Add(fun _ -> rebuildCommentPane false)
+    uiTimer.Tick.Add(fun _ ->
+      rebuildCommentPane false
+      updateModeLabel ())
     uiTimer.Start()
     manualTimer.Start()
     statsTimer.Start()
@@ -4365,5 +5001,21 @@ module Program =
   [<EntryPoint>]
   [<STAThread>]
   let main _ =
+    let logCrash (label: string) (e: exn) =
+      try
+        System.IO.File.WriteAllText(
+          System.IO.Path.Combine(AppContext.BaseDirectory, "crash.log"),
+          sprintf "%s: %s\n%s" label e.Message e.StackTrace)
+      with _ -> ()
     let app = Application()
+    // Log but do not swallow: after the log is written the crash proceeds
+    // exactly as it would without the handler.
+    app.DispatcherUnhandledException.Add(fun args -> logCrash "dispatcher" args.Exception)
+    AppDomain.CurrentDomain.UnhandledException.Add(fun args ->
+      match args.ExceptionObject with
+      | :? exn as e -> logCrash "appdomain" e
+      | _ -> ())
+    // One window for the whole app: it opens as the "ZX Spectrum Game
+    // Changer" picker and swaps its own content for the emulator when a
+    // project opens. Closing it ends the app (default OnLastWindowClose).
     app.Run(MainWindow())

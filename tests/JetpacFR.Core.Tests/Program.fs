@@ -1723,6 +1723,36 @@ let runFlame (romPath: string) (tzxPath: string) : int =
   check "cache returns covering windows" (hit.IsSome && hit.Value.EndTick = wCache.EndTick) ""
   check "cache misses non-covering ranges" (cache.TryGet(2, 4) = None) ""
 
+  // 10b. LOD pyramid: odd cell counts crashed the pairwise merge (an
+  // out-of-range pair cell on the last depth row); runs must tile cells.
+  for frameCount in [ 1; 2; 3; 5; 8 ] do
+    let bounds = [| for f in 1 .. frameCount -> uint32 (f * 100) |]
+    let wLod = FlameWalker.walk 1 bounds callRet
+    let lod = FlameLod.build wLod
+    let shapeOk =
+      lod.Levels.Length > 0
+      && (lod.Levels |> Array.forall (fun l ->
+           l.Funcs.Length = l.Cols * wLod.MaxDepth
+           && l.Dominated.Length = l.Funcs.Length
+           && l.Covered.Length = l.Funcs.Length))
+    check (sprintf "flame LOD builds, frames=%d" frameCount) shapeOk
+      (sprintf "levels=%d maxDepth=%d" lod.Levels.Length wLod.MaxDepth)
+    // Coarser levels halve the cell count (rounded up).
+    check (sprintf "flame LOD level shapes, frames=%d" frameCount)
+      (lod.Levels
+       |> Array.mapi (fun i l -> l.Cols = (frameCount + (1 <<< i) - 1) / (1 <<< i))
+       |> Array.forall id)
+      (sprintf "%A" (lod.Levels |> Array.map (fun l -> l.Cols)))
+    // Runs tile the requested range exactly, once per level.
+    let level = lod.Levels[0]
+    let fA, bA, sA, lA = FlameLod.runs lod level 0 0 level.Cols
+    check (sprintf "flame LOD runs tile, frames=%d" frameCount)
+      (Array.sum lA = level.Cols
+       && (Array.isEmpty sA || Array.head sA = 0)
+       && Array.fold (fun acc l -> acc + l) 0 lA = level.Cols
+       && fA.Length = sA.Length && sA.Length = lA.Length)
+      (sprintf "runs=%d cols=%d" fA.Length level.Cols)
+
   // 11. Live re-execution: builder determinism + step back. Each needs one
   // booted session (minutes on a cold boot), so they share a single session
   // and only run when the warm entry cache exists - run --test trace first
