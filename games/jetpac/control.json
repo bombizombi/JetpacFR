@@ -52,6 +52,251 @@
       "kind": "line",
       "addr": 23433,
       "text": "clear scrn"
+    },
+    {
+      "kind": "range",
+      "addr": 56,
+      "endExcl": 83,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 654,
+      "endExcl": 668,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 683,
+      "endExcl": 691,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 703,
+      "endExcl": 713,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 721,
+      "endExcl": 732,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 798,
+      "endExcl": 805,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 23728,
+      "endExcl": 23729,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 24745,
+      "endExcl": 24797,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 24940,
+      "endExcl": 24969,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 24988,
+      "endExcl": 25045,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 25361,
+      "endExcl": 25456,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 25827,
+      "endExcl": 25841,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 25885,
+      "endExcl": 25942,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26077,
+      "endExcl": 26098,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26158,
+      "endExcl": 26179,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26373,
+      "endExcl": 26381,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26417,
+      "endExcl": 26495,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26535,
+      "endExcl": 26561,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26905,
+      "endExcl": 26945,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 26979,
+      "endExcl": 27102,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 27115,
+      "endExcl": 27120,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 27148,
+      "endExcl": 27155,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28188,
+      "endExcl": 28220,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28231,
+      "endExcl": 28235,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28313,
+      "endExcl": 28460,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28478,
+      "endExcl": 28557,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28832,
+      "endExcl": 28885,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 28895,
+      "endExcl": 28914,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29117,
+      "endExcl": 29118,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29135,
+      "endExcl": 29198,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29220,
+      "endExcl": 29304,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29339,
+      "endExcl": 29343,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29368,
+      "endExcl": 29443,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29479,
+      "endExcl": 29498,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 29618,
+      "endExcl": 29627,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 30214,
+      "endExcl": 30226,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 30237,
+      "endExcl": 30286,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 30301,
+      "endExcl": 30308,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 30317,
+      "endExcl": 30432,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "range",
+      "addr": 30522,
+      "endExcl": 30613,
+      "text": "main menu keypress divergence"
+    },
+    {
+      "kind": "line",
+      "addr": 25397,
+      "text": "new game key pressed"
     }
   ],
   "symbols": [

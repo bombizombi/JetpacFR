@@ -25,6 +25,7 @@ type CommentKind =
   | Name
   | Range
   | Exec
+  | Frames
 
 type ControlComment =
   { Kind: CommentKind

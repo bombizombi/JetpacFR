@@ -106,14 +106,49 @@ type FlameGraph() as self =
 
   /// Warm flame palette: hue hashed per entry address so a function keeps
   /// its color across the whole view. Mid luminance keeps black text legible.
+  /// Memoized and frozen: the paint path must not allocate brushes.
+  let brushMemo = System.Collections.Generic.Dictionary<int, Brush>()
+  let funcColor (entry: int) : Color =
+    hslToColor (float ((entry * 47 + 13) % 360)) 0.62 0.62
   let brushFor (entry: int) : Brush =
-    let hue = float ((entry * 47 + 13) % 360)
-    let brush = SolidColorBrush(hslToColor hue 0.62 0.62)
-    brush.Freeze()
-    brush
+    match brushMemo.TryGetValue entry with
+    | true, b -> b
+    | _ ->
+      let brush = SolidColorBrush(funcColor entry)
+      brush.Freeze()
+      brushMemo[entry] <- brush
+      brush
+
+  /// Gray for LOD cells no single function dominates, and coverage-blended
+  /// brushes: the dominant function's color pulled toward the background as
+  /// its share of the cell drops (bucket 3 = >= 75% = full color).
+  let mixedBrush =
+    let b = SolidColorBrush(Color.FromRgb(0x3Auy, 0x3Euy, 0x4Auy))
+    b.Freeze()
+    b :> Brush
+  let covMemo = System.Collections.Generic.Dictionary<int * int, Brush>()
+  let coverageBrush (entry: int) (bucket: int) : Brush =
+    if bucket >= 3 then brushFor entry
+    elif bucket < 0 then mixedBrush
+    else
+      let key = (entry, bucket)
+      match covMemo.TryGetValue key with
+      | true, b -> b
+      | _ ->
+        let f = funcColor entry
+        let bg = Color.FromRgb(0x0Euy, 0x0Euy, 0x14uy)
+        let t = 0.35 + 0.2 * float bucket
+        let lerp (a: byte) (b: byte) = byte (Math.Round(float a + (float b - float a) * t))
+        let brush = SolidColorBrush(Color.FromRgb(lerp bg.R f.R, lerp bg.G f.G, lerp bg.B f.B))
+        brush.Freeze()
+        covMemo[key] <- brush
+        brush
 
   // ---- state ---------------------------------------------------------------
   let mutable window: FlameWindow option = None
+  /// LOD pyramid for the current window (cleared by SetWindow, built lazily
+  /// on the first zoomed-out paint).
+  let mutable lod: FlameLod.Lod option = None
   let mutable origin = 0L // tick at the left edge
   let mutable ppTick = 0.01 // pixels per tick
   let mutable firstDepth = 0
@@ -165,6 +200,7 @@ type FlameGraph() as self =
     window <- Some w
     firstDepth <- 0
     cursorTick <- -1L // the old window's tick is meaningless in the new one
+    lod <- None
     this.ZoomToFit()
 
   member this.PlayheadFrame
@@ -413,46 +449,95 @@ type FlameGraph() as self =
                   let label = ft (string (win.FirstFrame + j)) 8.0 labelFg false
                   dc.DrawText(label, Point(x + 2.0, 1.0))
 
-        // Rectangles: stab the sorted rect array at the window's left edge,
-        // scan while starts stay within the right edge.
+        // Rectangles. Two regimes: once a frame is narrower than the
+        // fidelity threshold, paint LOD pyramid runs - geometry is bounded
+        // by viewport pixels x visible depth rows, so paint cost does not
+        // depend on how many invocations the window holds. Below the
+        // threshold, draw raw rectangles with per-invocation fidelity.
         let leftTick = origin
         let rightTick = origin + visibleSpan
         let visibleRows = int (h / this.RowH) + 1
-        let mutable i = FlameWindow.stab win leftTick
-        while i < win.Rects.Length && win.Rects[i].StartTick <= rightTick do
-          let r = win.Rects[i]
-          i <- i + 1
-          let y = this.RowOf r.Depth
-          if y > -this.RowH && y < h && r.EndTick > leftTick then
-            let x0 = max -1.0 (this.XOf r.StartTick)
-            let x1 = min (w + 1.0) (this.XOf r.EndTick)
-            let rw = max 1.0 (x1 - x0)
-            if x1 > 0.0 then
-              let brush = brushFor (int r.Entry)
-              dc.DrawRectangle(brush, null, Rect(x0, y, rw, this.RowH - 1.0))
-              let name = labelFor (int r.Entry)
-              let minWidth = if r.Depth = 0 then 54.0 else 26.0
-              if rw >= minWidth && this.RowH >= 12.0 then
-                let mutable text = if r.Depth = 0 then "(window root)" else name
-                let fg = SolidColorBrush(Colors.Black)
-                let mutable ftText = ft text 10.5 fg true
-                if ftText.Width > rw - 5.0 then
-                  text <- elide text (int (rw / 6.0))
-                  ftText <- ft text 10.5 fg true
-                if ftText.Width <= rw - 5.0 then
-                  dc.DrawText(ftText, Point(x0 + 3.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0))
-              // Instruction-level separators when the window kept its
-              // detail tier and instructions are wide enough to matter.
-              match win.EntryTicks with
-              | Some ticks when ppTick >= 3.0 && r.EndIndex - r.StartIndex <= 512 ->
-                let pen = Pen(SolidColorBrush(Color.FromArgb(0x60uy, 0x00uy, 0x00uy, 0x00uy)), 1.0)
-                let mutable e = r.StartIndex + 1
-                let stop = min (r.EndIndex) ticks.Length
-                while e < stop do
-                  let x = this.XOf ticks[e]
-                  if x >= 0.0 && x <= w then dc.DrawLine(pen, Point(x, y), Point(x, y + this.RowH - 1.0))
-                  e <- e + 1
-              | _ -> ()
+        let blackBrush =
+          let b = SolidColorBrush(Colors.Black)
+          b.Freeze()
+          b
+        let lodData =
+          match lod with
+          | Some l -> Some l
+          | None ->
+            let l = FlameLod.build win
+            lod <- Some l
+            Some l
+        let framePx =
+          match lodData with
+          | Some l when l.Levels.Length > 0 ->
+            let a, b = FlameLod.cellTickRange l l.Levels[0] 0
+            float (b - a) * ppTick
+          | _ -> 0.0
+        if framePx >= 1.0 && framePx < 10.0 then
+          let level = lodData.Value.Levels[FlameLod.pickLevel lodData.Value ppTick 1.0]
+          let depthLast = min win.MaxDepth (firstDepth + visibleRows)
+          for depth in firstDepth .. depthLast - 1 do
+            let y = this.RowOf depth
+            if y > -this.RowH && y < h then
+              let cellFrom = max 0 (FlameLod.cellAt lodData.Value level.Shift leftTick)
+              let cellTo = min level.Cols ((FlameLod.cellAt lodData.Value level.Shift rightTick) + 1)
+              let rFuncs, rBuckets, rStarts, rLens = FlameLod.runs lodData.Value level depth cellFrom cellTo
+              for r in 0 .. rFuncs.Length - 1 do
+                let func = rFuncs[r]
+                let bucket = rBuckets[r]
+                if func >= 0 && bucket >= 0 then
+                  let a, _ = FlameLod.cellTickRange lodData.Value level rStarts[r]
+                  let _, b = FlameLod.cellTickRange lodData.Value level (rStarts[r] + rLens[r] - 1)
+                  let x0 = max -1.0 (this.XOf a)
+                  let x1 = min (w + 1.0) (this.XOf b)
+                  let rw = x1 - x0
+                  if rw >= 1.0 && x1 > 0.0 then
+                    dc.DrawRectangle(coverageBrush func bucket, null, Rect(x0, y, rw, this.RowH - 1.0))
+                    if this.RowH >= 12.0 && rw >= 40.0 then
+                      let text = if depth = 0 then "(window root)" else labelFor func
+                      let fg = if bucket >= 2 then blackBrush :> Brush else labelFg :> Brush
+                      let mutable ftText = ft text 10.5 fg true
+                      if ftText.Width > rw - 5.0 then
+                        let t2 = elide text (int (rw / 6.0))
+                        ftText <- ft t2 10.5 fg true
+                      if ftText.Width <= rw - 5.0 then
+                        dc.DrawText(ftText, Point(x0 + 3.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0))
+        else
+          let mutable i = FlameWindow.stab win leftTick
+          while i < win.Rects.Length && win.Rects[i].StartTick <= rightTick do
+            let r = win.Rects[i]
+            i <- i + 1
+            let y = this.RowOf r.Depth
+            if y > -this.RowH && y < h && r.EndTick > leftTick then
+              let x0 = max -1.0 (this.XOf r.StartTick)
+              let x1 = min (w + 1.0) (this.XOf r.EndTick)
+              let rw = max 1.0 (x1 - x0)
+              if x1 > 0.0 then
+                let brush = brushFor (int r.Entry)
+                dc.DrawRectangle(brush, null, Rect(x0, y, rw, this.RowH - 1.0))
+                let name = labelFor (int r.Entry)
+                let minWidth = if r.Depth = 0 then 54.0 else 26.0
+                if rw >= minWidth && this.RowH >= 12.0 then
+                  let mutable text = if r.Depth = 0 then "(window root)" else name
+                  let mutable ftText = ft text 10.5 blackBrush true
+                  if ftText.Width > rw - 5.0 then
+                    text <- elide text (int (rw / 6.0))
+                    ftText <- ft text 10.5 blackBrush true
+                  if ftText.Width <= rw - 5.0 then
+                    dc.DrawText(ftText, Point(x0 + 3.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0))
+                // Instruction-level separators when the window kept its
+                // detail tier and instructions are wide enough to matter.
+                match win.EntryTicks with
+                | Some ticks when ppTick >= 3.0 && r.EndIndex - r.StartIndex <= 512 ->
+                  let pen = Pen(SolidColorBrush(Color.FromArgb(0x60uy, 0x00uy, 0x00uy, 0x00uy)), 1.0)
+                  let mutable e = r.StartIndex + 1
+                  let stop = min (r.EndIndex) ticks.Length
+                  while e < stop do
+                    let x = this.XOf ticks[e]
+                    if x >= 0.0 && x <= w then dc.DrawLine(pen, Point(x, y), Point(x, y + this.RowH - 1.0))
+                    e <- e + 1
+                | _ -> ()
 
         // Mass-comment lanes: one muted row per frame-range comment that
         // intersects the viewport, one gap row below the deepest box. When

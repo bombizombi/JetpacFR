@@ -120,7 +120,14 @@ data_F000:
 ---queued can we optionally synchronize the brush timeline with the flame graph timeline, so they are both at the same position and at the same zoom level. (add zooming to the brush timeline if it does not already exists). there could also be a non-accented small checkbox with text "sync with main timeline" that will control this behaviour.  put default at off
 
 
--?? Problem with t-state count and time (or frame) position of the trace. they could be exactly equivalent, but this is not necessarily so, so how do we handle this.  in some zoom levels it is better to look at the big picture (just time in seconds) but if we zoom into individual frames, tstates make more sense as an address)
+-??sent Problem with t-state count and time (or frame) position of the trace. they could be exactly equivalent, but this is not necessarily so, so how do we handle this.  in some zoom levels it is better to look at the big picture (just time in seconds) but if we zoom into individual frames, tstates make more sense as an address)
+
+--sent  We need to add "Step Over F10" "Step Into F11" and "Step Backward" buttons on top of the code pane, with their functionality.  Start with them working in execution mode, where they do not actually interpret anything, they just move the current position in the code window to the right location.  for step over, we should need to detect if the instruction under cursor is a function call or not.  Also I have a question.  When we are stopped in a certain spot in execution mode, is all the state synchronized to be the exact state for that moment? Is the screen picture the same?  Are all register values correct?  if this is so, this functionality will be easy to implement.  For the memory mode, when we stop the trace replay with pause, is the PC register always on the last value executed, or does it move when we slide back with the trace slider?  Do you think there is a way we can also implement step into / step over for the memory mode as well?
+
+--
+
+
+
 
 
 
