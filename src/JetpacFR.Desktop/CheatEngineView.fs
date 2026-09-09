@@ -5,23 +5,28 @@ open System.IO
 open System.Windows
 open System.Windows.Controls
 open System.Windows.Controls.Primitives
+open System.Windows.Input
 open System.Windows.Media
 open System.Windows.Media.Imaging
 open System.Windows.Threading
 
-/// Cheat Engine: a secondary window over the LIVE session of the main
-/// window (shared state - the accessors hand out the machine's own memory
-/// and screen buffer, not copies, so pokes hit the running game). Left:
-/// the Spectrum screen, refreshed live. Right: a memory scanner with the
-/// classic first-scan / narrow / poke workflow over RAM ($4000-$FFFF),
-/// byte or 16-bit word values.
-type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte[] option, getGameName: unit -> string) as self
-    =
-    inherit Window()
+/// Cheat Engine: a phase of the main window (no second window) over the
+/// LIVE session (shared state - the accessors hand out the machine's own
+/// memory and screen buffer, not copies, so pokes hit the running game).
+/// Left: the Spectrum screen, refreshed live. Right: a memory scanner with
+/// the classic first-scan / narrow / poke workflow over RAM ($4000-$FFFF),
+/// byte or 16-bit word values. Escape (or the main-menu button) returns to
+/// the launcher via the onExit callback.
+type CheatEngineView
+    (
+        getScreen: unit -> byte[] option,
+        getMemory: unit -> byte[] option,
+        onExit: unit -> unit
+    ) as self =
+    inherit Grid()
 
     let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
     let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
-    let normal = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
     let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
     let green = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
     let red = SolidColorBrush(Color.FromRgb(0xE8uy, 0x54uy, 0x54uy))
@@ -150,6 +155,11 @@ type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte
         scanType.Items.Add("Word (16-bit)") |> ignore
         scanType.SelectedIndex <- 0
 
+        let menuBtn =
+            Button(Content = "<- main menu", Width = 110.0, HorizontalAlignment = HorizontalAlignment.Left)
+
+        menuBtn.Click.Add(fun _ -> onExit ())
+
         let screenTitle =
             TextBlock(
                 Text = "Spectrum (live)",
@@ -161,7 +171,7 @@ type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte
         let hint =
             TextBlock(
                 Text =
-                    "open a project in the main window; the machine may run or be paused while scanning. Pokes write the live machine memory.",
+                    "the machine may run or be paused while scanning. Pokes write the live machine memory. Escape returns to the main menu.",
                 Foreground = dim,
                 FontSize = 11.0,
                 TextWrapping = TextWrapping.Wrap,
@@ -169,6 +179,7 @@ type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte
             )
 
         let left = StackPanel(Margin = Thickness(0.0, 0.0, 16.0, 0.0))
+        left.Children.Add menuBtn |> ignore
         left.Children.Add screenTitle |> ignore
         left.Children.Add screenImg |> ignore
         left.Children.Add hint |> ignore
@@ -212,7 +223,17 @@ type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte
         Grid.SetColumn(right, 1)
         root.Children.Add left |> ignore
         root.Children.Add right |> ignore
-        self.Content <- root
+        self.Children.Add root |> ignore
+        self.Focusable <- true
+        self.Background <- bg
+
+        // Escape returns to the launcher (needs keyboard focus on the view)
+        self.PreviewKeyDown.Add(fun e ->
+            if e.Key = Key.Escape then
+                onExit ()
+                e.Handled <- true)
+
+        self.Loaded.Add(fun _ -> self.Focus() |> ignore)
 
         let screenTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 50.0)
 
@@ -222,13 +243,3 @@ type CheatEngineWindow(getScreen: unit -> byte[] option, getMemory: unit -> byte
             | None -> screenTitle.Text <- "Spectrum (no live machine)")
 
         screenTimer.Start()
-
-        self.Title <- sprintf "Cheat Engine - %s" (getGameName ())
-        self.Width <- 1000.0
-        self.Height <- 700.0
-        self.WindowStartupLocation <- WindowStartupLocation.CenterScreen
-        self.Background <- bg
-
-    /// Re-title when the main window switches project.
-    member self.RefreshTitle() =
-        self.Title <- sprintf "Cheat Engine - %s" (getGameName ())
