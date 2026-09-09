@@ -317,10 +317,18 @@ type MainWindow() as self =
         loadSlotTimeline game s (slotPath game currentSlot)
 
 
+    /// One-shot: the launcher's "Slow tape boot" button forces the next
+    /// launch to emulate the real tape (the oracle boot) instead of the
+    /// flash loader. Consumed by the next launchGame.
+    let mutable forceSlowBoot = false
+
     /// Start a game from its manifest: warm cache -> fast port session; cold
-    /// auto -> oracle boot (slow, first run); cold manual -> the user runs the
+    /// auto -> flash load (FastBoot) or the emulated-tape oracle boot when
+    /// forced slow; cold manual -> the user runs the
     let launchGame (m: GameManifest, preset: SessionStart option) =
         saveTimeline false
+        let slowBoot = forceSlowBoot // one-shot: consumed by this launch
+        forceSlowBoot <- false
         bootStartedAt <- System.DateTime.UtcNow
         bootScreen <- None
         bootFrameNo <- 0
@@ -341,24 +349,33 @@ type MainWindow() as self =
             pendingStart <- if slots.Length < 2 then Some(defaultChoice slots) else None
         | None -> pendingStart <- None
 
-        match EntryCache.tryLoad m.Rom m.Tzx with
-        | Some _ ->
+        // Warm either way; the fast slot only counts when it may be used.
+        // (A warm-but-wrong-mode slot makes the TraceSession rebuild the
+        // other one in seconds - both boots are cheap once cached.)
+        let warmFast = EntryCache.tryLoadMode m.Rom m.Tzx true |> Option.isSome
+        let warmLegacy = EntryCache.tryLoad m.Rom m.Tzx |> Option.isSome
+        let warm = if slowBoot then warmLegacy else warmFast || warmLegacy
+
+        if warm then
             bootTask <-
                 Some(
                     System.Threading.Tasks.Task.Run(fun () ->
-                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame))
+                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame, fastBoot = not slowBoot))
                 )
 
             statusText.Text <- sprintf "booting %s (cached entry state)..." m.Name
-        | None when m.Boot = "auto" ->
+        elif m.Boot = "auto" then
             bootTask <-
                 Some(
                     System.Threading.Tasks.Task.Run(fun () ->
-                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame))
+                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame, fastBoot = not slowBoot))
                 )
 
-            statusText.Text <- sprintf "booting %s to game entry (first run, slow)..." m.Name
-        | None when m.Boot = "program" ->
+            if slowBoot then
+                statusText.Text <- sprintf "booting %s to game entry (emulating the tape, first run is slow)..." m.Name
+            else
+                statusText.Text <- sprintf "flash-loading %s..." m.Name
+        elif m.Boot = "program" then
             // A raw Z80 image: seed the entry cache from the bin, then boot the
             // port session warm (the cache is keyed on the image file).
             match m.ProgramBin, m.ProgramAddress with
@@ -376,7 +393,7 @@ type MainWindow() as self =
                 with ex ->
                     statusText.Text <- sprintf "cannot load %s's program image: %s" m.Name ex.Message
             | _ -> statusText.Text <- sprintf "%s: manifest is missing program.bin/address" m.Name
-        | None ->
+        else
             bootTask <- None
             manualBoot <- Some(ManualBoot(m.Rom, m.Tzx))
             manualTimer.Start()
@@ -3509,6 +3526,24 @@ type MainWindow() as self =
                 fun g ->
                     launchPhase <- "game"
                     openProject g
+              BootSlow =
+                fun g ->
+                    // Relaunch through the emulated-tape boot even when the
+                    // game is already running: the point is the other loader.
+                    // BuildEmulator's own auto-launch (first open) runs first;
+                    // the slow launch below replaces its boot task.
+                    launchPhase <- "emulator"
+
+                    match emulatorRoot with
+                    | None -> self.BuildEmulator g
+                    | Some r ->
+                        self.Title <- "JetpacFR - Game Changer"
+                        self.Content <- r
+
+                    forceSlowBoot <- true
+                    launchGame (g, None)
+                    loadControlForGame ()
+                    refreshControlLists ()
               SetTheme = applyTheme
               IsLight = fun () -> Theme.isLight () }
 

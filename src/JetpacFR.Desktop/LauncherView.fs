@@ -85,6 +85,7 @@ module LauncherView =
         { OpenEmulator: GameManifest -> unit
           OpenCheatEngine: GameManifest -> unit
           OpenJustGame: GameManifest -> unit
+          BootSlow: GameManifest -> unit
           SetTheme: Theme.Mode -> unit
           IsLight: unit -> bool }
 
@@ -328,15 +329,37 @@ module LauncherView =
             refill ()
             reselectDefault ())
 
-        let leftBox = StackPanel(Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left)
+        let leftBox =
+            StackPanel(Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left)
+
         Grid.SetColumn(leftBox, 0)
         bottom.Children.Add leftBox |> ignore
         leftBox.Children.Add rescan |> ignore
 
+        // The deliberately small alternative boot path: emulate the real tape
+        // instead of the flash loader (for custom loaders the trap cannot
+        // serve, or for authenticity).
+        let slowBoot =
+            Button(
+                Content = "Slow tape boot",
+                Width = 112.0,
+                Height = 24.0,
+                Margin = Thickness(8.0, 0.0, 0.0, 0.0),
+                ToolTip =
+                    "open the selected game by emulating the real tape load (the flash loader is skipped; ~40 s the first time, cached afterwards)"
+            )
+
+        slowBoot.Click.Add(fun _ ->
+            match selectedGame with
+            | Some g -> ctx.BootSlow g
+            | None -> ())
+
+        leftBox.Children.Add slowBoot |> ignore
+
         let themeToggle =
             CheckBox(
                 Content = "Light theme",
-                IsChecked = Nullable<bool>(ctx.IsLight ()),
+                IsChecked = Nullable<bool>(ctx.IsLight()),
                 Foreground = dim,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = Thickness(12.0, 0.0, 0.0, 0.0),

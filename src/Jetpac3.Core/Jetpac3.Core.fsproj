@@ -14,6 +14,7 @@
     <Compile Include="Checkpoint.fs" />
     <Compile Include="Diagnostics.fs" />
     <Compile Include="Boot.fs" />
+    <Compile Include="FastBoot.fs" />
     <Compile Include="LiftedRoutines.fs" />
     <Compile Include="RoutineAnalyzer.fs" />
     <Compile Include="Profiling.fs" />

@@ -35,8 +35,15 @@ module EntryCache =
         |> Array.map (fun b -> b.ToString("x2"))
         |> String.concat ""
 
-    let private marker (romPath: string) (tzxPath: string) =
-        sprintf "rom=%s\ntzx=%s\n" (sha256 (File.ReadAllBytes romPath)) (sha256 (File.ReadAllBytes tzxPath))
+    /// The cache marker: asset hashes plus the boot mode. The fast (ROM-trap
+    /// flash load) and slow (emulated tape) boots land in distinct slots - the
+    /// resulting states agree except for interrupt-timed sysvars, and a user
+    /// forcing the slow boot must not silently receive the fast slot.
+    let private marker (romPath: string) (tzxPath: string) (fast: bool) =
+        let baseText =
+            sprintf "rom=%s\ntzx=%s\n" (sha256 (File.ReadAllBytes romPath)) (sha256 (File.ReadAllBytes tzxPath))
+
+        if fast then baseText + "boot=fast\n" else baseText
 
     /// One cache slot per (ROM, tape) asset PAIR, keyed by the combined
     /// content hash. Keying on the ROM alone made projects sharing a ROM
@@ -44,39 +51,39 @@ module EntryCache =
     /// cold-boot each other on every switch; with the tape hash in the key
     /// every project keeps its own warm entry state. Program games pass
     /// their bin as both paths, which keys on the bin image.
-    let private dir (romPath: string) (tzxPath: string) =
-        let m: string = marker romPath tzxPath
+    let private dir (romPath: string) (tzxPath: string) (fast: bool) =
+        let m: string = marker romPath tzxPath fast
         let h = sha256 (System.Text.Encoding.UTF8.GetBytes m)
         Path.Combine(AppContext.BaseDirectory, "entry-cache", h.Substring(0, 12))
 
-    let private memoryPath romPath tzxPath =
-        Path.Combine(dir romPath tzxPath, "memory.bin")
+    let private memoryPath romPath tzxPath fast =
+        Path.Combine(dir romPath tzxPath fast, "memory.bin")
 
-    let private statePath romPath tzxPath =
-        Path.Combine(dir romPath tzxPath, "state.txt")
+    let private statePath romPath tzxPath fast =
+        Path.Combine(dir romPath tzxPath fast, "state.txt")
 
-    let private metaPath romPath tzxPath =
-        Path.Combine(dir romPath tzxPath, "meta.txt")
+    let private metaPath romPath tzxPath fast =
+        Path.Combine(dir romPath tzxPath fast, "meta.txt")
 
     /// Some(mem, state) when a cache exists, matches the current assets, and is
     /// structurally intact; None otherwise (cold boot needed).
-    let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
+    let tryLoadMode (romPath: string) (tzxPath: string) (fast: bool) : (byte[] * string) option =
         try
-            let mp = memoryPath romPath tzxPath
+            let mp = memoryPath romPath tzxPath fast
 
             if
                 File.Exists mp
-                && File.Exists(statePath romPath tzxPath)
-                && File.Exists(metaPath romPath tzxPath)
+                && File.Exists(statePath romPath tzxPath fast)
+                && File.Exists(metaPath romPath tzxPath fast)
             then
-                let current = marker romPath tzxPath
-                let stored = File.ReadAllText(metaPath romPath tzxPath)
+                let current = marker romPath tzxPath fast
+                let stored = File.ReadAllText(metaPath romPath tzxPath fast)
 
                 if stored = current then
                     let mem = File.ReadAllBytes mp
 
                     if mem.Length = 0x10000 then
-                        Some(mem, File.ReadAllText(statePath romPath tzxPath))
+                        Some(mem, File.ReadAllText(statePath romPath tzxPath fast))
                     else
                         None
                 else
@@ -86,21 +93,33 @@ module EntryCache =
         with _ ->
             None
 
-    let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
+    let saveMode (romPath: string) (tzxPath: string) (fast: bool) (mem: byte[]) (state: string) =
         try
-            Directory.CreateDirectory(dir romPath tzxPath) |> ignore
-            File.WriteAllBytes(memoryPath romPath tzxPath, mem)
-            File.WriteAllText(statePath romPath tzxPath, state)
-            File.WriteAllText(metaPath romPath tzxPath, marker romPath tzxPath)
+            Directory.CreateDirectory(dir romPath tzxPath fast) |> ignore
+            File.WriteAllBytes(memoryPath romPath tzxPath fast, mem)
+            File.WriteAllText(statePath romPath tzxPath fast, state)
+            File.WriteAllText(metaPath romPath tzxPath fast, marker romPath tzxPath fast)
         with _ ->
             () // the cache is an optimization; a failed write must not break startup
+
+    /// Legacy (slow-boot oracle) slots: the same three files the cache has
+    /// always used, so existing warm states keep loading without a re-boot.
+    let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option = tryLoadMode romPath tzxPath false
+
+    let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
+        saveMode romPath tzxPath false mem state
 
 /// The engine: the Jetpac2 port machine driven instruction-by-instruction,
 /// recording every step into a TraceRecorder. The JetpacFSharp oracle is only
 /// involved on a cold start (boot to the game entry, then cache the state);
 /// after that the port runs alone, so the screen, the sound and the trace all
 /// describe the same execution.
-type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byte[] * int -> unit) =
+type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byte[] * int -> unit, ?fastBoot: bool) =
+
+    /// Flash-load the tape (FastBoot, with its own slow fallback) instead of
+    /// emulating every pulse on a cold start; the fast and slow boots keep
+    /// separate entry-cache slots.
+    let fastBoot = defaultArg fastBoot false
 
     let port = Jetpac2.Core.Machine()
     let recorder = TraceRecorder(capacity, 512)
@@ -159,23 +178,30 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
             port.SetKey(row, bit, false)
 
     /// Put the port into the game-entry state. Warm: load the cached snapshot.
-    /// Cold: boot the oracle to the entry and cache its state for next time.
+    /// Cold: boot the oracle to the entry and cache its state for next time -
+    /// via the flash loader when fastBoot, via emulated tape otherwise.
     let loadEntryState () =
-        match EntryCache.tryLoad romPath tzxPath with
+        let bootOracle () =
+            if fastBoot then
+                Jetpac3.Core.FastBoot.bootToEntryFast romPath tzxPath onFrame
+            else
+                Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
+
+        match EntryCache.tryLoadMode romPath tzxPath fastBoot with
         | Some(mem, state) ->
             try
                 port.LoadState(mem, state)
                 warmStart <- true
             with _ ->
-                let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
+                let oracle, _ = bootOracle ()
                 let mem, state = oracle.SaveState()
-                EntryCache.save romPath tzxPath mem state
+                EntryCache.saveMode romPath tzxPath fastBoot mem state
                 port.LoadState(mem, state)
                 warmStart <- false
         | None ->
-            let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
+            let oracle, _ = bootOracle ()
             let mem, state = oracle.SaveState()
-            EntryCache.save romPath tzxPath mem state
+            EntryCache.saveMode romPath tzxPath fastBoot mem state
             port.LoadState(mem, state)
             warmStart <- false
 

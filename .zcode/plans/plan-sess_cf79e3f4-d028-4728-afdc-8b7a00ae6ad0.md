@@ -1,49 +1,43 @@
-Integrate the pasted SkoolKit static-analysis code into control-file creation, as a new Core module + hooks at the points where a default control file gets created. Decisions (user-confirmed): text blocks become Data + a Range comment holding the decoded string; scope is the static path only (no code-map/trace seeding for now).
+Instant tape boot via ROM-trap flash loading (user-confirmed mechanism), with the old slow boot kept as a launcher option. 48K Spectrum only. The pasted SkoolKit conversion's tables/config machinery are NOT needed with this approach — the real ROM loader sets every system variable itself; we only accelerate the byte transfer. (Its CLI parts — SimLoadConfig, arg parsing, filenames — have no in-process role either way.)
 
-## 1. New module `src/JetpacFR.Core/CtlGen.fs` (~250 lines)
+## 1. New module `src/Jetpac3.Core/FastBoot.fs`
 
-A port of `generateCtlsWithoutCodeMap` from the pasted code, adapted to this repo's types. Public API:
+`FastBoot.bootToEntryFast (romPath) (tzxPath) (onFrame) : Spectrum48 * int64` — same contract as `Boot.bootToEntry`, reached in ~1-2s instead of ~40s:
 
-- `CtlGen.analyze : memory:byte[] -> start:int -> endExcl:int -> Result` where `Result = { Blocks: Block list; TextNotes: (int * int * string) list }` (Block from GameProject.fs).
-- `CtlGen.ramSpan : memory:byte[] -> int * int` — the default analysis span (0x4000 to last non-zero byte + 1, mirroring loadOrCreate's original.bin rule).
-- `CtlGen.toControlFile : Result -> entryPc:int -> start:int -> endExcl:int -> ControlFile` — assembles a complete ControlFile (ImageFile="original.bin", ActiveVersion=-1, no symbols, TextNotes as `Range` comments `text: <decoded string>`), for the caller to save.
+- Own `Spectrum48` oracle with ROM loaded and tape inserted but **never played**.
+- Block list: `Jetpac.Core.Tape.parseTzx` → data payloads (flag + data + checksum split) in tape order, tracked by index.
+- Drive frames instruction-by-instruction via the public `spec.DebugZ80.ExecuteOne()` (the same API Boot.fs's tail already uses), managing 70000-cycle frame boundaries from `z80.CycleCount()`. Replicate the boot macro's key presses via public `spec.SetKey` (frame indices copied from `Spectrum48.RunBootMacro`, Spectrum.fs:314-334) so `LOAD ""` gets typed without touching private members.
+- **The trap**: when PC reaches LD-BYTES (0x0556, and the 0x056C variant) with carry set (load): write the next block's data bytes directly to the destination span, set the documented LD-BYTES success exit state (registers/flags, RET semantics — exact register contract from the 48K ROM disassembly during implementation), advance the block index, continue. Carry clear (verify) is not trapped. Because the real ROM performs all header/data dispatch, BASIC chaining, and sysvar bookkeeping, the resulting entry state is byte-identical to the slow boot (verified by test). Cycles/beeper/tapeEar fields will differ (tape never played) — harmless, sessions are cycle-relative.
+- Termination: same as Boot.fs — run until PC ≥ 0x4000 (first RAM instruction), then `SaveState()`.
+- **Automatic fallback**: if no trap fires within a bounded window after the loader starts (custom bit-banging loaders), abandon and delegate to the existing `Boot.bootToEntry` (old speed, still correct). Fast boot can never be worse than the status quo.
+- Progress: call `onFrame (screen, frame)` per frame like the slow boot (the boot screen renders).
+- Add to Jetpac3.Core.fsproj after Boot.fs.
 
-Ported pieces and their replacements for the stubbed SkoolKit `External` API:
+## 2. EntryCache mode separation (src/JetpacFR.Core/Session.fs)
 
-- **Decode loop**: iterate with `Disasm.disasmLength`; per instruction capture address/size/op-bytes.
-- **END (terminal) detection**: `Z80Flow.classify` matching `Jump | Branch | Return` (Call and Linear are not terminal). Drive-by fix included: add the missing RET cc opcodes 0xE0/0xE8/0xF0/0xF8 to Z80Flow.fs:68-72 (CallOps.isRet already covers them).
-- **`catchData`**: same logic; op identity = normalized (prefix-group, opcode) pair with DD/FD collapsed and condition bits masked; `MaxCount` = config knob (default 4) with the original's harmless-pair exception (count=2 with first byte 0x66/0x6E).
-- **NOP-prefix stripping, all-zero → zero block, adjacent data/zero joining**: direct ports. Kind mapping to the repo's three kinds: 'c'→Code, 'b'/'t'→Data, 's'→Gap.
-- **`getTextBlocks`/`isAllowedText`**: direct port with a `Config` record (printable-ASCII TextChars, TextMinLengthCode=3, TextMinLengthData=2, Words=[]). Text ranges emit Data blocks + the decoded string as a Range comment.
-- Blocks emitted sorted, non-overlapping, covering [start, endExcl), auto-names (`block_%04X`) — satisfying `GameProject.loadControl`'s validation invariants.
+The cache key currently hashes only `rom=..\ntzx=..\n` — fast and oracle boots must not share a slot:
+- `marker` gains an optional third line: fast slot = `rom=..\ntzx=..\nboot=fast\n`; the oracle slot keeps the exact legacy marker, so the 5 existing warm caches stay valid for the slow path (no mass re-boot).
+- `EntryCache.tryLoad`/`save` gain `?fast: bool` (default false = legacy behavior; all existing callers unchanged).
 
-**Not ported** (stated in the module doc): `readMap` textual/binary map formats, the with-code-map algorithm + referrer promotion (deferred until the trace-seeded refinement), RST sub-ctls, comment generator, `writeCtl` textual output (SkoolKit .ctl export already exists as `SkoolCtl.export`).
+## 3. TraceSession seam (src/JetpacFR.Core/Session.fs)
 
-## 2. App.fs wiring — `maybeGenerateDefaultControl`
+- Constructor gains `?fastBoot: bool` (default false). `loadEntryState()`: `EntryCache.tryLoad rom tzx fastBoot`; on cold + fastBoot → `FastBoot.bootToEntryFast` (which internally falls back to the oracle) → `EntryCache.save ... fast=true`. Minimal seam; the emulator construction stays in MainWindow per AGENTS.md.
 
-- New helper called from `consumeFinishedBoot` right after `session <- Some loadedSession` — all boot paths converge there (autoplay/record/live presets, legacy single-slot, parked-in-menu; manual boot reaches it after "Set as game entry" relaunches warm).
-- Guard: only when `control.json` is absent on disk AND the in-memory `control` is still the pristine empty stub (no comments/symbols, single ≤16-byte block), so an in-memory import is never stomped.
-- Inputs: `loadedSession.Memory` (game-entry 64K snapshot, guaranteed valid once the boot completed), span from `CtlGen.ramSpan`, EntryPc = `loadedSession.Regs.Pc()`.
-- Persist immediately via `ControlFile.save dir generated` — the point is a default file on disk for new projects (`loadOrCreate` never writes; this is why the launcher's "control:" column stays "no" today). Status: `control file created: N blocks (x code / y data / z gap)`, then `refreshControlLists()` + `syncMapData()`.
+## 4. App.fs + LauncherView wiring
 
-## 3. "New ctrl" button (App.fs)
+- `let mutable forceSlowBoot = false` (one-shot). `launchGame` reads-and-clears it and passes `fastBoot = not slow` to the `Task.Run` TraceSession sites (App.fs:349, 357; the program-image site at 372 and manual boot stay untouched). The warm-check at App.fs:344 tries both slots (fast slot first when not forced slow). Cold-status text: "flash-loading tape...". `boot:"auto"` projects default to the fast path; "manual"/"program" unchanged.
+- LauncherView: `LauncherContext` gains `BootSlow: GameManifest -> unit`; a small "Slow tape boot" button (Rescan-style: Width≈120, Height≈24) in the bottom-left `leftBox` next to Rescan (LauncherView.fs:317-334), acting on the selected game, with a tooltip explaining it emulates the real tape (~40s first time).
+- App.fs picker wires it: `forceSlowBoot <- true; launchPhase <- "emulator"` then relaunch the selected game through `launchGame` directly (always relaunching, even when it is the current game, so the button is never a no-op) and swap the emulator content in (mirroring `openProject`'s Some-branch, App.fs:3479-3497).
+- Web shell untouched.
 
-Replace `ControlFile.empty 0x4000 0x10000` with: generate from the current session's `Memory` when one is installed; else `EntryCache.tryLoad` of the current game's rom/tzx; else fall back to `empty`. Result marked `Dirty = true` so a plain "Save ctrl" persists it.
+## 5. Tests (`--test fastboot`, wired into the harness + `all`)
 
-## 4. Tests (tests/JetpacFR.Core.Tests)
+- **Equivalence gate**: `FastBoot.bootToEntryFast` vs `Boot.bootToEntry` on Jetpac — 64K memory byte-equal and entry PC equal (the slow side can come from the existing warm oracle cache when present).
+- **Timing**: fast boot completes < ~5s.
+- **Cache separation**: fast and oracle slots are distinct; a legacy cache still loads via the default flag.
+- **Block-blit unit test**: the trap's write helper lands block bytes at the destination, strips flag/checksum, honors the length.
+- Fantomas all touched files; build Core, Jetpac3.Core, Desktop; run `--test fastboot` plus `--test boot` and `--test flow` as regression neighbors.
 
-Following the existing runner patterns in Program.fs — synthetic 64K snapshots:
-- code ending in RET → one Code block ending after the RET; NOP prefix → Gap + Code resplit;
-- repeated-op run past MaxRepeat → Data block (catchData), including the 0x66/0x6E harmless-pair exception;
-- ASCII run ≥ TextMinLengthData → Data block + text Range comment with decoded content;
-- all-zero region → Gap; adjacent Data/Gap join;
-- invariant: analyze → toControlFile → toJson/fromJson round-trip → `GameProject.loadControl`-style validation (sorted, non-overlapping, in span).
+Files touched: NEW src/Jetpac3.Core/FastBoot.fs; src/Jetpac3.Core/Jetpac3.Core.fsproj; src/JetpacFR.Core/Session.fs; src/JetpacFR.Desktop/App.fs; src/JetpacFR.Desktop/LauncherView.fs; tests/JetpacFR.Core.Tests/Program.fs.
 
-## 5. Housekeeping
-
-- Add `CtlGen.fs` to JetpacFR.Core.fsproj after `ControlFile.fs` (compile order verified: Disasm, Z80Flow, GameProject, ControlFile all precede).
-- `dotnet fantomas` on every touched file; build Core + Desktop; run the Core test project.
-
-Files touched: NEW src/JetpacFR.Core/CtlGen.fs; src/JetpacFR.Core/JetpacFR.Core.fsproj; src/JetpacFR.Core/Z80Flow.fs (RET cc fix); src/JetpacFR.Desktop/App.fs; tests/JetpacFR.Core.Tests/Program.fs.
-
-Deferred (explicitly, per your choices): trace-seeded with-code-map refinement (later, as an explicit re-analyze action), a dedicated Text BlockKind, the web app's control storage, RST sub-directives.
+Explicitly out of scope: other machines (128K etc.), the pasted SkoolKit sysvar/patch tables, Python.NET, TAP/PZX input (TZX only, matching the current tape stack), and the web shell.

@@ -2912,6 +2912,147 @@ let runCtlGen () : int =
 
     if failures.Count > 0 then 1 else 0
 
+/// Flash loading (FastBoot): fast-vs-slow boot equivalence on the real
+/// Jetpac tape, timing, entry-cache slot separation, and the block blitter.
+/// The first run pays the slow oracle boot (~40 s) and caches it; later runs
+/// reuse the cache.
+let runFastBoot (romPath: string) (tzxPath: string) : int =
+    printfn "fastboot: ROM-trap flash load"
+
+    // 1. The tape parses into blocks; the first is a header (flag 0x00).
+    let blocks = Jetpac3.Core.FastBoot.tapeBlocks (File.ReadAllBytes tzxPath)
+
+    check
+        "tape yields blocks, header first"
+        (blocks.Length >= 2 && fst blocks[0] = 0x00uy)
+        (sprintf "count=%d" blocks.Length)
+
+    // 2. blitBlock: writes, wraps at 0x10000, honors the requested length.
+    let mem = Array.zeroCreate<byte> 0x10000
+    let written = Jetpac3.Core.FastBoot.blitBlock mem 0xFFFF 4 [| 1uy; 2uy; 3uy; 4uy |]
+
+    check
+        "blitBlock wraps and returns the count"
+        (written = 4
+         && mem[0xFFFF] = 1uy
+         && mem[0] = 2uy
+         && mem[1] = 3uy
+         && mem[2] = 4uy
+         && mem[3] = 0uy)
+        (sprintf "written=%d %02X %02X %02X" written mem[0xFFFF] mem[0] mem[1])
+
+    let written2 = Jetpac3.Core.FastBoot.blitBlock mem 0x4020 2 [| 9uy; 9uy; 9uy |]
+
+    check
+        "blitBlock honors the requested length"
+        (written2 = 2 && mem[0x4020] = 9uy && mem[0x4021] = 9uy && mem[0x4022] = 0uy)
+        (sprintf "written2=%d" written2)
+
+    // 3. Slow reference state: the legacy entry cache when warm (state.txt
+    //    carries pc=<hex>), else a real oracle boot that then gets cached.
+    let pcOfState (state: string) =
+        state.Split('\n')
+        |> Array.tryPick (fun line ->
+            if line.StartsWith "pc=" then
+                Some(Convert.ToInt32(line.Substring(3), 16))
+            else
+                None)
+        |> Option.defaultValue 0
+
+    let slowMem, slowPc =
+        match EntryCache.tryLoad romPath tzxPath with
+        | Some(mem, state) ->
+            printfn "  (slow reference from the warm oracle cache)"
+            mem, pcOfState state
+        | None ->
+            printfn "  (no warm oracle cache - running the slow tape boot once, ~40 s)"
+            let sw = System.Diagnostics.Stopwatch.StartNew()
+            let spec, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath None
+            let m, s = spec.SaveState()
+            EntryCache.save romPath tzxPath m s
+            printfn "  slow boot took %.1f s (cached for later runs)" sw.Elapsed.TotalSeconds
+            m, pcOfState s
+
+    // 4. The flash load: timed, then compared against the slow reference.
+    //    A handful of volatile regions necessarily differ because the pulse
+    //    timing is skipped and the load takes seconds instead of minutes:
+    //    - 0x5C00-0x5C0F  KSTATE: decaying keyboard-scan transients
+    //    - 0x5C78-0x5C79  FRAMES: interrupt-timed counter
+    //    - 0x5FD4-0x5FDF  loader header-workspace residue
+    //    - 0xFF3A-0xFF41  buffer residue near the top of RAM
+    //    Every byte outside those regions must match the slow boot exactly.
+    let sw2 = System.Diagnostics.Stopwatch.StartNew()
+    let spec, _cycles = Jetpac3.Core.FastBoot.bootToEntryFast romPath tzxPath None
+    sw2.Stop()
+    let fastMem = spec.Memory
+    let fastPc = spec.DebugZ80.Regs.Pc()
+
+    check "flash load completes under 5 s" (sw2.Elapsed.TotalSeconds < 5.0) (sprintf "%.1f s" sw2.Elapsed.TotalSeconds)
+
+    let inVolatileRegion (addr: int) =
+        (addr >= 0x5C00 && addr <= 0x5C0F)
+        || (addr >= 0x5C78 && addr <= 0x5C79)
+        || (addr >= 0x5FD4 && addr <= 0x5FDF)
+        || (addr >= 0xFF3A && addr <= 0xFF41)
+
+    let diffs = [ 0..0xFFFF ] |> List.filter (fun a -> slowMem[a] <> fastMem[a])
+
+    let outside = diffs |> List.filter (inVolatileRegion >> not)
+
+    check
+        "flash-loaded memory matches the slow boot outside volatile regions"
+        (outside.IsEmpty)
+        (match List.tryHead outside with
+         | Some a ->
+             sprintf
+                 "%d diffs outside volatile regions, first at 0x%04X: slow=%02X fast=%02X"
+                 outside.Length
+                 a
+                 slowMem[a]
+                 fastMem[a]
+         | None -> sprintf "clean (%d volatile diffs)" diffs.Length)
+
+    check "entry pc matches the slow boot" (fastPc = slowPc) (sprintf "fast=%04X slow=%04X" fastPc slowPc)
+
+    // 5. Cache slots: fast and legacy entries live in distinct directories.
+    //    EntryCache keys on asset CONTENT, so the probe uses a rom copy with
+    //    per-run random bytes appended - a pair no other run has ever touched.
+    let tempRom =
+        Path.Combine(Path.GetTempPath(), "fastboot-" + Guid.NewGuid().ToString("N") + ".rom")
+
+    let rnd = System.Random()
+
+    File.WriteAllBytes(tempRom, Array.append (File.ReadAllBytes romPath) (Array.init 16 (fun _ -> byte (rnd.Next 256))))
+
+    let dummyMem = Array.zeroCreate<byte> 0x10000
+    EntryCache.saveMode tempRom tzxPath true dummyMem "pc=4000"
+
+    let fastReloaded = EntryCache.tryLoadMode tempRom tzxPath true
+
+    let fastOk =
+        match fastReloaded with
+        | Some(m, s) -> s = "pc=4000" && m = dummyMem
+        | None -> false
+
+    let legacyAbsent = EntryCache.tryLoad tempRom tzxPath = None
+
+    check
+        "fast slot stores and reloads, distinct from legacy"
+        (fastOk && legacyAbsent)
+        (sprintf "fastOk=%b legacyAbsent=%b" fastOk legacyAbsent)
+
+    EntryCache.saveMode tempRom tzxPath false dummyMem "pc=4444"
+
+    check
+        "legacy slot stays separate"
+        ((EntryCache.tryLoad tempRom tzxPath |> Option.map snd) = Some "pc=4444"
+         && (EntryCache.tryLoadMode tempRom tzxPath true |> Option.map snd) = Some "pc=4000")
+        ""
+
+    File.Delete(tempRom)
+
+    if failures.Count > 0 then 1 else 0
+
 let mainTests argv =
     try
         let tests =
@@ -2945,6 +3086,7 @@ let mainTests argv =
             | "ce" -> runCE ()
             | "control" -> runControl ()
             | "ctlgen" -> runCtlGen ()
+            | "fastboot" -> runFastBoot rom.Value tzx.Value
             | "ctrlmap" -> runCtrlMap ()
             | "flame" -> runFlame rom.Value tzx.Value
             | "all" ->
@@ -2970,6 +3112,7 @@ let mainTests argv =
                 + runCE ()
                 + runControl ()
                 + runCtlGen ()
+                + runFastBoot rom.Value tzx.Value
                 + runCtrlMap ()
                 + runFlame rom.Value tzx.Value
             | other ->
@@ -2980,7 +3123,7 @@ let mainTests argv =
             match tests with
             | [] ->
                 eprintfn
-                    "usage: --test disasm|trace|agree|gaps|mine|contract|validate|prompt|bench|boot|manifest|minimal|game2|flow|handoff|history|z80ops|labels|integration|ce|control|ctlgen|ctrlmap|all"
+                    "usage: --test disasm|trace|agree|gaps|mine|contract|validate|prompt|bench|boot|manifest|minimal|game2|flow|handoff|history|z80ops|labels|integration|ce|control|ctlgen|fastboot|ctrlmap|all"
 
                 1
             | names -> List.sumBy run names
