@@ -301,16 +301,48 @@
   ],
   "symbols": [
     {
-      "addr": 29004,
-      "name": "xy_to_screenAdr"
+      "addr": 29126,
+      "name": "clearAttribs"
     },
     {
-      "addr": 29448,
-      "name": "xy_to_screenAdr"
+      "addr": 24714,
+      "name": "ResetScreen"
+    },
+    {
+      "addr": 28980,
+      "name": "implDispText"
+    },
+    {
+      "addr": 28972,
+      "name": "DispHighScore"
+    },
+    {
+      "addr": 28962,
+      "name": "DispP2Score"
+    },
+    {
+      "addr": 28952,
+      "name": "DisplayP1Score"
+    },
+    {
+      "addr": 29036,
+      "name": "DrawString"
+    },
+    {
+      "addr": 29004,
+      "name": "DrawFontChar"
     },
     {
       "addr": 29198,
-      "name": "xy_to_attribAdr"
+      "name": "pixelXY_to_attrib"
+    },
+    {
+      "addr": 29448,
+      "name": "pixelXY_to_screen"
+    },
+    {
+      "addr": 25345,
+      "name": "MenuWriteText"
     },
     {
       "addr": 29422,

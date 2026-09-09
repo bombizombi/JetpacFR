@@ -73,10 +73,12 @@ module Projects =
             | None -> List.head games
 
 
-/// The startup picker UI ("ZX Spectrum Game Changer"): project rows with
-/// status chips plus the open-with buttons (Emulator / Cheat Engine /
-/// Just the Game). Pure view - every action is a callback in
-/// LauncherContext, the shell owns the boot pipeline.
+/// The startup picker UI ("ZX Spectrum Game Changer"): the three open-with
+/// actions stacked on top (button left, explanation right), the project
+/// list below it (project name left, aligned status columns right), and
+/// small Rescan / Exit buttons along the bottom edge. Pure view - every
+/// action is a callback in LauncherContext, the shell owns the boot
+/// pipeline.
 module LauncherView =
 
     type LauncherContext =
@@ -96,14 +98,74 @@ module LauncherView =
         let mutable games = Projects.discover ()
         let startupGame = Projects.startupOf games
 
-        let chip (parent: #Panel) (text: string) (present: bool) =
+        // ---- top: the three open-with actions, one below the other, each
+        // with its explanation on the right
+        let actions = StackPanel(Margin = Thickness(0.0, 0.0, 0.0, 12.0))
+
+        let actionRow (caption: string) (explanation: string) (isDefault: bool) (onClick: GameManifest -> unit) =
+            let row =
+                StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 8.0))
+
+            let b =
+                Button(
+                    Content = caption,
+                    Width = 190.0,
+                    Height = 42.0,
+                    FontSize = 15.0,
+                    FontWeight = FontWeights.SemiBold,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    IsDefault = isDefault
+                )
+
+            b.Click.Add(fun _ ->
+                match selectedGame with
+                | Some g -> onClick g
+                | None -> ())
+
+            row.Children.Add b |> ignore
+
+            let expl =
+                TextBlock(
+                    Text = explanation,
+                    Foreground = dim,
+                    FontSize = 12.0,
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = Thickness(14.0, 0.0, 0.0, 0.0)
+                )
+
+            row.Children.Add expl |> ignore
+            actions.Children.Add row |> ignore
+
+        actionRow
+            "Emulator"
+            "Boot the selected project in the emulator window: boot to game entry, load its saved trace and autoplay it. (Enter, or double-click the project)"
+            true
+            ctx.OpenEmulator
+
+        actionRow
+            "Just the Game"
+            "Shows only the Spectrum screen of the selected project - plus hold-to-play-in-reverse (button or F3). No emulator chrome."
+            false
+            ctx.OpenJustGame
+
+        actionRow
+            "Cheat Engine"
+            "A separate window over the selected project: scan RAM for values, narrow with next scans, and poke the live machine."
+            false
+            ctx.OpenCheatEngine
+
+        // ---- project list: name left, fixed-width right-aligned status
+        // columns right, so trace sizes line up one below the other
+        let statusCell (parent: #Panel) (width: float) (text: string) (ok: bool) =
             let tb =
                 TextBlock(
                     Text = text,
-                    Foreground = (if present then green else dim),
+                    Width = width,
+                    TextAlignment = TextAlignment.Right,
+                    Foreground = (if ok then green else dim),
                     FontFamily = mono,
                     FontSize = 12.0,
-                    Margin = Thickness(0.0, 0.0, 18.0, 0.0),
                     VerticalAlignment = VerticalAlignment.Center
                 )
 
@@ -118,60 +180,67 @@ module LauncherView =
                     Margin = Thickness(4.0)
                 )
 
-            let col = StackPanel()
+            let grid = Grid()
+            grid.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
+            grid.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
 
-            let title =
-                sprintf "%s   (%s)" g.Name g.GameId
-                |> fun s -> if g.Default then s + "  - auto-load default" else s
+            let nameCol = StackPanel()
 
-            col.Children.Add(
-                TextBlock(
-                    Text = title,
-                    Foreground = normal,
-                    FontSize = 16.0,
-                    FontWeight = FontWeights.SemiBold,
-                    Margin = Thickness(0.0, 0.0, 0.0, 6.0)
-                )
+            nameCol.Children.Add(
+                TextBlock(Text = g.Name, Foreground = normal, FontSize = 15.0, FontWeight = FontWeights.SemiBold)
             )
             |> ignore
+
+            let sub =
+                (sprintf "(%s)" g.GameId) + (if g.Default then "  -  auto-load default" else "")
+
+            nameCol.Children.Add(TextBlock(Text = sub, Foreground = dim, FontSize = 11.5))
+            |> ignore
+
+            Grid.SetColumn(nameCol, 0)
+            grid.Children.Add nameCol |> ignore
 
             let status = StackPanel(Orientation = Orientation.Horizontal)
             let tracePath = Path.Combine(g.GameDirectory, StateTimelineStore.FileName)
             let fi = FileInfo(tracePath)
 
             if fi.Exists then
-                chip status (sprintf "trace: %.1f MB" (float fi.Length / (1024.0 * 1024.0))) true
+                statusCell status 110.0 (sprintf "trace: %.1f MB" (float fi.Length / (1024.0 * 1024.0))) true
             else
-                chip status "trace: none" false
+                statusCell status 110.0 "trace: none" false
 
-            chip
+            statusCell
                 status
-                (sprintf "key script: %s" (if FileInfo(ReplayStore.path g).Exists then "yes" else "no"))
+                82.0
+                (sprintf "keys: %s" (if FileInfo(ReplayStore.path g).Exists then "yes" else "no"))
                 (FileInfo(ReplayStore.path g).Exists)
 
-            chip
+            statusCell
                 status
+                106.0
                 (sprintf
-                    "control file: %s"
+                    "control: %s"
                     (if FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists then
                          "yes"
                      else
                          "no"))
                 (FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists)
 
-            chip
+            statusCell
                 status
+                86.0
                 (sprintf
-                    "CE program: %s"
+                    "CE: %s"
                     (if GameRegistry.tryFind g.GameId |> Option.isSome then
                          "yes"
                      else
                          "no"))
                 (GameRegistry.tryFind g.GameId |> Option.isSome)
 
-            chip status (sprintf "boot: %s" g.Boot) true
-            col.Children.Add status |> ignore
-            border.Child <- col
+            statusCell status 92.0 (sprintf "boot: %s" g.Boot) true
+            Grid.SetColumn(status, 1)
+            grid.Children.Add status |> ignore
+            border.Child <- grid
             ListBoxItem(Content = border, Tag = g, Padding = Thickness(2.0))
 
         let root =
@@ -192,7 +261,7 @@ module LauncherView =
         header.Children.Add(
             TextBlock(
                 Text =
-                    "Pick a project, then choose how to open it: the emulator, the cheat engine, or the bare game view.",
+                    "Pick a project, then choose how to open it: the emulator, the bare game view, or the cheat engine.",
                 Foreground = dim,
                 FontSize = 13.0,
                 Margin = Thickness(0.0, 6.0, 0.0, 0.0),
@@ -203,6 +272,8 @@ module LauncherView =
 
         DockPanel.SetDock(header, Dock.Top)
         root.Children.Add header |> ignore
+        DockPanel.SetDock(actions, Dock.Top)
+        root.Children.Add actions |> ignore
 
         let list = ListBox(Background = panel, BorderThickness = Thickness(0.0))
 
@@ -236,95 +307,48 @@ module LauncherView =
         refill ()
         reselectDefault ()
 
-        let btnRow = Grid(Margin = Thickness(0.0, 14.0, 0.0, 0.0))
+        // ---- bottom edge: small Rescan (left) and Exit (right)
+        let bottom = Grid(Margin = Thickness(0.0, 12.0, 0.0, 0.0))
+        bottom.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
+        bottom.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
 
-        for i in 0..4 do
-            btnRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
-
-        let buttonColumn (col: int) (caption: string) (explanation: string) (isDefault: bool) (onClick: unit -> unit) =
-            let stack =
-                StackPanel(Margin = Thickness((if col = 0 then 0.0 else 8.0), 0.0, 0.0, 0.0))
-
-            Grid.SetColumn(stack, col)
-
-            let b =
-                Button(
-                    Content = caption,
-                    Height = 52.0,
-                    MinWidth = 180.0,
-                    FontSize = 15.0,
-                    FontWeight = FontWeights.SemiBold,
-                    IsDefault = isDefault
-                )
-
-            b.Click.Add(fun _ -> onClick ())
-            stack.Children.Add b |> ignore
-
-            stack.Children.Add(
-                TextBlock(
-                    Text = explanation,
-                    Foreground = dim,
-                    FontSize = 11.5,
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = Thickness(2.0, 5.0, 2.0, 0.0)
-                )
+        let rescan =
+            Button(
+                Content = "Rescan",
+                Width = 84.0,
+                Height = 24.0,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = "re-read the games folder: picks up newly added projects, traces and status changes"
             )
-            |> ignore
 
-            btnRow.Children.Add stack |> ignore
+        rescan.Click.Add(fun _ ->
+            games <- Projects.discover ()
+            refill ()
+            reselectDefault ())
 
-        buttonColumn
-            0
-            "Emulator"
-            "Boot the selected project in the emulator window: boot to game entry, load its saved trace and autoplay it. (Enter, or double-click the row)"
-            true
-            (fun () ->
-                match selectedGame with
-                | Some g -> ctx.OpenEmulator g
-                | None -> ())
+        Grid.SetColumn(rescan, 0)
+        bottom.Children.Add rescan |> ignore
 
-        buttonColumn
-            1
-            "Cheat Engine"
-            "Opens the project first (if needed), then a cheat-engine window over it: scan RAM for values, narrow with next scans, and poke the live machine."
-            false
-            (fun () ->
-                match selectedGame with
-                | Some g -> ctx.OpenCheatEngine g
-                | None -> ())
+        let exit =
+            Button(
+                Content = "Exit",
+                Width = 64.0,
+                Height = 24.0,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                ToolTip =
+                    "close the app without opening a project (no recording is lost: timelines are only written by the emulator)"
+            )
 
-        buttonColumn
-            2
-            "Just the Game"
-            "Opens the project first (if needed), then shows only the Spectrum screen - plus hold-to-play-in-reverse (button or F3)."
-            false
-            (fun () ->
-                match selectedGame with
-                | Some g -> ctx.OpenJustGame g
-                | None -> ())
+        exit.Click.Add(fun _ ->
+            match Window.GetWindow root with
+            | null -> ()
+            | w -> w.Close())
 
-        buttonColumn
-            3
-            "Rescan"
-            "Re-read the games folder: picks up newly added projects, traces and status changes without restarting the app."
-            false
-            (fun () ->
-                games <- Projects.discover ()
-                refill ()
-                reselectDefault ())
+        Grid.SetColumn(exit, 1)
+        bottom.Children.Add exit |> ignore
+        DockPanel.SetDock(bottom, Dock.Bottom)
+        root.Children.Add bottom |> ignore
 
-        buttonColumn
-            4
-            "Exit"
-            "Close the app without opening a project. No recording is lost: timelines are only written by the emulator."
-            false
-            (fun () ->
-                match Window.GetWindow root with
-                | null -> ()
-                | w -> w.Close())
-
-        DockPanel.SetDock(btnRow, Dock.Bottom)
-        root.Children.Add btnRow |> ignore
         root.Children.Add list |> ignore
 
         root,

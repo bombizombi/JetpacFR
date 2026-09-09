@@ -453,6 +453,14 @@ type MainWindow() as self =
     /// next memory render to scroll the cursor row to 2/5 of the viewport
     /// (wheel moves and row clicks keep the viewport still instead).
     let mutable pendingMemJumpScroll = false
+    /// The label row clicked in memory mode (addr, current name): Some puts
+    /// the comments pane into label-editor mode and keeps the instruction
+    /// row unhighlighted while the label is selected.
+    let mutable labelEditor: (int * string) option = None
+    /// Names of the label rows currently rendered in the memory window
+    /// (addr -> name). A clicked row is a label row when its address is
+    /// registered here; the map is rebuilt on every memory render.
+    let labelNames = Dictionary<int, string>()
 
     let gotoMemCursor (addr: int) (reason: string) =
         memCursor <- addr
@@ -1154,11 +1162,32 @@ type MainWindow() as self =
             | None -> ""
         | None -> ""
 
+    /// The user-visible name exactly at addr (user symbol first, then a
+    /// named code block starting there) with its kind. Generated jump-target
+    /// labels do not count - they are window-local, not named.
+    let nameAtAddr (addr: int) : (string * string) option =
+        match control with
+        | Some c ->
+            match ControlFile.symbolAt c addr with
+            | Some n -> Some(n, "user symbol")
+            | None ->
+                c.Blocks
+                |> List.tryFind (fun b ->
+                    b.Kind = Code
+                    && b.Start = addr
+                    && b.Name <> sprintf "block_%04X" b.Start)
+                |> Option.map (fun b -> b.Name, "block name")
+        | None -> None
+
     let rowFor (t: Trace) (e: TraceEntry) (idx: int) (isCurrent: bool) : DisasmRow =
         let comment =
             match control with
             | Some c -> ControlFile.commentAt c (int e.Pc) |> Option.defaultValue ""
             | None -> ""
+
+        // execution mode has no label rows: a named address shows its name
+        // as a bracketed prefix on the instruction line instead
+        let named = nameAtAddr (int e.Pc)
 
         if e.Length = 0uy then
             { Tag = sprintf "%07d  ----  INT -> %04X   (%d tstates)" idx e.Target e.Cycles
@@ -1208,7 +1237,14 @@ type MainWindow() as self =
 
             let cm = if comment <> "" then sprintf "  ; %s" comment else ""
 
-            { Tag = sprintf "%07d  %04X  %-11s %3dt  %s%s%s%s%s" idx e.Pc hex (int e.Cycles) text tail sm lifted cm
+            // a named function start shows its name at the end of the line,
+            // after the comment
+            let nm =
+                named
+                |> Option.map (fun (n, _) -> sprintf "  [%s]" n)
+                |> Option.defaultValue ""
+
+            { Tag = sprintf "%07d  %04X  %-11s %3dt  %s%s%s%s%s%s" idx e.Pc hex (int e.Cycles) text tail sm lifted cm nm
               Brush = brush
               Tint = null
               IsCurrent = isCurrent
@@ -1524,17 +1560,25 @@ type MainWindow() as self =
             elif (currentCounts ())[addr] > 0 then cyan
             else normal
           Tint = tint
-          IsCurrent = addr = memCursor
+          // while a label is selected, the instruction row stays dim: the
+          // label row is the highlighted one
+          IsCurrent = addr = memCursor && labelEditor.IsNone
           Addr = addr
           InstrIdx = -1 }
 
     /// A label line placed before the row it names: function starts render as
-    /// `fun_73B2:` (or the user symbol), jump targets as `label_71B0:`.
+    /// `fun_73B2:` (or the user symbol), jump targets as `label_71B0:`. The
+    /// label being edited in the comments pane is the highlighted row.
     let labelRowFor (a: int) (name: string) : DisasmRow =
+        let isEdited =
+            match labelEditor with
+            | Some(ea, _) -> ea = a
+            | None -> false
+
         { Tag = sprintf "  %04X         %s:" a name
           Brush = (if name.StartsWith "label_" then dim else cyan)
           Tint = null
-          IsCurrent = false
+          IsCurrent = isEdited
           Addr = a
           InstrIdx = -1 }
 
@@ -2138,6 +2182,7 @@ type MainWindow() as self =
                         cur <- (cur + max 1 (Disasm.disasmMemory mem cur).Length) &&& 0xFFFF
 
                     let labelFor = windowLabels addrs (List.ofSeq targets)
+                    labelNames.Clear()
                     let mutable emitted = 0
                     let mutable i = 0
 
@@ -2147,6 +2192,7 @@ type MainWindow() as self =
 
                         match labelFor a with
                         | Some name ->
+                            labelNames[a] <- name
                             rows.Add(labelRowFor a name)
                             emitted <- emitted + 1
                         | None -> ()
@@ -3246,11 +3292,12 @@ type MainWindow() as self =
     /// switch / phase swap calls it so a list never shows a previous
     /// project's rows.
     let mutable refreshControlLists: unit -> unit = fun () -> ()
-    /// The cheat-engine window over this window's live session (opened from
-    /// the launcher; one instance - reopening focuses the existing one).
-    let mutable cheatWin: CheatEngineWindow option = None
-    /// Which view the launcher's buttons open: "emulator" (full UI) or
-    /// "game" (bare game screen with reverse playback, no emulator chrome).
+    /// The cheat-engine view (CheatEngineView.fs) once built; it is
+    /// embedded in this window as a phase - there is no second window.
+    let mutable cheatView: CheatEngineView option = None
+    /// Which view the launcher's buttons open: "emulator" (full UI), "game"
+    /// (bare game screen with reverse playback) or "cheat" (cheat-engine
+    /// view) - no emulator chrome for the latter two.
     let mutable launchPhase = "emulator"
     /// The bare game view (GameOnlyView.fs) once it has been built; it is
     /// embedded in this window as a phase - there is no second window.
@@ -3295,8 +3342,9 @@ type MainWindow() as self =
         self.Background <- bg
 
         // Open a project per the chosen phase: "emulator" swaps the full
-        // emulator UI in, "game" swaps in the bare game view (screen +
-        // reverse playback) so the emulator chrome never shows.
+        // emulator UI in, "game" swaps in the bare game view, "cheat" swaps
+        // in the cheat-engine view - the emulator chrome never shows for
+        // the latter two.
         let openProject (g: GameManifest) =
             menuOpen <- false
 
@@ -3309,6 +3357,8 @@ type MainWindow() as self =
 
                 if launchPhase = "game" then
                     self.ShowGameOnly()
+                elif launchPhase = "cheat" then
+                    self.ShowCheatEngine()
                 else
                     self.Title <- "JetpacFR - Game Changer"
                     self.Content <- r
@@ -3317,18 +3367,17 @@ type MainWindow() as self =
 
         let ctx: LauncherView.LauncherContext =
             { OpenEmulator =
-                fun g ->
-                    launchPhase <- "emulator"
-                    openProject g
+                  fun g ->
+                      launchPhase <- "emulator"
+                      openProject g
               OpenCheatEngine =
-                fun g ->
-                    launchPhase <- "emulator"
-                    openProject g
-                    self.OpenCheatEngine()
+                  fun g ->
+                      launchPhase <- "cheat"
+                      openProject g
               OpenJustGame =
-                fun g ->
-                    launchPhase <- "game"
-                    openProject g }
+                  fun g ->
+                      launchPhase <- "game"
+                      openProject g }
 
         let root, refreshLauncher = LauncherView.build ctx
         pickerRoot <- root
@@ -3601,11 +3650,10 @@ type MainWindow() as self =
         DockPanel.SetDock(viewRow, Dock.Top)
         center.Children.Add viewRow |> ignore
 
-        // 4. right of the code window: the whole comment complex (edit pane,
-        //    target line, shared comment box + mass-comment buttons) lives in
-        //    its own sub-pane. codeCmtHost (code | splitter | comments)
-        //    replaces the code window as center's fill child; the splitter
-        //    lets the user give either side more width.
+        // 4. the comment EDIT pane moves right of the code pane (they share
+        //    codeCmtHost below the flame graph, with a splitter); the shared
+        //    comment box + mass-comment buttons and the target line stay
+        //    docked to the bottom of the center column, where they had room.
         let codeCmtHost = Grid()
         codeCmtHost.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
         codeCmtHost.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
@@ -3657,20 +3705,19 @@ type MainWindow() as self =
 
         cmtBar.Children.Add cmtBtnRow |> ignore
         DockPanel.SetDock(cmtBar, Dock.Bottom)
-        cmtHost.Children.Add cmtBar |> ignore
+        center.Children.Add cmtBar |> ignore
         disasmTarget.Foreground <- cyan
         disasmTarget.FontFamily <- mono
         disasmTarget.FontSize <- 12.0
         disasmTarget.Margin <- Thickness(0.0, 4.0, 0.0, 4.0)
         DockPanel.SetDock(disasmTarget, Dock.Bottom)
-        cmtHost.Children.Add disasmTarget |> ignore
+        center.Children.Add disasmTarget |> ignore
 
         // Comment edit pane (right of the code pane): every comment attached
         // to the current line, most specific first. Line comments get
         // editable boxes; block (range/name) comments are shown read-only
-        // and marked. Enter on a code line hands focus here. Added LAST to
-        // cmtHost, so it becomes the pane's fill child (the shared box and
-        // buttons above stay docked to the bottom).
+        // and marked. Enter on a code line hands focus here. It is the only
+        // element inside cmtHost, so it fills the side pane.
         let cmtPaneBorder =
             Border(BorderBrush = dim, BorderThickness = Thickness(1.0), Margin = Thickness(0.0, 2.0, 0.0, 2.0))
 
@@ -3714,118 +3761,246 @@ type MainWindow() as self =
         let mutable editingComment: ControlComment option = None
 
         let rec rebuildCommentPane (force: bool) =
-            let controlRef = control |> Option.map box |> Option.defaultValue null
+            // Label-editor mode: clicking a label row swaps the pane from the
+            // comment list to a label editor - static kind + address text,
+            // the name in an editable box, Rename/Cancel.
+            match labelEditor with
+            | Some(addr, name) ->
+                if force || paneAddr <> Some addr then
+                    paneAddr <- Some addr
 
-            if
-                force
-                || paneAddr <> Some memCursor
-                || not (Object.ReferenceEquals(paneControl, controlRef))
-            then
-                // The editing selection is address-bound: moving the cursor away
-                // leaves edit mode (the drafted text stays in the box).
-                match editingComment with
-                | Some m when m.Addr <> memCursor ->
-                    editingComment <- None
-                    cmtPaneAddBtn.Content <- "add line comment"
-                | _ -> ()
+                    let kind =
+                        match control with
+                        | Some c when c.Symbols |> List.exists (fun (a, _) -> a = addr) -> "user symbol"
+                        | Some c when
+                            c.Blocks
+                            |> List.exists (fun b ->
+                                b.Kind = Code
+                                && b.Start = addr
+                                && b.Name <> sprintf "block_%04X" b.Start) ->
+                            "block name"
+                        | _ -> "generated label"
 
-                paneAddr <- Some memCursor
-                paneControl <- controlRef
-                cmtPaneRows.Children.Clear()
-                cmtPaneTitle.Text <- sprintf "comments at %04X" memCursor
+                    cmtPaneTitle.Text <- sprintf "label editor (was: %s)" name
+                    cmtPaneRows.Children.Clear()
 
-                match control with
-                | None ->
                     cmtPaneRows.Children.Add(
-                        TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)
+                        TextBlock(
+                            Text = sprintf "kind: %s    address: $%04X" kind addr,
+                            Foreground = dim,
+                            FontSize = 11.0,
+                            Margin = Thickness(0.0, 0.0, 0.0, 6.0)
+                        )
                     )
                     |> ignore
-                | Some c ->
-                    // Comment rows are read-only one-liners: clicking a line comment
-                    // loads it into the single editor below (whose button turns into
-                    // "update comment"), so rows never carry text boxes and the pane
-                    // height stays bounded.
-                    let mkRow (label: string) (labelColor: Brush) (text: string) (original: ControlComment option) =
-                        let row =
-                            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
 
-                        let tag =
-                            TextBlock(
-                                Text = label,
-                                Foreground = labelColor,
-                                FontSize = 11.0,
-                                VerticalAlignment = VerticalAlignment.Center,
-                                MinWidth = 150.0
-                            )
+                    let box = TextBox(Text = name, FontFamily = mono, FontSize = 12.0)
+                    cmtPaneRows.Children.Add box |> ignore
 
-                        row.Children.Add tag |> ignore
+                    let btnRow =
+                        StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 6.0, 0.0, 0.0))
 
-                        let body =
-                            TextBlock(
-                                Text = text,
-                                Foreground = normal,
-                                FontSize = 11.0,
-                                VerticalAlignment = VerticalAlignment.Center
-                            )
+                    let renameBtn = Button(Content = "Rename", Width = 90.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
 
-                        row.Children.Add body |> ignore
-
-                        match original with
-                        | Some m ->
-                            row.Cursor <- Cursors.Hand
-
-                            row.MouseLeftButtonDown.Add(fun _ ->
-                                Seq.cast<Panel> cmtPaneRows.Children
-                                |> Seq.iter (fun el -> el.Background <- null)
-
-                                row.Background <- hiBgBrush
-                                editingComment <- Some m
-                                cmtPaneAddBox.Text <- m.Text
-                                cmtPaneAddBtn.Content <- "update comment")
-
-                            let del =
-                                Button(Content = "del", Width = 38.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
-
-                            del.Click.Add(fun _ ->
-                                if editingComment = Some m then
-                                    editingComment <- None
-                                    cmtPaneAddBox.Text <- ""
-                                    cmtPaneAddBtn.Content <- "add line comment"
-
-                                control <- Some(ControlFile.removeComment c m)
-                                refreshDisasm ()
-                                rebuildCommentPane true)
-
-                            row.Children.Add del |> ignore
+                    let apply () =
+                        match control with
+                        | Some c ->
+                            control <- Some(ControlFile.renameSymbol c addr box.Text)
+                            labelEditor <- Some(addr, box.Text.Trim())
+                            refreshControlLists ()
+                            refreshDisasm ()
+                            rebuildCommentPane true
                         | None -> ()
 
-                        cmtPaneRows.Children.Add row |> ignore
+                    renameBtn.Click.Add(fun _ -> apply ())
+                    btnRow.Children.Add renameBtn |> ignore
 
-                    let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = memCursor)
+                    let cancelBtn = Button(Content = "Cancel", Width = 90.0)
 
-                    let covering kind =
-                        c.Comments
-                        |> List.filter (fun m -> m.Kind = kind && m.Addr <= memCursor && memCursor < m.EndExcl)
-                        |> List.sortBy (fun m -> m.EndExcl - m.Addr)
+                    cancelBtn.Click.Add(fun _ ->
+                        labelEditor <- None
+                        refreshDisasm ()
+                        rebuildCommentPane true)
 
-                    if
-                        List.isEmpty lines
-                        && List.isEmpty (covering Range)
-                        && List.isEmpty (covering Name)
-                    then
+                    btnRow.Children.Add cancelBtn |> ignore
+                    cmtPaneRows.Children.Add btnRow |> ignore
+
+                    box.KeyDown.Add(fun e ->
+                        if e.Key = Key.Enter then
+                            e.Handled <- true
+                            apply ()
+                        elif e.Key = Key.Escape then
+                            e.Handled <- true
+                            labelEditor <- None
+                            refreshDisasm ()
+                            rebuildCommentPane true)
+            | None ->
+                rebuildCommentRows force
+
+        and rebuildCommentRows (force: bool) =
+                let controlRef = control |> Option.map box |> Option.defaultValue null
+
+                if
+                    force
+                    || paneAddr <> Some memCursor
+                    || not (Object.ReferenceEquals(paneControl, controlRef))
+                then
+                    // The editing selection is address-bound: moving the cursor away
+                    // leaves edit mode (the drafted text stays in the box).
+                    match editingComment with
+                    | Some m when m.Addr <> memCursor ->
+                        editingComment <- None
+                        cmtPaneAddBtn.Content <- "add line comment"
+                    | _ -> ()
+
+                    paneAddr <- Some memCursor
+                    paneControl <- controlRef
+                    cmtPaneRows.Children.Clear()
+                    cmtPaneTitle.Text <- sprintf "comments at %04X" memCursor
+
+                    match control with
+                    | None ->
                         cmtPaneRows.Children.Add(
-                            TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)
+                            TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)
+                        )
+                        |> ignore
+                    | Some c ->
+                        // Name/label section: in execution mode there are no
+                        // label rows, so a named address shows its name here
+                        // for editing (and an unnamed one offers a box to add
+                        // one). renameSymbol upserts, empty text removes.
+                        let named = nameAtAddr memCursor
+
+                        let kindText, boxText, btnText =
+                            match named with
+                            | Some(n, k) -> k, n, "Rename"
+                            | None -> "no name", "", "Add name"
+
+                        cmtPaneRows.Children.Add(
+                            TextBlock(
+                                Text = sprintf "name: %s  ($%04X)" kindText memCursor,
+                                Foreground = dim,
+                                FontSize = 11.0,
+                                Margin = Thickness(0.0, 0.0, 0.0, 3.0)
+                            )
                         )
                         |> ignore
 
-                    for m in lines do
-                        mkRow "line" normal m.Text (Some m)
+                        let nameRow =
+                            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 8.0))
 
-                    for m in covering Range do
-                        mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
+                        let nameBox = TextBox(Text = boxText, Width = 190.0, FontFamily = mono, FontSize = 11.5)
 
-                    for m in covering Name do
-                        mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
+                        let applyName () =
+                            if not (String.IsNullOrWhiteSpace nameBox.Text) then
+                                control <- Some(ControlFile.renameSymbol c memCursor (nameBox.Text.Trim()))
+                                refreshControlLists ()
+                                refreshDisasm ()
+                                rebuildCommentPane true
+                            elif named.IsSome then
+                                // empty text removes the name
+                                control <- Some(ControlFile.renameSymbol c memCursor "")
+                                refreshControlLists ()
+                                refreshDisasm ()
+                                rebuildCommentPane true
+
+                        let nameBtn = Button(Content = btnText, MinWidth = 80.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
+                        nameBtn.Click.Add(fun _ -> applyName ())
+
+                        nameBox.KeyDown.Add(fun e ->
+                            if e.Key = Key.Enter then
+                                e.Handled <- true
+                                applyName ())
+
+                        nameRow.Children.Add nameBox |> ignore
+                        nameRow.Children.Add nameBtn |> ignore
+                        cmtPaneRows.Children.Add nameRow |> ignore
+
+                        // Comment rows are read-only one-liners: clicking a line comment
+                        // loads it into the single editor below (whose button turns into
+                        // "update comment"), so rows never carry text boxes and the pane
+                        // height stays bounded.
+                        let mkRow (label: string) (labelColor: Brush) (text: string) (original: ControlComment option) =
+                            let row =
+                                StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
+
+                            let tag =
+                                TextBlock(
+                                    Text = label,
+                                    Foreground = labelColor,
+                                    FontSize = 11.0,
+                                    VerticalAlignment = VerticalAlignment.Center,
+                                    MinWidth = 150.0
+                                )
+
+                            row.Children.Add tag |> ignore
+
+                            let body =
+                                TextBlock(
+                                    Text = text,
+                                    Foreground = normal,
+                                    FontSize = 11.0,
+                                    VerticalAlignment = VerticalAlignment.Center
+                                )
+
+                            row.Children.Add body |> ignore
+
+                            match original with
+                            | Some m ->
+                                row.Cursor <- Cursors.Hand
+
+                                row.MouseLeftButtonDown.Add(fun _ ->
+                                    Seq.cast<Panel> cmtPaneRows.Children
+                                    |> Seq.iter (fun el -> el.Background <- null)
+
+                                    row.Background <- hiBgBrush
+                                    editingComment <- Some m
+                                    cmtPaneAddBox.Text <- m.Text
+                                    cmtPaneAddBtn.Content <- "update comment")
+
+                                let del =
+                                    Button(Content = "del", Width = 38.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
+
+                                del.Click.Add(fun _ ->
+                                    if editingComment = Some m then
+                                        editingComment <- None
+                                        cmtPaneAddBox.Text <- ""
+                                        cmtPaneAddBtn.Content <- "add line comment"
+
+                                    control <- Some(ControlFile.removeComment c m)
+                                    refreshDisasm ()
+                                    rebuildCommentPane true)
+
+                                row.Children.Add del |> ignore
+                            | None -> ()
+
+                            cmtPaneRows.Children.Add row |> ignore
+
+                        let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = memCursor)
+
+                        let covering kind =
+                            c.Comments
+                            |> List.filter (fun m -> m.Kind = kind && m.Addr <= memCursor && memCursor < m.EndExcl)
+                            |> List.sortBy (fun m -> m.EndExcl - m.Addr)
+
+                        if
+                            List.isEmpty lines
+                            && List.isEmpty (covering Range)
+                            && List.isEmpty (covering Name)
+                        then
+                            cmtPaneRows.Children.Add(
+                                TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)
+                            )
+                            |> ignore
+
+                        for m in lines do
+                            mkRow "line" normal m.Text (Some m)
+
+                        for m in covering Range do
+                            mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
+
+                        for m in covering Name do
+                            mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
 
         let commitComment () =
             match control with
@@ -3862,11 +4037,26 @@ type MainWindow() as self =
             match disasmList.SelectedItem with
             | :? DisasmRow as row when row.Addr >= 0 ->
                 if disasmModeMemory then
-                    if memCursor <> row.Addr then
-                        memCursor <- row.Addr
-                        memCursorReason <- "row click"
+                    // A label row (its tag ends with the ':' of `name:`) opens
+                    // the label editor in the comments pane; the instruction
+                    // row keeps unhighlighted and the bright cursor does not
+                    // move. Any other row exits label-editor mode.
+                    let tag = string row.Tag
+                    let isLabelRow = tag.EndsWith ":" && labelNames.ContainsKey row.Addr
+
+                    if isLabelRow then
+                        labelEditor <- Some(row.Addr, labelNames[row.Addr])
                         refreshDisasm ()
                         rebuildCommentPane true
+                    else
+                        let wasEditing = labelEditor.IsSome
+                        labelEditor <- None
+
+                        if memCursor <> row.Addr || wasEditing then
+                            memCursor <- row.Addr
+                            memCursorReason <- "row click"
+                            refreshDisasm ()
+                            rebuildCommentPane true
                 elif row.InstrIdx >= 0 then
                     cursor <- row.InstrIdx
                     memCursor <- row.Addr
@@ -3988,16 +4178,17 @@ type MainWindow() as self =
             )
 
         Grid.SetRow(flameSplitter, 1)
-        Grid.SetRow(codeHost, 2)
+        // the code pane (left) and the comment pane (right) share the row
+        // below the flame graph via codeCmtHost, so the flame graph spans
+        // BOTH at full width
         codeHost.MinWidth <- 300.0
+        Grid.SetColumn(codeHost, 0)
+        codeCmtHost.Children.Add codeHost |> ignore
+        Grid.SetRow(codeCmtHost, 2)
         lowerHost.Children.Add flameCtrl |> ignore
         lowerHost.Children.Add flameSplitter |> ignore
-        lowerHost.Children.Add codeHost |> ignore
-        // The lower host (flame + code) takes the code side of the
-        // code/comments split; the comments pane sits in the right column.
-        Grid.SetColumn(lowerHost, 0)
-        codeCmtHost.Children.Add lowerHost |> ignore
-        center.Children.Add codeCmtHost |> ignore
+        lowerHost.Children.Add codeCmtHost |> ignore
+        center.Children.Add lowerHost |> ignore
 
         // right column: heatmap / functions / call graph
         let right = TabControl(Margin = Thickness(8.0), Background = panel)
@@ -4485,8 +4676,8 @@ type MainWindow() as self =
         right.Items.Add theaterTab |> ignore
         // The mass-comment list reads the control file on demand: refresh when
         // the tab becomes visible (and via its Refresh button).
-        right.SelectionChanged.Add(fun _ ->
-            if right.SelectedItem = massTab then
+        right.SelectionChanged.Add(fun e ->
+            if Object.ReferenceEquals(e.OriginalSource, right) && right.SelectedItem = massTab then
                 refreshMassList ())
         // toolbar
         let toolbar =
@@ -5059,6 +5250,7 @@ type MainWindow() as self =
                 scanList.ItemsSource <- null
                 scanCountLabel.Text <- ""
                 engineCombo.IsEnabled <- hasCE g
+                saveControlNow () // persist the PREVIOUS project's dirty labels/comments first
                 launchGame g
                 loadControlForGame ()
                 refreshControlLists () // names/mass lists must not keep the previous game's rows
@@ -5286,10 +5478,13 @@ type MainWindow() as self =
         root.Children.Add main |> ignore
         emulatorRoot <- Some root
 
-        // Just-the-Game phase: the emulator machinery is built (timers,
-        // wiring, boot) but stays invisible - only the bare game view shows.
+        // Just-the-Game / Cheat phases: the emulator machinery is built
+        // (timers, wiring, boot) but stays invisible - only the chosen
+        // bare view shows.
         if launchPhase = "game" then
             self.ShowGameOnly()
+        elif launchPhase = "cheat" then
+            self.ShowCheatEngine()
         else
             self.Content <- root
 
@@ -5397,8 +5592,10 @@ type MainWindow() as self =
         // disassembly on it, execution mode jumps to its first execution
         let focusCodeView (reason: string) (addr: int) =
             if disasmModeMemory then
+                labelEditor <- None
                 gotoMemCursor (addr &&& 0xFFFF) reason
                 refreshDisasm ()
+                rebuildCommentPane true
             else
                 match currentTrace (), session with
                 | Some t, _ when
@@ -5407,8 +5604,10 @@ type MainWindow() as self =
                     && t.FirstIndexAtPc[addr] >= 0
                     ->
                     cursor <- t.FirstIndexAtPc[addr]
+                    memCursor <- addr &&& 0xFFFF
                     refreshAll ()
                     syncSlider ()
+                    rebuildCommentPane true
                 | _ -> ()
 
         // Hex address jump (code pane toolbar). Bare numbers are hex here.
@@ -5479,26 +5678,57 @@ type MainWindow() as self =
                 Margin = Thickness(8.0, 0.0, 0.0, 0.0)
             )
 
-        let namesRow (text: string) (brush: SolidColorBrush) (addr: int) =
-            { Tag = text
-              Brush = brush
-              Tint = null
-              IsCurrent = false
-              Addr = addr
-              InstrIdx = -1 }
+        let addRow (text: string) (color: Brush) (addr: int) (menuItems: (string * (unit -> unit)) list) =
+            let tb =
+                TextBlock(
+                    Text = text,
+                    Foreground = color,
+                    FontFamily = mono,
+                    FontSize = 11.5,
+                    Margin = Thickness(6.0, 1.0, 6.0, 1.0)
+                )
+
+            let item = ListBoxItem(Content = tb, Tag = box addr)
+
+            if not (List.isEmpty menuItems) then
+                let menu = ContextMenu()
+
+                for (label, act) in menuItems do
+                    let mi = MenuItem(Header = label)
+                    mi.Click.Add(fun _ -> act ())
+                    menu.Items.Add mi |> ignore
+
+                item.ContextMenu <- menu
+
+            namesList.Items.Add item |> ignore
 
         let refreshNamesList () =
-            let rows = ResizeArray<DisasmRow>()
+            namesList.Items.Clear()
+            namesCountLabel.Text <- ""
+
+            let refreshAfterEdit (msg: string) =
+                refreshControlLists ()
+                refreshDisasm ()
+                rebuildCommentPane true
+                statusText.Text <- msg
 
             match control with
             | None ->
-                rows.Add(namesRow "no control file loaded - use 'New ctrl' or 'Import ctrl...' first" dim -1)
-                namesCountLabel.Text <- ""
+                addRow "no control file loaded - use 'New ctrl' or 'Import ctrl...' first" dim -1 []
             | Some c ->
-                // named function entry points (feed the flame graph labels)
+                // named function entry points (feed the flame graph labels);
+                // right-click deletes the symbol
                 for (a, n) in c.Symbols do
-                    rows.Add(namesRow (sprintf "symbol   %04X            %s" a n) green a)
-                // the block map
+                    addRow
+                        (sprintf "symbol   %04X            %s" a n)
+                        green
+                        a
+                        [ (sprintf "delete symbol '%s' at $%04X" n a,
+                           fun () ->
+                               control <- Some(ControlFile.renameSymbol c a "")
+                               refreshAfterEdit (sprintf "symbol at $%04X deleted" a)) ]
+
+                // the block map (structural - no delete here)
                 for b in c.Blocks do
                     let kind =
                         match b.Kind with
@@ -5506,10 +5736,13 @@ type MainWindow() as self =
                         | Data -> "data"
                         | Gap -> "gap"
 
-                    rows.Add(
-                        namesRow (sprintf "block    %04X..%04X  %s  (%s)" b.Start b.EndExcl b.Name kind) cyan b.Start
-                    )
-                // every comment in the file
+                    addRow
+                        (sprintf "block    %04X..%04X  %s  (%s)" b.Start b.EndExcl b.Name kind)
+                        cyan
+                        b.Start
+                        []
+
+                // every comment in the file; right-click deletes it
                 for m in c.Comments do
                     let span =
                         if m.EndExcl > m.Addr then
@@ -5517,20 +5750,25 @@ type MainWindow() as self =
                         else
                             sprintf "%04X" m.Addr
 
-                    let brush =
+                    let color =
                         match m.Kind with
                         | CommentKind.Name -> yellow
                         | CommentKind.Exec -> orange
                         | _ -> normal
 
-                    rows.Add(
-                        namesRow (sprintf "%-8s %s   %s" (ControlFile.kindToString m.Kind) span m.Text) brush m.Addr
-                    )
+                    let kindText = ControlFile.kindToString m.Kind
+
+                    addRow
+                        (sprintf "%-8s %s   %s" kindText span m.Text)
+                        color
+                        m.Addr
+                        [ (sprintf "delete this %s comment" kindText,
+                           fun () ->
+                               control <- Some(ControlFile.upsert c { m with Text = "" })
+                               refreshAfterEdit "comment deleted") ]
 
                 namesCountLabel.Text <-
                     sprintf "%d symbols, %d blocks, %d comments" c.Symbols.Length c.Blocks.Length c.Comments.Length
-
-            namesList.ItemsSource <- rows
 
         let refreshNamesIfVisible () =
             if right.SelectedItem = namesTab then
@@ -5538,34 +5776,29 @@ type MainWindow() as self =
 
         namesList.MouseDoubleClick.Add(fun _ ->
             match namesList.SelectedItem with
-            | :? DisasmRow as r when r.Addr >= 0 ->
-                let addr = r.Addr &&& 0xFFFF
-                // Land on the row's line whatever it takes: execution view when the
-                // address executed in the trace, otherwise switch to the memory
-                // sweep and center on the address there.
-                if disasmModeMemory then
-                    focusCodeView "names tab" addr
-                else
-                    match currentTrace () with
-                    | Some t when
-                        t.Entries.Length > 0
-                        && addr < t.FirstIndexAtPc.Length
-                        && t.FirstIndexAtPc[addr] >= 0
-                        ->
+            | :? ListBoxItem as it ->
+                match it.Tag with
+                | :? int as a when a >= 0 ->
+                    let addr = a &&& 0xFFFF
+                    // Land on the row's line whatever it takes: execution view when the
+                    // address executed in the trace, otherwise switch to the memory
+                    // sweep and center on the address there.
+                    if disasmModeMemory then
                         focusCodeView "names tab" addr
-                    | _ ->
-                        pendingMemCursor <- Some addr
-                        memModeBtn.IsChecked <- Nullable<bool>(true)
+                    else
+                        match currentTrace () with
+                        | Some t when
+                            t.Entries.Length > 0
+                            && addr < t.FirstIndexAtPc.Length
+                            && t.FirstIndexAtPc[addr] >= 0
+                            ->
+                            focusCodeView "names tab" addr
+                        | _ ->
+                            pendingMemCursor <- Some addr
+                            memModeBtn.IsChecked <- Nullable<bool>(true)
+                | _ -> ()
             | _ -> ())
 
-        let namesTemplate = DataTemplate()
-        let namesFactory = FrameworkElementFactory(typeof<TextBlock>)
-        namesFactory.SetValue(TextBlock.TextProperty, Binding("Tag"))
-        namesFactory.SetValue(TextBlock.FontFamilyProperty, mono)
-        namesFactory.SetValue(TextBlock.FontSizeProperty, 11.5)
-        namesFactory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
-        namesTemplate.VisualTree <- namesFactory
-        namesList.ItemTemplate <- namesTemplate
         namesList.Background <- panel
         namesList.BorderThickness <- Thickness(0.0)
         namesRefreshBtn.Click.Add(fun _ -> refreshNamesList ())
@@ -5578,7 +5811,7 @@ type MainWindow() as self =
 
         namesTop.Children.Add(
             TextBlock(
-                Text = "symbols + blocks + comments from control.json; double-click a row to jump",
+                Text = "double-click a row to jump - right-click a symbol or comment row to delete it",
                 Foreground = dim,
                 FontSize = 11.0,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -5595,9 +5828,8 @@ type MainWindow() as self =
         // here also fires the refresh above, populating the list at startup.
         right.Items.Insert(0, namesTab)
         right.SelectedIndex <- 0
-
-        right.SelectionChanged.Add(fun _ ->
-            if right.SelectedItem = namesTab then
+        right.SelectionChanged.Add(fun e ->
+            if Object.ReferenceEquals(e.OriginalSource, right) && right.SelectedItem = namesTab then
                 refreshNamesList ())
         // Phase switches and game switches route through this hook (declared
         // at class level): the names list AND the mass-comment list re-read
@@ -5607,6 +5839,7 @@ type MainWindow() as self =
             fun () ->
                 refreshNamesList ()
                 refreshMassIfVisible ()
+
 
         // click/drag scrubs the code views to the address under the cursor
         controlMap.AddressClicked.Add(fun addr -> focusCodeView "memory map click" addr)
@@ -5928,13 +6161,37 @@ type MainWindow() as self =
         // re-executing the frame prefix from the recording (ParkAtInstruction),
         // with the code cursor on the exact entry of the flame trace. Falls
         // back to a frame-level scrub when the window has no instruction tier.
+        // Frame-level fallback for flame clicks: clamps the frame into the
+        // recording and parks there. Every caller passes the reason the
+        // instruction-level seek could not run, and it lands in the status
+        // bar - flame clicks are never silent.
+        let frameSeek (reason: string) (frame: int) =
+            match session with
+            | None ->
+                statusText.Text <-
+                    sprintf
+                        "flame click: %s - but there is no live session (CE engine active), nothing to seek"
+                        reason
+            | Some s ->
+                let target = max 0 (min frame s.TimelineExtent)
+
+                let clampNote =
+                    if frame > s.TimelineExtent then " - beyond the recording, clamped" else ""
+
+                if target = s.Frame && not running && not replaying then
+                    statusText.Text <-
+                        sprintf "flame click: %s - already parked at frame %d%s" reason target clampNote
+                else
+                    statusText.Text <- sprintf "flame click: %s - frame seek to %d%s" reason target clampNote
+                    scrubToFrame (int64 frame)
+
         flameCtrl.SeekRequested.Add(fun (tick, frame) ->
             match session, flameCtrl.Window, flameTrace with
             | Some s, Some w, Some ft when frame >= 0 ->
                 let idx = FlameWindow.entryAtTick w tick
 
                 if idx < 0 || idx >= ft.Entries.Length then
-                    scrubToFrame (int64 frame)
+                    frameSeek "the clicked tick has no instruction in the flame trace" frame
                 else
                     let frameNo = frameOfEntry ft idx
                     // First entry of that frame: boundary [frame - 2] ends frame - 1
@@ -5966,7 +6223,13 @@ type MainWindow() as self =
                             steps <- steps + 1
 
                     if steps <= 0 || frameNo < 1 || frameNo - 1 > s.TimelineExtent then
-                        scrubToFrame (int64 frame)
+                        let reason =
+                            if frameNo - 1 > s.TimelineExtent then
+                                "the clicked frame is beyond the recording"
+                            else
+                                "the tick precedes any instruction of its frame"
+
+                        frameSeek reason frame
                     else
                         pauseGame ()
 
@@ -5996,8 +6259,16 @@ type MainWindow() as self =
                             // frame-level seek, which clamps into the timeline's extent.
                             scrubToFrame (int64 frame)
                             statusText.Text <- sprintf "flame seek fell back to frame %d (%s)" frame ex.Message
-            | _ when frame >= 0 -> scrubToFrame (int64 frame)
-            | _ -> statusText.Text <- "flame: window has no frame mapping")
+            | _ when frame >= 0 ->
+                let reason =
+                    match session, flameTrace, flameCtrl.Window with
+                    | None, _, _ -> "no live session (CE engine active)"
+                    | _, None, _ -> "the game is running - instruction data is dropped while playing"
+                    | _, _, None -> "no flame window loaded"
+                    | _ -> "unmapped click"
+
+                frameSeek reason frame
+            | _ -> statusText.Text <- "flame click: this window has no frame mapping - click ignored")
 
         // right-click: jump to the function, or name it from the comment box
         // (control.json symbols feed the labels here AND the regenerated CE).
@@ -6966,6 +7237,7 @@ type MainWindow() as self =
         self.Closed.Add(fun _ ->
             running <- false
             saveTimeline false // only when the recording actually changed
+            saveControlNow () // labels/comments: written only when dirty
             frameTimer.Stop()
             cinemaTimer.Stop()
             manualTimer.Stop()
@@ -6983,12 +7255,24 @@ type MainWindow() as self =
     /// accessors hand out the live session's own screen buffer and memory,
     /// so pokes hit the running game and the picture follows project
     /// switches automatically.
-    member self.OpenCheatEngine() : unit =
-        match cheatWin with
-        | Some w when w.IsLoaded ->
-            w.RefreshTitle()
-            w.Activate() |> ignore
-        | _ ->
+    /// Swap the window to the cheat-engine view (CheatEngineView.fs): the
+    /// Spectrum screen plus the memory scanner, over the shared live
+    /// session. Pokes hit the running game and the picture follows project
+    /// switches automatically. Escape or its main-menu button returns to
+    /// the launcher.
+    member self.ShowCheatEngine() : unit =
+        self.Title <-
+            sprintf
+                "Cheat Engine - %s"
+                (match currentGame with
+                 | Some g -> g.Name
+                 | None -> "no project")
+
+        match cheatView with
+        | Some v ->
+            self.Content <- v
+            v.Focus() |> ignore
+        | None ->
             let getScreen () =
                 match session with
                 | Some s -> Some s.ScreenBuffer
@@ -6999,18 +7283,11 @@ type MainWindow() as self =
                 | Some s -> Some s.Memory
                 | None -> None
 
-            let getName () =
-                match currentGame with
-                | Some g -> g.Name
-                | None -> "no project"
+            let v = CheatEngineView(getScreen, getMemory, returnToMenu)
+            cheatView <- Some v
+            self.Content <- v
+            v.Focus() |> ignore
 
-            let w = CheatEngineWindow(getScreen, getMemory, getName)
-            w.Owner <- self
-            cheatWin <- Some w
-            w.Show()
-
-    /// Open (or focus) the bare game window. Same shared machine as the
-    /// cheat window: only the screen plus hold-to-reverse playback.
     /// Swap the window to the bare game view (GameOnlyView.fs): only the
     /// Spectrum screen plus hold-to-reverse playback, no emulator chrome.
     /// The view talks to the shared session through accessors; Escape or
