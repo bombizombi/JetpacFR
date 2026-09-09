@@ -3,6 +3,7 @@ namespace JetpacFR.Core
 open System
 open System.IO
 open System.Text
+open System.Globalization
 
 /// The per-frame full-state timeline: after every completed frame the whole
 /// machine state (64K memory + register/timing text + keyboard matrix) is
@@ -314,3 +315,96 @@ module StateTimelineStore =
                                             | None -> TimelineLoaded(timeline, Seq.toList events)
             with ex ->
                 TimelineIgnored ex.Message
+
+/// Named recording slots: the legacy games/<id>/timeline.jst is the "default"
+/// slot, further recordings live as games/<id>/timelines/<name>.jst in the
+/// same uncompressed format. Listing peeks headers only (no frame data).
+module TimelineSlots =
+
+    let defaultName = "default"
+
+    let dirFor (gameDir: string) =
+        Path.Combine(gameDir, "timelines")
+
+    let pathFor (gameDir: string) (name: string) =
+        if name = defaultName then
+            Path.Combine(gameDir, StateTimelineStore.FileName)
+        else
+            Path.Combine(dirFor gameDir, name + ".jst")
+
+    type SlotInfo =
+        { Name: string
+          Path: string
+          Bytes: int64
+          Modified: DateTime
+          StartFrame: int option
+          Frames: int option }
+
+    /// Header-only read: (startFrame, frameCount, eventCount) without touching
+    /// the per-frame states.
+    let tryPeek (path: string) : (int * int * int) option =
+        try
+            use fs = File.OpenRead path
+            use r = new BinaryReader(fs)
+            let magic = [| byte 'J'; byte 'P'; byte 'S'; byte 'T' |]
+
+            if r.ReadBytes 4 <> magic || r.ReadUInt16() <> StateTimelineStore.Version then
+                None
+            else
+                r.ReadUInt16() |> ignore // flags
+                for _ in 1..4 do
+                    let len = int (r.ReadByte())
+                    r.ReadBytes len |> ignore
+                if r.ReadByte() = 1uy then r.ReadInt32() |> ignore
+                let eventCount = int (r.ReadUInt32())
+                // frame i32 + row i32 + bit i32 + pressed u8 per event
+                fs.Seek(int64 eventCount * 13L, SeekOrigin.Current) |> ignore
+                let startFrame = r.ReadInt32()
+                let frameCount = int (r.ReadUInt32())
+
+                if startFrame < 0 || frameCount < 0 then None
+                else Some(startFrame, frameCount, eventCount)
+        with _ ->
+            None
+
+    let private info (name: string) (path: string) : SlotInfo option =
+        try
+            let fi = FileInfo path
+
+            if not fi.Exists then
+                None
+            else
+                let peeked = tryPeek path
+
+                Some
+                    { Name = name
+                      Path = path
+                      Bytes = fi.Length
+                      Modified = fi.LastWriteTimeUtc
+                      StartFrame = peeked |> Option.map (fun (s, _, _) -> s)
+                      Frames = peeked |> Option.map (fun (_, f, _) -> f) }
+        with _ ->
+            None
+
+    /// All slots, newest first. Empty when nothing was ever recorded.
+    let list (gameDir: string) : SlotInfo list =
+        let legacy = info defaultName (Path.Combine(gameDir, StateTimelineStore.FileName)) |> Option.toList
+
+        let named =
+            try
+                let dir = dirFor gameDir
+
+                if Directory.Exists dir then
+                    Directory.GetFiles(dir, "*.jst")
+                    |> Array.sort
+                    |> Array.choose (fun p -> info (Path.GetFileNameWithoutExtension p) p)
+                    |> Array.toList
+                else
+                    []
+            with _ ->
+                []
+
+        (legacy @ named) |> List.sortByDescending (fun s -> s.Modified)
+
+    let suggestName () =
+        "timeline-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)

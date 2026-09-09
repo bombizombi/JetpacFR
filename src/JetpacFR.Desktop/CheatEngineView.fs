@@ -25,11 +25,11 @@ type CheatEngineView
     ) as self =
     inherit Grid()
 
-    let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
-    let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
-    let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
-    let green = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
-    let red = SolidColorBrush(Color.FromRgb(0xE8uy, 0x54uy, 0x54uy))
+    let bg = Theme.bg
+    let panel = Theme.panel
+    let dim = Theme.dim
+    let green = Theme.green
+    let red = Theme.red
     let mono = FontFamily("Consolas")
 
     let mutable results: int list = []

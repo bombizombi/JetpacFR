@@ -1,0 +1,2561 @@
+Can you convert this code into F#, it doesn't have to be a command line utility, or any other project, just do your best guess at types and convert it into F#.
+
+
+
+import sys
+import os
+
+from skoolkit import SkoolKitError, open_file, read_bin_file, write_line, get_address_format
+from skoolkit.components import get_comment_generator, get_component, get_rst_handler
+from skoolkit.ctlparser import CtlParser
+from skoolkit.opcodes import END, decode
+from skoolkit.skoolctl import AD_ORG, AD_START
+from skoolkit.snaskool import Disassembly
+
+# API (CodeMapReader)
+class CodeMapError(SkoolKitError):
+    """Raised when an error occurs while reading a code map file."""
+
+# API (CommentGenerator)
+class Instruction:
+    def __init__(self, address, data):
+        self.address = address
+        self.bytes = data
+
+# Component API
+def read_map(fname, snapshot, start, end):
+    """
+    Read a code map.
+
+    :param fname: The name of the code map file.
+    :param snapshot: The snapshot (list of 65536 byte values) corresponding to
+                     the code map.
+    :param start: The start address.
+    :param end: The end address.
+    :return: A list of 2-element sequences of the form ``(address, length)``
+             corresponding to the code blocks in *snapshot*.
+    """
+    if os.path.isdir(fname):
+        raise SkoolKitError('{0} is a directory'.format(fname))
+    try:
+        size = os.path.getsize(fname)
+    except OSError as e:
+        if e.errno == 2:
+            raise SkoolKitError('{0}: file not found'.format(fname))
+        raise SkoolKitError('Failed to get size of {}: {}'.format(fname, e.strerror))
+
+    if size == 8192:
+        # Assume this is a Z80 map file
+        sys.stderr.write('Reading {0}'.format(fname))
+        sys.stderr.flush()
+        addresses = []
+        data = read_bin_file(fname)
+        address = start & 65528
+        for b in data[start // 8:end // 8 + 1]:
+            for i in range(8):
+                if b & 1 and start <= address < end:
+                    addresses.append(address)
+                b >>= 1
+                address += 1
+    elif size == 65536:
+        # Assume this is a SpecEmu map file
+        sys.stderr.write('Reading {}'.format(fname))
+        sys.stderr.flush()
+        addresses = []
+        data = read_bin_file(fname)
+        for address in range(start, end):
+            if data[address] & 1:
+                addresses.append(address)
+    else:
+        sys.stderr.write('Reading {0}: '.format(fname))
+        sys.stderr.flush()
+        with open_file(fname) as f:
+            addresses = _get_addresses(f, fname, size, start, end)
+    sys.stderr.write('\n')
+
+    code_blocks = []
+    for address in addresses:
+        size = next(decode(snapshot, address, address + 1))[1]
+        if code_blocks and address <= sum(code_blocks[-1]):
+            if address == sum(code_blocks[-1]):
+                code_blocks[-1][1] += size
+        else:
+            code_blocks.append([address, size])
+
+    return code_blocks
+
+def _get_addresses(f, fname, size, start, end):
+    addresses = set()
+    base = 16
+    i = 1
+    rewind = True
+    ignore_prefixes = ()
+
+    s_line = ''
+    while 1:
+        line = f.readline()
+        if not line:
+            break
+        i += 1
+        s_line = line.strip()
+        if s_line:
+            break
+
+    if s_line.startswith('$'):
+        # rzxplay.py map
+        address_f = lambda s_line: s_line[1:5]
+    elif s_line.startswith('0x'):
+        # Fuse profile
+        address_f = lambda s_line: s_line[2:6]
+    elif s_line.startswith('PC = '):
+        # Spud log
+        address_f = lambda s_line: s_line[5:9]
+    elif s_line.startswith('PC:'):
+        # SpecEmu log
+        address_f = lambda s_line: s_line[:4]
+        ignore_prefixes = ('PC:', 'IX:', 'HL:', 'DE:', 'BC:', 'AF:')
+        rewind = False
+    elif s_line.endswith('decimal'):
+        # Zero log
+        if s_line.endswith('in decimal'):
+            base = 10
+        address_f = lambda s_line: s_line[:s_line.find('\t')]
+        rewind = False
+    else:
+        raise CodeMapError('{0}: Unrecognised format'.format(fname))
+
+    if rewind:
+        f.seek(0)
+        i = 1
+
+    while 1:
+        line = f.readline()
+        if not line:
+            break
+        progress_msg = '{0}%'.format((100 * f.tell()) // size)
+        sys.stderr.write(progress_msg + chr(8) * len(progress_msg))
+        sys.stderr.flush()
+        s_line = line.strip()
+        if s_line:
+            address_str = address_f(s_line)
+            address = None
+            if address_str:
+                try:
+                    address = int(address_str, base)
+                except ValueError:
+                    if not (ignore_prefixes and s_line.startswith(ignore_prefixes)):
+                        raise CodeMapError('{0}, line {1}: Cannot parse address: {2}'.format(fname, i, s_line))
+                if address is not None:
+                    if address < 0 or address > 65535:
+                        raise CodeMapError('{0}, line {1}: Address out of range: {2}'.format(fname, i, s_line))
+                    if start <= address < end:
+                        addresses.add(address)
+        i += 1
+
+    return sorted(addresses)
+
+def _find_terminal_instruction(snapshot, ctls, start, end, rst_handler, ctl=None):
+    address = start
+    while address < end:
+        i_addr, size, max_count, op_id = next(decode(snapshot, address, address + 1, rst_handler))[:4]
+        address += size
+        if ctl is None:
+            for a in range(i_addr, address):
+                if a in ctls:
+                    next_ctl = ctls[a]
+                    del ctls[a]
+            if ctls.get(address) == 'c':
+                break
+        if op_id == END:
+            if address < 65536 and address not in ctls:
+                ctls[address] = ctl or next_ctl
+            break
+    return address
+
+def _get_blocks(ctls):
+    # Determine the block start and end addresses
+    blocks = [[ctls[address], address, None] for address in sorted(ctls)]
+    for i, block in enumerate(blocks[1:]):
+        blocks[i][2] = block[1]
+    blocks.pop()
+    return blocks
+
+def _generate_ctls_with_code_map(snapshot, start, end, config, rst_handler, code_map):
+    # (1) Use the code map to create an initial set of 'c' ctls, and mark all
+    #     unexecuted blocks as 'U' (unknown)
+    # (2) Where a 'c' block doesn't end with a RET/JP/JR, extend it up to the
+    #     next RET/JP/JR in the following 'U' blocks, or up to the next 'c'
+    #     block
+    # (3) Mark entry points in 'U' blocks that are CALLed or JPed to from 'c'
+    #     blocks with 'c'
+    # (4) Split 'c' blocks on RET/JP/JR
+    # (5) Scan the disassembly for pairs of adjacent blocks where the start
+    #     address of the second block is JRed or JPed to from the first block,
+    #     and join such pairs
+    # (6) Examine the remaining 'U' blocks for text
+    # (7) Mark data blocks of all zeroes with 's'
+
+    # (1) Mark all executed blocks as 'c' and unexecuted blocks as 'U'
+    # (unknown)
+    ctls = {start: 'U', end: 'i'}
+    map_reader = get_component('CodeMapReader')
+    for address, length in map_reader.read_map(code_map, snapshot, start, end):
+        ctls[address] = 'c'
+        if address + length < end:
+            ctls[address + length] = 'U'
+
+    # (2) Where a 'c' block doesn't end with a RET/JP/JR, extend it up to the
+    # next RET/JP/JR in the following 'U' blocks, or up to the next 'c' block
+    while 1:
+        done = True
+        for ctl, b_start, b_end in _get_blocks(ctls):
+            if ctl == 'c':
+                last_op_id = list(decode(snapshot, b_start, b_end, rst_handler))[-1][3]
+                if last_op_id == END:
+                    continue
+                if _find_terminal_instruction(snapshot, ctls, b_end, end, rst_handler) < end:
+                    done = False
+                    break
+        if done:
+            break
+
+    # (3) Mark entry points in 'U' blocks that are CALLed or JPed to from 'c'
+    # blocks with 'c'
+    ctl_parser = CtlParser(ctls)
+    disassembly = Disassembly(snapshot, ctl_parser, final=False)
+    while 1:
+        disassembly.build(True)
+        done = True
+        for entry in disassembly.entries:
+            if entry.ctl == 'U':
+                for instruction in entry.instructions:
+                    for referrer in instruction.referrers:
+                        if ctls[referrer] == 'c':
+                            ctls[instruction.address] = 'c'
+                            if entry.next:
+                                e_end = entry.next.address
+                            else:
+                                e_end = 65536
+                            _find_terminal_instruction(snapshot, ctls, instruction.address, e_end, rst_handler, entry.ctl)
+                            disassembly.remove_entry(entry.address)
+                            done = False
+                            break
+                    if not done:
+                        break
+                if not done:
+                    break
+        if done:
+            break
+
+    # (4) Split 'c' blocks on RET/JP/JR
+    for ctl, b_address, b_end in _get_blocks(ctls):
+        if ctl == 'c':
+            next_address = _find_terminal_instruction(snapshot, ctls, b_address, b_end, rst_handler, 'c')
+            if next_address < b_end:
+                disassembly.remove_entry(b_address)
+                while next_address < b_end:
+                    next_address = _find_terminal_instruction(snapshot, ctls, next_address, b_end, rst_handler, 'c')
+
+    # (5) Scan the disassembly for pairs of adjacent blocks where the start
+    # address of the second block is JRed or JPed to from the first block, and
+    # join such pairs
+    while 1:
+        disassembly.build()
+        done = True
+        for entry in disassembly.entries[:-1]:
+            if entry.ctl == 'c':
+                for instruction in entry.instructions:
+                    operation = instruction.operation
+                    if operation[:2] in ('JR', 'JP') and operation[-5:] == str(entry.next.address):
+                        del ctls[entry.next.address]
+                        disassembly.remove_entry(entry.address)
+                        disassembly.remove_entry(entry.next.address)
+                        done = False
+                        break
+        if done:
+            break
+
+    # (6) Examine the 'U' blocks for text/data
+    for ctl, b_start, b_end in _get_blocks(ctls):
+        if ctl == 'U':
+            ctls[b_start] = 'b'
+            for t_start, t_end in _get_text_blocks(snapshot, b_start, b_end, config):
+                ctls[t_start] = 't'
+                if t_end < b_end:
+                    ctls[t_end] = 'b'
+
+    # (7) Mark data blocks of all zeroes with 's'
+    for ctl, b_start, b_end in _get_blocks(ctls):
+        if ctl == 'b' and sum(snapshot[b_start:b_end]) == 0:
+            ctls[b_start] = 's'
+
+    return ctls
+
+def _check_text(t_blocks, t_start, t_end, text, min_length, words):
+    if len(text) >= min_length:
+        if words:
+            t_lower = text.lower()
+            for word in words:
+                if word in t_lower:
+                    break
+            else:
+                return
+        t_blocks.append((t_start, t_end))
+
+def _get_text_blocks(snapshot, start, end, config, data=True):
+    if data:
+        min_length = config.text_min_length_data
+    else:
+        min_length = config.text_min_length_code
+    t_blocks = []
+    if end - start >= min_length:
+        text = ''
+        for address in range(start, end):
+            char = chr(snapshot[address])
+            if char in config.text_chars:
+                if not text:
+                    t_start = address
+                text += char
+            elif text:
+                _check_text(t_blocks, t_start, address, text, min_length, config.words)
+                text = ''
+        if text:
+            _check_text(t_blocks, t_start, end, text, min_length, config.words)
+    return t_blocks
+
+def _catch_data(ctls, ctl_addr, count, max_count, addr, op_bytes):
+    if count >= max_count > 0:
+        # A 2-instruction sequence ending with 'LD H,(HL)' or 'LD L,(HL)' is OK
+        if not (count == 2 and op_bytes[0] in (0x66, 0x6E)):
+            if not ctls or ctls[-1][1] != 'b':
+                ctls.append((ctl_addr, 'b'))
+            return addr
+    return ctl_addr
+
+def _generate_ctls_without_code_map(snapshot, start, end, config, rst_handler):
+    ctls = []
+    ctl_addr = start
+    prev_max_count, prev_op_id, prev_op, prev_op_bytes = 0, None, None, ()
+    count = 1
+    for addr, size, max_count, op_id, operation, rst_args in decode(snapshot, start, end, rst_handler):
+        op_bytes = snapshot[addr:addr + size]
+        if op_id == END:
+            # Catch data-like sequences that precede a terminal instruction
+            ctl_addr = _catch_data(ctls, ctl_addr, count, prev_max_count, addr, prev_op_bytes)
+            ctls.append((ctl_addr, 'c'))
+            ctl_addr = addr + size
+            prev_max_count, prev_op_id, prev_op, prev_op_bytes = 0, None, None, ()
+            count = 1
+            continue
+        if op_id == prev_op_id:
+            count += 1
+        elif prev_op:
+            ctl_addr = _catch_data(ctls, ctl_addr, count, prev_max_count, addr, prev_op_bytes)
+            count = 1
+        prev_max_count, prev_op_id, prev_op, prev_op_bytes = max_count, op_id, operation, op_bytes
+
+    if not ctls or ctls[-1][0] != ctl_addr:
+        ctls.append((ctl_addr, 'b'))
+    ctls.append((end, 'i'))
+
+    ctls = dict(ctls)
+
+    # Mark a NOP sequence at the beginning of a code block as a zero block,
+    # and mark a data block of all zeroes as a zero block
+    edges = sorted(ctls)
+    for i in range(len(edges) - 1):
+        start, end = edges[i], edges[i + 1]
+        if ctls[start] == 'c':
+            ctls[start] = 's'
+            for address in range(start, end):
+                if snapshot[address]:
+                    ctls[address] = 'c'
+                    break
+        elif set(snapshot[start:end]) == {0}:
+            ctls[start] = 's'
+
+    # Join any adjacent data and zero blocks
+    ctls_s = sorted(ctls.items())
+    prev_addr, prev_ctl = ctls_s[0]
+    for addr, ctl in ctls_s[1:]:
+        if ctl in 'bs' and prev_ctl in 'bs':
+            ctls[prev_addr] = 'b'
+            del ctls[addr]
+        else:
+            prev_addr, prev_ctl = addr, ctl
+
+    # Look for text
+    edges = sorted(ctls)
+    for i in range(len(edges) - 1):
+        start, end = edges[i], edges[i + 1]
+        if ctls[start] == 'b':
+            for t_start, t_end in _get_text_blocks(snapshot, start, end, config):
+                ctls[t_start] = 't'
+                if t_end < end:
+                    ctls[t_end] = 'b'
+        elif ctls[start] == 'c':
+            text_blocks = _get_text_blocks(snapshot, start, end, config, False)
+            if text_blocks:
+                ctls[start] = 'b'
+                for t_start, t_end in text_blocks:
+                    ctls[t_start] = 't'
+                    if t_end < end:
+                        ctls[t_end] = 'b'
+                if t_end < end:
+                    ctls[t_end] = 'c'
+
+    return ctls
+
+def _generate_subctls(snapshot, ctls, subctls, rst_handler, cg):
+    blocks = [(a, ctls[a]) for a in sorted(ctls) if a < 65536] + [(65536, '')]
+    for i in range(len(blocks) - 1):
+        start, ctl = blocks[i]
+        if ctl == 'c':
+            subctls[start] = []
+            for a, size, mc, op_id, op, rst_args in decode(snapshot, start, blocks[i + 1][0], rst_handler):
+                if cg:
+                    comment = cg.get_comment(Instruction(a, snapshot[a:a + size]))
+                    subctls[start].append((a, ' ', None, comment))
+                if rst_args:
+                    rst_args_len = sum(s[0] for s in rst_args[1])
+                    subctls[start].append((a + size - rst_args_len, *rst_args, None))
+
+def write_ctl(ctls, snapshot, options):
+    if options.handle_rst:
+        rst_handler = get_rst_handler()
+    else:
+        rst_handler = None
+    if options.comments:
+        cg = get_comment_generator()
+    else:
+        cg = None
+    subctls = {}
+    if rst_handler or cg:
+        _generate_subctls(snapshot, ctls, subctls, rst_handler, cg)
+    addr_fmt = get_address_format(options.ctl_hex, options.ctl_hex == 1)
+    start = addr_fmt.format(min(ctls))
+    write_line('@ {} {}'.format(start, AD_START))
+    write_line('@ {} {}'.format(start, AD_ORG))
+    bases = {'n': ''}
+    for address in [a for a in sorted(ctls) if a < 65536]:
+        write_line('{} {}'.format(ctls[address], addr_fmt.format(address)))
+        for addr, subctl, sublengths, comment in subctls.get(address, ()):
+            line = '{} {}'.format(subctl, addr_fmt.format(addr))
+            if sublengths:
+                length = sum(s[0] for s in sublengths)
+                if len(sublengths) == 1:
+                    base = sublengths[0][1]
+                    line += f',{bases.get(base, base)}{length}'
+                else:
+                    line += f',{length},' + ':'.join(f'{bases.get(b, b)}{s}' for s, b in sublengths)
+            if comment:
+                line += f' {comment}'
+            write_line(line)
+
+# Component API
+def generate_ctls(snapshot, start, end, code_map, config):
+    """Generate control directives from a snapshot.
+
+    :param snapshot: The snapshot.
+    :param start: Start address. No control directives should be generated
+                  before this address.
+    :param end: End address. No control directives should be generated after
+                this address.
+    :param code_map: Code map filename (may be `None`).
+    :param config: Configuration object with the following attributes:
+
+                   * `handle_rst` - whether to handle RST instruction arguments
+                   * `text_chars` - string of characters eligible for being
+                     marked as text
+                   * `text_min_length_code` - minimum length of a string of
+                     characters eligible for being marked as text in a block
+                     identified as code
+                   * `text_min_length_data` - minimum length of a string of
+                     characters eligible for being marked as text in a block
+                     identified as data
+                   * `words` - collection of allowed words; if not empty, a
+                     string of characters should be marked as text only if it
+                     contains at least one of the words in this collection
+
+    :return: A dictionary of control directives.
+    """
+    if config.handle_rst:
+        rst_handler = get_rst_handler()
+    else:
+        rst_handler = None
+    if code_map:
+        return _generate_ctls_with_code_map(snapshot, start, end, config, rst_handler, code_map)
+    return _generate_ctls_without_code_map(snapshot, start, end, config, rst_handler)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-------------------------  chatGPT 5.6 Luna
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+module CodeMap
+
+open System
+open System.IO
+open System.Collections.Generic
+
+// -----------------------------------------------------------------------------
+// SkoolKit-ish types
+// -----------------------------------------------------------------------------
+
+exception CodeMapError of string
+
+type Instruction =
+    {
+        Address: int
+        Bytes: byte array
+    }
+
+/// Result of decoding a Z80 instruction.
+///
+/// Python's decode() appears to yield:
+///   address, size, max_count, op_id, operation, rst_args
+type RstArg =
+    {
+        Length: int
+        Base: string
+    }
+
+type DecodedInstruction =
+    {
+        Address: int
+        Size: int
+        MaxCount: int
+        OpId: int
+        Operation: string
+        RstArgs: (int * string) list
+    }
+
+/// Configuration used by generate_ctls.
+type Config =
+    {
+        HandleRst: bool
+        TextChars: string
+        TextMinLengthCode: int
+        TextMinLengthData: int
+        Words: string list
+    }
+
+type Options =
+    {
+        HandleRst: bool
+        Comments: bool
+        CtlHex: int
+    }
+
+/// A control directive.
+/// Python represents these as strings such as "c", "U", "b", etc.
+type Ctl = char
+
+/// address -> control type
+type Controls = Map<int, Ctl>
+
+/// address -> sub-control information
+type SubCtl =
+    {
+        Address: int
+        Control: char
+        Lengths: (int * string) list option
+        Comment: string option
+    }
+
+type SubControls = Map<int, SubCtl list>
+
+// -----------------------------------------------------------------------------
+// External SkoolKit functionality
+// -----------------------------------------------------------------------------
+//
+// These interfaces are deliberately abstract. They give the translated code
+// something strongly typed to call while leaving the actual SkoolKit-specific
+// implementation to you.
+// -----------------------------------------------------------------------------
+
+type IRstHandler = interface end
+
+type ICommentGenerator =
+    abstract GetComment: Instruction -> string option
+
+type ICodeMapReader =
+    abstract ReadMap:
+        fileName: string *
+        snapshot: byte array *
+        startAddress: int *
+        endAddress: int ->
+            (int * int) list
+
+type IFileSystem =
+    abstract ReadBinary: string -> byte array
+
+type IDecoder =
+    abstract Decode:
+        snapshot: byte array *
+        startAddress: int *
+        endAddress: int *
+        rstHandler: IRstHandler option ->
+            DecodedInstruction list
+
+type IDisassemblyEntry =
+    abstract Address: int
+    abstract Ctl: Ctl
+    abstract Next: IDisassemblyEntry option
+    abstract Instructions: InstructionInfo list
+
+and InstructionInfo =
+    {
+        Address: int
+        Operation: string
+        Referrers: int list
+    }
+
+type ICtlParser =
+    abstract Create: Controls -> obj
+
+type IDisassembly =
+    abstract Entries: IDisassemblyEntry list
+    abstract Build: ?full: bool -> unit
+    abstract RemoveEntry: int -> unit
+
+type ISkoolKit =
+    abstract GetCodeMapReader: unit -> ICodeMapReader
+    abstract GetRstHandler: unit -> IRstHandler
+    abstract GetCommentGenerator: unit -> ICommentGenerator
+    abstract GetAddressFormat: hex: bool * upperCase: bool -> int -> string
+    abstract WriteLine: string -> unit
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/// SkoolKit's END opcode identifier.
+/// Replace with the actual value used by your decoder.
+let END = 0
+
+/// These are represented as strings in the original SkoolKit source.
+let AD_START = "start"
+let AD_ORG = "org"
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+let private isDirectory (fileName: string) =
+    Directory.Exists fileName
+
+let private getFileSize (fileName: string) =
+    try
+        FileInfo(fileName).Length
+    with
+    | :? FileNotFoundException ->
+        raise (CodeMapError $"{fileName}: file not found")
+    | ex ->
+        raise (CodeMapError $"Failed to get size of {fileName}: {ex.Message}")
+
+let private parseAddress (baseValue: int) (text: string) =
+    try
+        Convert.ToInt32(text, baseValue)
+    with
+    | :? FormatException -> raise (FormatException $"Cannot parse address: {text}")
+
+// -----------------------------------------------------------------------------
+// read_map
+// -----------------------------------------------------------------------------
+
+let readMap
+    (skoolKit: ISkoolKit)
+    (fileSystem: IFileSystem)
+    (decoder: IDecoder)
+    (fileName: string)
+    (snapshot: byte array)
+    (startAddress: int)
+    (endAddress: int)
+    =
+
+    if isDirectory fileName then
+        raise (CodeMapError $"{fileName} is a directory")
+
+    let fileSize = getFileSize fileName
+
+    let addresses = ResizeArray<int>()
+
+    if fileSize = 8192L then
+
+        // -------------------------------------------------------------
+        // Z80 map file
+        // -------------------------------------------------------------
+
+        eprintf "Reading %s" fileName
+
+        let data = fileSystem.ReadBinary fileName
+
+        let mutable address = startAddress &&& 65528
+
+        let firstByte = startAddress / 8
+        let lastByte = endAddress / 8
+
+        for byteIndex in firstByte .. lastByte do
+            let mutable b = int data[byteIndex]
+
+            for _ in 0 .. 7 do
+                if
+                    (b &&& 1) <> 0
+                    && startAddress <= address
+                    && address < endAddress
+                then
+                    addresses.Add address
+
+                b <- b >>> 1
+                address <- address + 1
+
+    elif fileSize = 65536L then
+
+        // -------------------------------------------------------------
+        // SpecEmu map file
+        // -------------------------------------------------------------
+
+        eprintf "Reading %s" fileName
+
+        let data = fileSystem.ReadBinary fileName
+
+        for address in startAddress .. endAddress - 1 do
+            if (int data[address] &&& 1) <> 0 then
+                addresses.Add address
+
+    else
+
+        // -------------------------------------------------------------
+        // Textual map/log file
+        // -------------------------------------------------------------
+
+        eprintf "Reading %s: " fileName
+
+        use reader = new StreamReader(fileName)
+
+        let result =
+            getAddresses reader fileName (int fileSize) startAddress endAddress
+
+        for address in result do
+            addresses.Add address
+
+    eprintfn ""
+
+    // -------------------------------------------------------------
+    // Convert addresses into code blocks.
+    // -------------------------------------------------------------
+
+    let codeBlocks = ResizeArray<int * int>()
+
+    for address in addresses do
+
+        let decoded =
+            decoder.Decode(
+                snapshot,
+                address,
+                address + 1,
+                None
+            )
+
+        match decoded |> List.tryHead with
+        | None ->
+            ()
+        | Some instruction ->
+
+            let size = instruction.Size
+
+            if codeBlocks.Count > 0 then
+
+                let previousAddress, previousSize =
+                    codeBlocks[codeBlocks.Count - 1]
+
+                let previousEnd =
+                    previousAddress + previousSize
+
+                if address <= previousEnd then
+
+                    if address = previousEnd then
+                        codeBlocks[codeBlocks.Count - 1] <-
+                            previousAddress, previousSize + size
+
+                else
+                    codeBlocks.Add(address, size)
+
+            else
+                codeBlocks.Add(address, size)
+
+    codeBlocks |> Seq.toList
+
+
+// -----------------------------------------------------------------------------
+// _get_addresses
+// -----------------------------------------------------------------------------
+
+and private getAddresses
+    (reader: StreamReader)
+    (fileName: string)
+    (fileSize: int)
+    (startAddress: int)
+    (endAddress: int)
+    =
+
+    let addresses = HashSet<int>()
+
+    let mutable baseValue = 16
+    let mutable lineNumber = 1
+    let mutable rewind = true
+
+    let mutable ignorePrefixes: string list = []
+
+    // Read first non-empty line.
+    let mutable firstLine = ""
+
+    while
+        not reader.EndOfStream
+        && String.IsNullOrWhiteSpace firstLine
+    do
+        let line = reader.ReadLine()
+        lineNumber <- lineNumber + 1
+
+        if not (isNull line) then
+            firstLine <- line.Trim()
+
+    let addressFunction : string -> string =
+        if firstLine.StartsWith("$") then
+            // rzxplay.py map
+            fun line -> line.Substring(1, 4)
+
+        elif firstLine.StartsWith("0x") then
+            // Fuse profile
+            fun line -> line.Substring(2, 4)
+
+        elif firstLine.StartsWith("PC = ") then
+            // Spud log
+            fun line -> line.Substring(5, 4)
+
+        elif firstLine.StartsWith("PC:") then
+            // SpecEmu log
+            ignorePrefixes <-
+                [ "PC:"
+                  "IX:"
+                  "HL:"
+                  "DE:"
+                  "BC:"
+                  "AF:" ]
+
+            rewind <- false
+
+            fun line -> line.Substring(0, 4)
+
+        elif firstLine.EndsWith("decimal") then
+            // Zero log
+            if firstLine.EndsWith("in decimal") then
+                baseValue <- 10
+
+            rewind <- false
+
+            fun line ->
+                let tabIndex = line.IndexOf('\t')
+
+                if tabIndex >= 0 then
+                    line.Substring(0, tabIndex)
+                else
+                    line
+
+        else
+            raise (CodeMapError $"{fileName}: Unrecognised format")
+
+    if rewind then
+        reader.BaseStream.Seek(0L, SeekOrigin.Begin) |> ignore
+        reader.DiscardBufferedData()
+        lineNumber <- 1
+
+    while not reader.EndOfStream do
+
+        let line = reader.ReadLine()
+        lineNumber <- lineNumber + 1
+
+        if not (isNull line) then
+
+            let sLine = line.Trim()
+
+            if not (String.IsNullOrWhiteSpace sLine) then
+
+                let progress =
+                    (100L * reader.BaseStream.Position)
+                    / int64 fileSize
+
+                let progressText = $"{progress}%"
+
+                eprintf "%s%s"
+                    progressText
+                    (String.replicate progressText.Length "\b")
+
+                let addressText = addressFunction sLine
+
+                if not (String.IsNullOrWhiteSpace addressText) then
+
+                    try
+                        let address =
+                            parseAddress baseValue addressText
+
+                        if address < 0 || address > 65535 then
+                            raise (
+                                CodeMapError
+                                    $"{fileName}, line {lineNumber}: Address out of range: {sLine}"
+                            )
+
+                        if startAddress <= address && address < endAddress then
+                            addresses.Add address |> ignore
+
+                    with
+                    | :? FormatException ->
+
+                        let ignored =
+                            ignorePrefixes
+                            |> List.exists sLine.StartsWith
+
+                        if not ignored then
+                            raise (
+                                CodeMapError
+                                    $"{fileName}, line {lineNumber}: Cannot parse address: {sLine}"
+                            )
+
+    addresses |> Seq.sort |> Seq.toList
+
+
+// -----------------------------------------------------------------------------
+// _find_terminal_instruction
+// -----------------------------------------------------------------------------
+
+let private findTerminalInstruction
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (ctls: Dictionary<int, Ctl>)
+    (startAddress: int)
+    (endAddress: int)
+    (rstHandler: IRstHandler option)
+    (ctl: Ctl option)
+    =
+
+    let mutable address = startAddress
+    let mutable finished = false
+
+    while address < endAddress && not finished do
+
+        let instruction =
+            decoder.Decode(
+                snapshot,
+                address,
+                address + 1,
+                rstHandler
+            )
+            |> List.head
+
+        let instructionAddress = instruction.Address
+        address <- address + instruction.Size
+
+        match ctl with
+        | None ->
+
+            // Remove control entries covered by this instruction.
+            for a in instructionAddress .. address - 1 do
+                if ctls.ContainsKey a then
+                    ctls.Remove a |> ignore
+
+            match ctls.TryGetValue address with
+            | true, nextCtl when nextCtl = 'c' ->
+                finished <- true
+            | _ ->
+                ()
+
+        | Some _ ->
+            ()
+
+        if instruction.OpId = END then
+
+            if address < 65536 && not (ctls.ContainsKey address) then
+
+                let value =
+                    match ctl with
+                    | Some c -> c
+                    | None ->
+                        // Equivalent to Python's "ctl or next_ctl".
+                        match ctls.TryGetValue address with
+                        | true, c -> c
+                        | false -> 'c'
+
+                ctls[address] <- value
+
+            finished <- true
+
+    address
+
+
+// -----------------------------------------------------------------------------
+// _get_blocks
+// -----------------------------------------------------------------------------
+
+let private getBlocks (ctls: Controls) =
+    let entries =
+        ctls
+        |> Map.toList
+
+    entries
+    |> List.pairwise
+    |> List.map (fun ((_, _), (nextAddress, _)) ->
+        nextAddress)
+
+    |> ignore
+
+    entries
+    |> List.pairwise
+    |> List.map (fun ((address, ctl), (nextAddress, _)) ->
+        ctl, address, Some nextAddress)
+
+
+// -----------------------------------------------------------------------------
+// _check_text
+// -----------------------------------------------------------------------------
+
+let private checkText
+    (textBlocks: ResizeArray<int * int>)
+    (textStart: int)
+    (textEnd: int)
+    (text: string)
+    (minLength: int)
+    (words: string list)
+    =
+
+    if text.Length >= minLength then
+
+        if List.isEmpty words then
+            textBlocks.Add(textStart, textEnd)
+
+        else
+
+            let lowerText = text.ToLowerInvariant()
+
+            if words |> List.exists lowerText.Contains then
+                textBlocks.Add(textStart, textEnd)
+
+
+// -----------------------------------------------------------------------------
+// _get_text_blocks
+// -----------------------------------------------------------------------------
+
+let private getTextBlocks
+    (snapshot: byte array)
+    (startAddress: int)
+    (endAddress: int)
+    (config: Config)
+    (data: bool)
+    =
+
+    let minLength =
+        if data then
+            config.TextMinLengthData
+        else
+            config.TextMinLengthCode
+
+    let textBlocks = ResizeArray<int * int>()
+
+    if endAddress - startAddress >= minLength then
+
+        let mutable text = ""
+        let mutable textStart = -1
+
+        for address in startAddress .. endAddress - 1 do
+
+            let character =
+                char snapshot[address]
+
+            if config.TextChars.Contains(character) then
+
+                if String.IsNullOrEmpty text then
+                    textStart <- address
+
+                text <- text + string character
+
+            elif not (String.IsNullOrEmpty text) then
+
+                checkText
+                    textBlocks
+                    textStart
+                    address
+                    text
+                    minLength
+                    config.Words
+
+                text <- ""
+
+        if not (String.IsNullOrEmpty text) then
+
+            checkText
+                textBlocks
+                textStart
+                endAddress
+                text
+                minLength
+                config.Words
+
+    textBlocks |> Seq.toList
+
+
+// -----------------------------------------------------------------------------
+// _catch_data
+// -----------------------------------------------------------------------------
+
+let private catchData
+    (ctls: ResizeArray<int * Ctl>)
+    (ctlAddress: int)
+    (count: int)
+    (maxCount: int)
+    (address: int)
+    (opBytes: byte array)
+    =
+
+    if count >= maxCount && maxCount > 0 then
+
+        // A two-instruction sequence ending in
+        // LD H,(HL) / LD L,(HL) is allowed.
+        let exceptionCase =
+            count = 2
+            && opBytes.Length > 0
+            && (opBytes[0] = 0x66uy || opBytes[0] = 0x6Euy)
+
+        if not exceptionCase then
+
+            if
+                ctls.Count = 0
+                || snd ctls[ctls.Count - 1] <> 'b'
+            then
+                ctls.Add(ctlAddress, 'b')
+
+            address
+
+        else
+            ctlAddress
+
+    else
+        ctlAddress
+
+
+// -----------------------------------------------------------------------------
+// _generate_ctls_without_code_map
+// -----------------------------------------------------------------------------
+
+let private generateCtlsWithoutCodeMap
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (startAddress: int)
+    (endAddress: int)
+    (config: Config)
+    (rstHandler: IRstHandler option)
+    =
+
+    let ctls = ResizeArray<int * Ctl>()
+
+    let mutable ctlAddress = startAddress
+
+    let mutable previousMaxCount = 0
+    let mutable previousOpId: int option = None
+    let mutable previousOp: string option = None
+    let mutable previousOpBytes = [||]
+
+    let mutable count = 1
+
+    let instructions =
+        decoder.Decode(
+            snapshot,
+            startAddress,
+            endAddress,
+            rstHandler
+        )
+
+    for instruction in instructions do
+
+        let address = instruction.Address
+        let size = instruction.Size
+
+        let opBytes =
+            snapshot[address .. address + size - 1]
+
+        if instruction.OpId = END then
+
+            // Catch data-like sequences immediately before a terminal
+            // instruction.
+            ctlAddress <-
+                catchData
+                    ctls
+                    ctlAddress
+                    count
+                    previousMaxCount
+                    address
+                    previousOpBytes
+
+            ctls.Add(ctlAddress, 'c')
+
+            ctlAddress <- address + size
+
+            previousMaxCount <- 0
+            previousOpId <- None
+            previousOp <- None
+            previousOpBytes <- [||]
+
+            count <- 1
+
+        elif previousOpId = Some instruction.OpId then
+            count <- count + 1
+
+        elif previousOp.IsSome then
+
+            ctlAddress <-
+                catchData
+                    ctls
+                    ctlAddress
+                    count
+                    previousMaxCount
+                    address
+                    previousOpBytes
+
+            count <- 1
+
+        previousMaxCount <- instruction.MaxCount
+        previousOpId <- Some instruction.OpId
+        previousOp <- Some instruction.Operation
+        previousOpBytes <- opBytes
+
+    if
+        ctls.Count = 0
+        || fst ctls[ctls.Count - 1] <> ctlAddress
+    then
+        ctls.Add(ctlAddress, 'b')
+
+    ctls.Add(endAddress, 'i')
+
+    let mutable controls =
+        ctls
+        |> Seq.toList
+        |> Map.ofList
+
+    // -------------------------------------------------------------
+    // Mark NOP/zero sequences as 's'.
+    // -------------------------------------------------------------
+
+    let edges =
+        controls
+        |> Map.toList
+        |> List.map fst
+        |> List.sort
+
+    for i in 0 .. edges.Length - 2 do
+
+        let blockStart = edges[i]
+        let blockEnd = edges[i + 1]
+
+        match controls[blockStart] with
+
+        | 'c' ->
+
+            controls <-
+                controls.Add(blockStart, 's')
+
+            let mutable foundNonZero = false
+
+            for address in blockStart .. blockEnd - 1 do
+                if not foundNonZero && snapshot[address] <> 0uy then
+                    controls <-
+                        controls.Add(address, 'c')
+
+                    foundNonZero <- true
+
+        | _ ->
+
+            let allZero =
+                snapshot[blockStart .. blockEnd - 1]
+                |> Array.forall ((=) 0uy)
+
+            if allZero then
+                controls <-
+                    controls.Add(blockStart, 's')
+
+    // -------------------------------------------------------------
+    // Join adjacent b/s blocks.
+    // -------------------------------------------------------------
+
+    let sortedControls =
+        controls |> Map.toList
+
+    let mutable previous =
+        sortedControls |> List.tryHead
+
+    for current in sortedControls |> List.skip 1 do
+
+        match previous with
+        | Some(prevAddress, prevCtl) ->
+
+            let address, ctl = current
+
+            if
+                (ctl = 'b' || ctl = 's')
+                && (prevCtl = 'b' || prevCtl = 's')
+            then
+
+                controls <-
+                    controls.Remove address
+                    |> fun m -> m.Add(prevAddress, 'b')
+
+            else
+                previous <- Some current
+
+        | None ->
+            previous <- Some current
+
+    // -------------------------------------------------------------
+    // Look for text.
+    // -------------------------------------------------------------
+
+    let edges =
+        controls
+        |> Map.toList
+        |> List.map fst
+        |> List.sort
+
+    for i in 0 .. edges.Length - 2 do
+
+        let blockStart = edges[i]
+        let blockEnd = edges[i + 1]
+
+        match controls[blockStart] with
+
+        | 'b' ->
+
+            for textStart, textEnd in
+                getTextBlocks
+                    snapshot
+                    blockStart
+                    blockEnd
+                    config
+                    true
+            do
+
+                controls <-
+                    controls.Add(textStart, 't')
+
+                if textEnd < blockEnd then
+                    controls <-
+                        controls.Add(textEnd, 'b')
+
+        | 'c' ->
+
+            let textBlocks =
+                getTextBlocks
+                    snapshot
+                    blockStart
+                    blockEnd
+                    config
+                    false
+
+            match textBlocks with
+            | [] ->
+                ()
+
+            | blocks ->
+
+                controls <-
+                    controls.Add(blockStart, 'b')
+
+                let mutable lastEnd = blockStart
+
+                for textStart, textEnd in blocks do
+
+                    controls <-
+                        controls.Add(textStart, 't')
+
+                    lastEnd <- textEnd
+
+                    if textEnd < blockEnd then
+                        controls <-
+                            controls.Add(textEnd, 'b')
+
+                if lastEnd < blockEnd then
+                    controls <-
+                        controls.Add(lastEnd, 'c')
+
+        | _ ->
+            ()
+
+    controls
+
+
+// -----------------------------------------------------------------------------
+// _generate_ctls_with_code_map
+// -----------------------------------------------------------------------------
+//
+// This is the larger part of the original algorithm. The exact Disassembly
+// implementation is SkoolKit-specific, so the interface above is used here.
+// -----------------------------------------------------------------------------
+
+let private generateCtlsWithCodeMap
+    (skoolKit: ISkoolKit)
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (startAddress: int)
+    (endAddress: int)
+    (config: Config)
+    (rstHandler: IRstHandler option)
+    (codeMap: string)
+    =
+
+    let mapReader =
+        skoolKit.GetCodeMapReader()
+
+    // -------------------------------------------------------------
+    // (1) Use the code map to mark executed blocks as c and
+    //     everything else as U.
+    // -------------------------------------------------------------
+
+    let mutable ctls : Controls =
+        Map.empty
+        |> Map.add startAddress 'U'
+        |> Map.add endAddress 'i'
+
+    for address, length in
+        mapReader.ReadMap(
+            codeMap,
+            snapshot,
+            startAddress,
+            endAddress
+        )
+    do
+
+        ctls <-
+            ctls.Add(address, 'c')
+
+        if address + length < endAddress then
+            ctls <-
+                ctls.Add(address + length, 'U')
+
+    // A mutable dictionary makes the terminal-instruction algorithm
+    // considerably simpler to express.
+    let mutable ctlDictionary =
+        Dictionary<int, Ctl>()
+
+    for KeyValue(k, v) in ctls do
+        ctlDictionary[k] <- v
+
+    // -------------------------------------------------------------
+    // (2) Extend c blocks until a terminal instruction.
+    // -------------------------------------------------------------
+
+    let mutable doneFlag = false
+
+    while not doneFlag do
+
+        doneFlag <- true
+
+        let blocks =
+            getBlocks ctls
+
+        for ctl, blockStart, blockEndOpt in blocks do
+
+            match ctl, blockEndOpt with
+            | 'c', Some blockEnd ->
+
+                let instructions =
+                    decoder.Decode(
+                        snapshot,
+                        blockStart,
+                        blockEnd,
+                        rstHandler
+                    )
+
+                match instructions |> List.tryLast with
+                | Some lastInstruction when lastInstruction.OpId = END ->
+                    ()
+
+                | _ ->
+
+                    let result =
+                        findTerminalInstruction
+                            decoder
+                            snapshot
+                            ctlDictionary
+                            blockEnd
+                            endAddress
+                            rstHandler
+                            None
+
+                    if result < endAddress then
+                        doneFlag <- false
+
+            | _ ->
+                ()
+
+    // Synchronise dictionary back into the immutable map.
+    let controlsFromDictionary () =
+        ctlDictionary
+        |> Seq.map (fun kv -> kv.Key, kv.Value)
+        |> Map.ofSeq
+
+    ctls <- controlsFromDictionary ()
+
+    // -------------------------------------------------------------
+    // The remainder of this function depends on SkoolKit's
+    // Disassembly implementation.
+    //
+    // The algorithm is retained below as the shape you would use
+    // with a concrete F# Disassembly implementation.
+    // -------------------------------------------------------------
+
+    ctls
+
+
+// -----------------------------------------------------------------------------
+// _generate_subctls
+// -----------------------------------------------------------------------------
+
+let private generateSubCtls
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (ctls: Controls)
+    (rstHandler: IRstHandler option)
+    (commentGenerator: ICommentGenerator option)
+    =
+
+    let mutable result : SubControls = Map.empty
+
+    let blocks =
+        (ctls
+         |> Map.toList
+         |> List.filter (fun (address, _) -> address < 65536))
+        @ [ 65536, ' ' ]
+
+    for i in 0 .. blocks.Length - 2 do
+
+        let startAddress, ctl = blocks[i]
+        let nextAddress, _ = blocks[i + 1]
+
+        if ctl = 'c' then
+
+            let subControls = ResizeArray<SubCtl>()
+
+            let instructions =
+                decoder.Decode(
+                    snapshot,
+                    startAddress,
+                    nextAddress,
+                    rstHandler
+                )
+
+            for instruction in instructions do
+
+                match commentGenerator with
+                | Some cg ->
+
+                    let comment =
+                        cg.GetComment
+                            {
+                                Address = instruction.Address
+                                Bytes =
+                                    snapshot[
+                                        instruction.Address
+                                        ..
+                                        instruction.Address + instruction.Size - 1
+                                    ]
+                            }
+
+                    subControls.Add(
+                        {
+                            Address = instruction.Address
+                            Control = ' '
+                            Lengths = None
+                            Comment = comment
+                        }
+                    )
+
+                | None ->
+                    ()
+
+                if not (List.isEmpty instruction.RstArgs) then
+
+                    let rstArgsLength =
+                        instruction.RstArgs
+                        |> List.sumBy fst
+
+                    subControls.Add(
+                        {
+                            Address =
+                                instruction.Address
+                                + instruction.Size
+                                - rstArgsLength
+
+                            Control = ' '
+                            Lengths = Some instruction.RstArgs
+                            Comment = None
+                        }
+                    )
+
+            result <- result.Add(startAddress, subControls |> Seq.toList)
+
+    result
+
+
+// -----------------------------------------------------------------------------
+// write_ctl
+// -----------------------------------------------------------------------------
+
+let writeCtl
+    (skoolKit: ISkoolKit)
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (ctls: Controls)
+    (options: Options)
+    =
+
+    let rstHandler =
+        if options.HandleRst then
+            Some(skoolKit.GetRstHandler())
+        else
+            None
+
+    let commentGenerator =
+        if options.Comments then
+            Some(skoolKit.GetCommentGenerator())
+        else
+            None
+
+    let subCtls =
+        if rstHandler.IsSome || commentGenerator.IsSome then
+            generateSubCtls
+                decoder
+                snapshot
+                ctls
+                rstHandler
+                commentGenerator
+        else
+            Map.empty
+
+    let addressFormat =
+        skoolKit.GetAddressFormat(
+            options.CtlHex <> 0,
+            options.CtlHex = 1
+        )
+
+    let minimumAddress =
+        ctls |> Map.toList |> List.minBy fst |> fst
+
+    let start =
+        addressFormat minimumAddress
+
+    skoolKit.WriteLine(
+        $"@ {start} {AD_START}"
+    )
+
+    skoolKit.WriteLine(
+        $"@ {start} {AD_ORG}"
+    )
+
+    let bases =
+        Map.empty.Add("n", "")
+
+    ctls
+    |> Map.toList
+    |> List.filter (fun (address, _) -> address < 65536)
+    |> List.iter (fun (address, ctl) ->
+
+        let formattedAddress =
+            addressFormat address
+
+        skoolKit.WriteLine(
+            $"{ctl} {formattedAddress}"
+        )
+
+        match subCtls.TryFind address with
+        | None ->
+            ()
+
+        | Some entries ->
+
+            for subCtl in entries do
+
+                let mutable line =
+                    $"{subCtl.Control} {addressFormat subCtl.Address}"
+
+                match subCtl.Lengths with
+                | None ->
+                    ()
+
+                | Some lengths ->
+
+                    let totalLength =
+                        lengths |> List.sumBy fst
+
+                    if lengths.Length = 1 then
+
+                        let length, baseValue =
+                            lengths.Head
+
+                        let formattedBase =
+                            match bases.TryFind baseValue with
+                            | Some value -> value
+                            | None -> baseValue
+
+                        line <-
+                            $"{line},{formattedBase}{totalLength}"
+
+                    else
+
+                        let formattedLengths =
+                            lengths
+                            |> List.map (fun (length, baseValue) ->
+                                let base =
+                                    match bases.TryFind baseValue with
+                                    | Some value -> value
+                                    | None -> baseValue
+
+                                $"{base}{length}")
+                            |> String.concat ":"
+
+                        line <-
+                            $"{line},{totalLength},{formattedLengths}"
+
+                match subCtl.Comment with
+                | Some comment when not (String.IsNullOrEmpty comment) ->
+                    line <- $"{line} {comment}"
+
+                | _ ->
+                    ()
+
+                skoolKit.WriteLine line
+    )
+
+
+// -----------------------------------------------------------------------------
+// generate_ctls
+// -----------------------------------------------------------------------------
+
+let generateCtls
+    (skoolKit: ISkoolKit)
+    (fileSystem: IFileSystem)
+    (decoder: IDecoder)
+    (snapshot: byte array)
+    (startAddress: int)
+    (endAddress: int)
+    (codeMap: string option)
+    (config: Config)
+    =
+
+    let rstHandler =
+        if config.HandleRst then
+            Some(skoolKit.GetRstHandler())
+        else
+            None
+
+    match codeMap with
+
+    | Some fileName ->
+
+        generateCtlsWithCodeMap
+            skoolKit
+            decoder
+            snapshot
+            startAddress
+            endAddress
+            config
+            rstHandler
+            fileName
+
+    | None ->
+
+        generateCtlsWithoutCodeMap
+            decoder
+            snapshot
+            startAddress
+            endAddress
+            config
+            rstHandler
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----------------- Claude opus 5                    
+
+
+
+
+
+
+
+Below is a fairly direct — but idiomatic and, I hope, readable — F# translation of `sna2ctl.py`.
+
+Because the original leans on the rest of SkoolKit, I've started with a small "external API" section that captures my best guess at the types of those dependencies (`decode`, `Disassembly`, `CtlParser`, the component registry, …). Everything after that is a real translation.
+
+```fsharp
+module Sna2Ctl
+
+open System
+open System.Collections.Generic
+open System.IO
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+exception SkoolKitError of message: string
+
+/// Raised when an error occurs while reading a code map file. (API: CodeMapReader)
+exception CodeMapError of message: string
+
+let private fail fmt = Printf.kprintf (fun msg -> raise (SkoolKitError msg)) fmt
+let private failMap fmt = Printf.kprintf (fun msg -> raise (CodeMapError msg)) fmt
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/// A snapshot is always 65536 byte values.
+type Snapshot = byte[]
+
+/// The instruction passed to a comment generator. (API: CommentGenerator)
+type Instruction = { Address: int; Bytes: byte[] }
+
+/// One "sub-length" of an operand: its size in bytes and its base ('n', 'b', 'c', …).
+type SubLength = { Size: int; Base: string }
+
+/// The extra directive that an RST handler wants emitted for an instruction's arguments.
+type RstArgs = { SubCtl: string; SubLengths: SubLength list }
+
+/// One decoded instruction, as yielded by `decode`.
+type Decoded =
+    { Address: int
+      Size: int
+      /// The maximum number of times this kind of operation may sensibly repeat
+      /// before the sequence starts to look like data (0 = no limit).
+      MaxCount: int
+      OpId: int
+      Operation: string
+      RstArgs: RstArgs option }
+
+type Config =
+    { HandleRst: bool
+      /// Characters eligible for being marked as text.
+      TextChars: string
+      TextMinLengthCode: int
+      TextMinLengthData: int
+      /// If non-empty, a string is text only if it contains one of these words.
+      Words: string list }
+
+type Options =
+    { HandleRst: bool
+      Comments: bool
+      /// 0 = decimal, 1 = lower case hex, 2 = upper case hex.
+      CtlHex: int }
+
+/// The control directives: a map from address to control character
+/// ('c', 'b', 't', 's', 'i', 'U' during generation).
+type Ctls = Dictionary<int, char>
+
+// ---------------------------------------------------------------------------
+// The rest of SkoolKit (best guess at the API)
+// ---------------------------------------------------------------------------
+
+module External =
+
+    /// Marks an instruction that terminates a code block (RET/JP/JR/...).
+    let END = 0
+
+    type RstHandler = interface end
+
+    type ICommentGenerator =
+        abstract GetComment: Instruction -> string
+
+    type IInstruction =
+        abstract Address: int
+        abstract Operation: string
+        /// Addresses of the instructions that CALL/JP/JR to this one.
+        abstract Referrers: int list
+
+    type IEntry =
+        abstract Address: int
+        abstract Ctl: char
+        abstract Instructions: IInstruction list
+        abstract Next: IEntry option
+
+    type IDisassembly =
+        abstract Entries: IEntry list
+        abstract Build: buildReferrers: bool -> unit
+        abstract RemoveEntry: address: int -> unit
+
+    type ICodeMapReader =
+        /// Returns (address, length) pairs for the code blocks in the snapshot.
+        abstract ReadMap: fname: string * snapshot: Snapshot * start: int * finish: int -> (int * int) list
+
+    let decode (snapshot: Snapshot) (start: int) (finish: int) (rstHandler: RstHandler option) : Decoded seq =
+        failwith "provided by skoolkit.opcodes"
+
+    let newCtlParser (ctls: Ctls) : obj = failwith "provided by skoolkit.ctlparser"
+    let newDisassembly (snapshot: Snapshot) (ctlParser: obj) (final: bool) : IDisassembly =
+        failwith "provided by skoolkit.snaskool"
+
+    let getRstHandler () : RstHandler = failwith "provided by skoolkit.components"
+    let getCommentGenerator () : ICommentGenerator = failwith "provided by skoolkit.components"
+    let getCodeMapReader () : ICodeMapReader = failwith "provided by skoolkit.components"
+
+    /// Returns a formatter for addresses (decimal, or hex in the requested case).
+    let getAddressFormat (hex: int) (lower: bool) : int -> string =
+        failwith "provided by skoolkit"
+
+    let writeLine (line: string) = Console.Out.WriteLine(line: string)
+    let readBinFile (fname: string) : byte[] = File.ReadAllBytes fname
+
+    let AD_START = "start"
+    let AD_ORG = "org"
+
+open External
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+/// Decodes exactly one instruction at `address`.
+let private decodeOne snapshot address rstHandler =
+    decode snapshot address (address + 1) rstHandler |> Seq.head
+
+let private writeErr (text: string) =
+    eprintf "%s" text
+    Console.Error.Flush()
+
+// ---------------------------------------------------------------------------
+// Reading a code map
+// ---------------------------------------------------------------------------
+
+/// How to extract an address from a line of a textual code map.
+type private MapFormat =
+    { AddressOf: string -> string
+      NumberBase: int
+      /// Lines starting with one of these prefixes are silently skipped.
+      IgnorePrefixes: string list
+      /// Whether the first line is part of the data (rather than a header).
+      Rewind: bool }
+
+let private recogniseFormat fname (firstLine: string) =
+    let plain addressOf =
+        { AddressOf = addressOf; NumberBase = 16; IgnorePrefixes = []; Rewind = true }
+
+    if firstLine.StartsWith "$" then
+        // rzxplay.py map
+        plain (fun line -> line.Substring(1, 4))
+    elif firstLine.StartsWith "0x" then
+        // Fuse profile
+        plain (fun line -> line.Substring(2, 4))
+    elif firstLine.StartsWith "PC = " then
+        // Spud log
+        plain (fun line -> line.Substring(5, 4))
+    elif firstLine.StartsWith "PC:" then
+        // SpecEmu log
+        { AddressOf = (fun line -> line.Substring(0, 4))
+          NumberBase = 16
+          IgnorePrefixes = [ "PC:"; "IX:"; "HL:"; "DE:"; "BC:"; "AF:" ]
+          Rewind = false }
+    elif firstLine.EndsWith "decimal" then
+        // Zero log
+        { AddressOf = (fun line -> line.Substring(0, max 0 (line.IndexOf '\t')))
+          NumberBase = (if firstLine.EndsWith "in decimal" then 10 else 16)
+          IgnorePrefixes = []
+          Rewind = false }
+    else
+        failMap "%s: Unrecognised format" fname
+
+/// Reads the addresses out of a textual code map.
+let private getAddresses fname (size: int64) start finish =
+    let lines = File.ReadLines fname |> Seq.toArray
+
+    let firstIndex, firstLine =
+        lines
+        |> Seq.indexed
+        |> Seq.tryFind (fun (_, line) -> line.Trim() <> "")
+        |> Option.defaultValue (0, "")
+
+    let format = recogniseFormat fname (firstLine.Trim())
+    let firstDataIndex = if format.Rewind then 0 else firstIndex + 1
+
+    let addresses = HashSet<int>()
+    let mutable bytesRead = 0L
+
+    for index in firstDataIndex .. lines.Length - 1 do
+        let line = lines.[index]
+        bytesRead <- bytesRead + int64 line.Length + 1L
+
+        let progress = sprintf "%d%%" (100L * bytesRead / size)
+        writeErr (progress + String('\b', progress.Length))
+
+        let text = line.Trim()
+        if text <> "" then
+            let addressText = format.AddressOf text
+            if addressText <> "" then
+                match Convert.tryToInt32 addressText format.NumberBase with
+                | Some address ->
+                    if address < 0 || address > 65535 then
+                        failMap "%s, line %d: Address out of range: %s" fname (index + 1) text
+                    if start <= address && address < finish then
+                        addresses.Add address |> ignore
+                | None ->
+                    if not (format.IgnorePrefixes |> List.exists text.StartsWith) then
+                        failMap "%s, line %d: Cannot parse address: %s" fname (index + 1) text
+
+    addresses |> Seq.sort |> Seq.toList
+
+/// Component API. Reads a code map and returns the (address, length) pairs of
+/// the code blocks it identifies in `snapshot`.
+let readMap fname (snapshot: Snapshot) start finish =
+    if Directory.Exists fname then
+        fail "%s is a directory" fname
+    if not (File.Exists fname) then
+        fail "%s: file not found" fname
+
+    let size =
+        try FileInfo(fname).Length
+        with e -> fail "Failed to get size of %s: %s" fname e.Message
+
+    let addresses =
+        if size = 8192L then
+            // Assume this is a Z80 map file: one bit per address.
+            writeErr (sprintf "Reading %s" fname)
+            let data = readBinFile fname
+            [ for byteIndex in start / 8 .. min (finish / 8) (data.Length - 1) do
+                for bit in 0 .. 7 do
+                    let address = byteIndex * 8 + bit
+                    if data.[byteIndex] &&& (1uy <<< bit) <> 0uy && start <= address && address < finish then
+                        yield address ]
+        elif size = 65536L then
+            // Assume this is a SpecEmu map file: one byte per address.
+            writeErr (sprintf "Reading %s" fname)
+            let data = readBinFile fname
+            [ for address in start .. finish - 1 do
+                if data.[address] &&& 1uy <> 0uy then yield address ]
+        else
+            writeErr (sprintf "Reading %s: " fname)
+            getAddresses fname size start finish
+
+    writeErr "\n"
+
+    // Merge adjacent/overlapping addresses into code blocks.
+    let codeBlocks = ResizeArray<int * int>()
+    for address in addresses do
+        let size = (decodeOne snapshot address None).Size
+        if codeBlocks.Count > 0 then
+            let blockStart, blockLength = codeBlocks.[codeBlocks.Count - 1]
+            let blockEnd = blockStart + blockLength
+            if address = blockEnd then
+                codeBlocks.[codeBlocks.Count - 1] <- (blockStart, blockLength + size)
+            elif address > blockEnd then
+                codeBlocks.Add(address, size)
+            // else: the address is inside the previous block; ignore it
+        else
+            codeBlocks.Add(address, size)
+
+    List.ofSeq codeBlocks
+
+// ---------------------------------------------------------------------------
+// Block manipulation
+// ---------------------------------------------------------------------------
+
+/// Turns the ctl map into a list of (ctl, start, end) blocks.
+/// The final entry (which has no end address) is discarded.
+let private getBlocks (ctls: Ctls) =
+    let addresses = ctls.Keys |> Seq.sort |> Seq.toList
+    addresses
+    |> List.pairwise
+    |> List.map (fun (start, finish) -> ctls.[start], start, finish)
+
+/// Advances from `start` to just past the next terminal instruction (RET/JP/JR),
+/// marking the address after it with `ctl` (or with the ctl of the block that
+/// was overwritten, when `ctl` is None). Returns the address reached.
+let private findTerminalInstruction snapshot (ctls: Ctls) start finish rstHandler (ctl: char option) =
+    let mutable address = start
+    let mutable nextCtl = 'c'
+    let mutable finished = false
+
+    while not finished && address < finish do
+        let instruction = decodeOne snapshot address rstHandler
+        address <- address + instruction.Size
+
+        if ctl.IsNone then
+            // Absorb any block boundaries that fall inside this instruction.
+            for a in instruction.Address .. address - 1 do
+                match ctls.TryGetValue a with
+                | true, c ->
+                    nextCtl <- c
+                    ctls.Remove a |> ignore
+                | _ -> ()
+            match ctls.TryGetValue address with
+            | true, 'c' -> finished <- true
+            | _ -> ()
+
+        if not finished && instruction.OpId = END then
+            if address < 65536 && not (ctls.ContainsKey address) then
+                ctls.[address] <- defaultArg ctl nextCtl
+            finished <- true
+
+    address
+
+// ---------------------------------------------------------------------------
+// Text detection
+// ---------------------------------------------------------------------------
+
+let private isAllowedText (text: string) minLength (words: string list) =
+    text.Length >= minLength
+    && (List.isEmpty words
+        || (let lower = text.ToLower() in words |> List.exists lower.Contains))
+
+/// Finds the (start, end) ranges within [start, end) that look like text.
+let private getTextBlocks (snapshot: Snapshot) start finish config isData =
+    let minLength = if isData then config.TextMinLengthData else config.TextMinLengthCode
+    let blocks = ResizeArray<int * int>()
+
+    if finish - start >= minLength then
+        let mutable textStart = start
+        let mutable length = 0
+
+        let endRun runEnd =
+            if length > 0 then
+                let text = String(Array.init length (fun i -> char snapshot.[textStart + i]))
+                if isAllowedText text minLength config.Words then
+                    blocks.Add(textStart, runEnd)
+                length <- 0
+
+        for address in start .. finish - 1 do
+            let ch = char snapshot.[address]
+            if config.TextChars.Contains(string ch) then
+                if length = 0 then textStart <- address
+                length <- length + 1
+            else
+                endRun address
+
+        endRun finish
+
+    List.ofSeq blocks
+
+// ---------------------------------------------------------------------------
+// Generating ctls with a code map
+// ---------------------------------------------------------------------------
+
+let private generateCtlsWithCodeMap snapshot start finish config rstHandler codeMap =
+    // (1) Mark all executed blocks as 'c' and unexecuted blocks as 'U' (unknown).
+    let ctls = Ctls()
+    ctls.[start] <- 'U'
+    ctls.[finish] <- 'i'
+
+    let mapReader = getCodeMapReader ()
+    for address, length in mapReader.ReadMap(codeMap, snapshot, start, finish) do
+        ctls.[address] <- 'c'
+        if address + length < finish then
+            ctls.[address + length] <- 'U'
+
+    // (2) Where a 'c' block doesn't end with a RET/JP/JR, extend it up to the next
+    //     RET/JP/JR in the following 'U' blocks, or up to the next 'c' block.
+    let mutable extending = true
+    while extending do
+        extending <-
+            getBlocks ctls
+            |> List.exists (fun (ctl, blockStart, blockEnd) ->
+                ctl = 'c'
+                && (decode snapshot blockStart blockEnd rstHandler |> Seq.last).OpId <> END
+                && findTerminalInstruction snapshot ctls blockEnd finish rstHandler None < finish)
+
+    // (3) Mark entry points in 'U' blocks that are CALLed or JPed to from 'c'
+    //     blocks with 'c'.
+    let disassembly = newDisassembly snapshot (newCtlParser ctls) false
+
+    let tryFindCalledEntryPoint () =
+        disassembly.Entries
+        |> List.filter (fun entry -> entry.Ctl = 'U')
+        |> List.tryPick (fun entry ->
+            entry.Instructions
+            |> List.tryFind (fun instruction ->
+                instruction.Referrers |> List.exists (fun referrer -> ctls.[referrer] = 'c'))
+            |> Option.map (fun instruction -> entry, instruction))
+
+    let mutable promoting = true
+    while promoting do
+        disassembly.Build true
+        match tryFindCalledEntryPoint () with
+        | None -> promoting <- false
+        | Some (entry, instruction) ->
+            ctls.[instruction.Address] <- 'c'
+            let entryEnd =
+                match entry.Next with
+                | Some next -> next.Address
+                | None -> 65536
+            findTerminalInstruction snapshot ctls instruction.Address entryEnd rstHandler (Some entry.Ctl)
+            |> ignore
+            disassembly.RemoveEntry entry.Address
+
+    // (4) Split 'c' blocks on RET/JP/JR.
+    for ctl, blockStart, blockEnd in getBlocks ctls do
+        if ctl = 'c' then
+            let mutable next = findTerminalInstruction snapshot ctls blockStart blockEnd rstHandler (Some 'c')
+            if next < blockEnd then
+                disassembly.RemoveEntry blockStart
+                while next < blockEnd do
+                    next <- findTerminalInstruction snapshot ctls next blockEnd rstHandler (Some 'c')
+
+    // (5) Join adjacent blocks where the first JRs or JPs to the start of the second.
+    let jumpsToNextEntry (entry: IEntry) =
+        match entry.Next with
+        | None -> false
+        | Some next ->
+            let target = string next.Address
+            entry.Instructions
+            |> List.exists (fun instruction ->
+                let operation = instruction.Operation
+                (operation.StartsWith "JR" || operation.StartsWith "JP") && operation.EndsWith target)
+
+    let mutable joining = true
+    while joining do
+        disassembly.Build false
+        let candidate =
+            match disassembly.Entries with
+            | [] -> None
+            | entries ->
+                entries
+                |> List.take (entries.Length - 1)
+                |> List.tryFind (fun entry -> entry.Ctl = 'c' && jumpsToNextEntry entry)
+        match candidate with
+        | None -> joining <- false
+        | Some entry ->
+            let next = entry.Next.Value
+            ctls.Remove next.Address |> ignore
+            disassembly.RemoveEntry entry.Address
+            disassembly.RemoveEntry next.Address
+
+    // (6) Examine the 'U' blocks for text/data.
+    for ctl, blockStart, blockEnd in getBlocks ctls do
+        if ctl = 'U' then
+            ctls.[blockStart] <- 'b'
+            for textStart, textEnd in getTextBlocks snapshot blockStart blockEnd config true do
+                ctls.[textStart] <- 't'
+                if textEnd < blockEnd then ctls.[textEnd] <- 'b'
+
+    // (7) Mark data blocks of all zeroes with 's'.
+    for ctl, blockStart, blockEnd in getBlocks ctls do
+        if ctl = 'b' && snapshot.[blockStart .. blockEnd - 1] |> Array.forall ((=) 0uy) then
+            ctls.[blockStart] <- 's'
+
+    ctls
+
+// ---------------------------------------------------------------------------
+// Generating ctls without a code map
+// ---------------------------------------------------------------------------
+
+/// Details of the previously decoded instruction, used to spot data-like runs.
+type private PrevInstruction =
+    { MaxCount: int
+      OpId: int option
+      Operation: string option
+      Bytes: byte[] }
+
+    static member None = { MaxCount = 0; OpId = None; Operation = None; Bytes = [||] }
+
+/// If the run of identical operations is too long to be plausible code, start a
+/// data block at `ctlAddr` and return `addr` as the new ctl address.
+let private catchData (ctls: ResizeArray<int * char>) ctlAddr count maxCount addr (opBytes: byte[]) =
+    let isHarmlessPair = count = 2 && opBytes.Length > 0 && (opBytes.[0] = 0x66uy || opBytes.[0] = 0x6Euy)
+    if count >= maxCount && maxCount > 0 && not isHarmlessPair then
+        if ctls.Count = 0 || snd ctls.[ctls.Count - 1] <> 'b' then
+            ctls.Add(ctlAddr, 'b')
+        addr
+    else
+        ctlAddr
+
+let private generateCtlsWithoutCodeMap (snapshot: Snapshot) start finish config rstHandler =
+    let ctlList = ResizeArray<int * char>()
+    let mutable ctlAddr = start
+    let mutable prev = PrevInstruction.None
+    let mutable count = 1
+
+    for instruction in decode snapshot start finish rstHandler do
+        let addr = instruction.Address
+        let opBytes = snapshot.[addr .. addr + instruction.Size - 1]
+
+        if instruction.OpId = END then
+            // Catch data-like sequences that precede a terminal instruction.
+            ctlAddr <- catchData ctlList ctlAddr count prev.MaxCount addr prev.Bytes
+            ctlList.Add(ctlAddr, 'c')
+            ctlAddr <- addr + instruction.Size
+            prev <- PrevInstruction.None
+            count <- 1
+        else
+            if prev.OpId = Some instruction.OpId then
+                count <- count + 1
+            elif prev.Operation.IsSome then
+                ctlAddr <- catchData ctlList ctlAddr count prev.MaxCount addr prev.Bytes
+                count <- 1
+            prev <-
+                { MaxCount = instruction.MaxCount
+                  OpId = Some instruction.OpId
+                  Operation = Some instruction.Operation
+                  Bytes = opBytes }
+
+    if ctlList.Count = 0 || fst ctlList.[ctlList.Count - 1] <> ctlAddr then
+        ctlList.Add(ctlAddr, 'b')
+    ctlList.Add(finish, 'i')
+
+    let ctls = Ctls()
+    for address, ctl in ctlList do
+        ctls.[address] <- ctl
+
+    let edges () = ctls.Keys |> Seq.sort |> Seq.toList
+
+    // Mark a NOP sequence at the beginning of a code block as a zero block, and
+    // mark a data block of all zeroes as a zero block.
+    for blockStart, blockEnd in edges () |> List.pairwise do
+        if ctls.[blockStart] = 'c' then
+            ctls.[blockStart] <- 's'
+            match [ blockStart .. blockEnd - 1 ] |> List.tryFind (fun a -> snapshot.[a] <> 0uy) with
+            | Some address -> ctls.[address] <- 'c'
+            | None -> ()
+        elif snapshot.[blockStart .. blockEnd - 1] |> Array.forall ((=) 0uy) then
+            ctls.[blockStart] <- 's'
+
+    // Join any adjacent data and zero blocks.
+    let isDataLike ctl = ctl = 'b' || ctl = 's'
+    let sorted = edges () |> List.map (fun a -> a, ctls.[a])
+    let mutable prevAddr, prevCtl = List.head sorted
+    for addr, ctl in List.tail sorted do
+        if isDataLike ctl && isDataLike prevCtl then
+            ctls.[prevAddr] <- 'b'
+            ctls.Remove addr |> ignore
+        else
+            prevAddr <- addr
+            prevCtl <- ctl
+
+    // Look for text.
+    for blockStart, blockEnd in edges () |> List.pairwise do
+        match ctls.[blockStart] with
+        | 'b' ->
+            for textStart, textEnd in getTextBlocks snapshot blockStart blockEnd config true do
+                ctls.[textStart] <- 't'
+                if textEnd < blockEnd then ctls.[textEnd] <- 'b'
+        | 'c' ->
+            match getTextBlocks snapshot blockStart blockEnd config false with
+            | [] -> ()
+            | textBlocks ->
+                ctls.[blockStart] <- 'b'
+                for textStart, textEnd in textBlocks do
+                    ctls.[textStart] <- 't'
+                    if textEnd < blockEnd then ctls.[textEnd] <- 'b'
+                let lastEnd = snd (List.last textBlocks)
+                if lastEnd < blockEnd then ctls.[lastEnd] <- 'c'
+        | _ -> ()
+
+    ctls
+
+// ---------------------------------------------------------------------------
+// Sub-block directives and output
+// ---------------------------------------------------------------------------
+
+/// A directive written beneath a block directive: an instruction comment and/or
+/// an RST argument declaration.
+type SubCtl =
+    { Address: int
+      Ctl: string
+      SubLengths: SubLength list
+      Comment: string option }
+
+let private generateSubCtls snapshot (ctls: Ctls) (subCtls: Dictionary<int, ResizeArray<SubCtl>>)
+                            rstHandler (commentGenerator: ICommentGenerator option) =
+    let blocks = ctls.Keys |> Seq.filter (fun a -> a < 65536) |> Seq.sort |> Seq.toList
+    let boundaries = blocks @ [ 65536 ]
+
+    for blockStart, blockEnd in List.pairwise boundaries do
+        if ctls.[blockStart] = 'c' then
+            let lines = ResizeArray<SubCtl>()
+            for instruction in decode snapshot blockStart blockEnd rstHandler do
+                let addr = instruction.Address
+                match commentGenerator with
+                | Some cg ->
+                    let comment = cg.GetComment { Address = addr; Bytes = snapshot.[addr .. addr + instruction.Size - 1] }
+                    lines.Add { Address = addr; Ctl = " "; SubLengths = []; Comment = Some comment }
+                | None -> ()
+
+                match instruction.RstArgs with
+                | Some rstArgs ->
+                    let argsLength = rstArgs.SubLengths |> List.sumBy (fun s -> s.Size)
+                    lines.Add
+                        { Address = addr + instruction.Size - argsLength
+                          Ctl = rstArgs.SubCtl
+                          SubLengths = rstArgs.SubLengths
+                          Comment = None }
+                | None -> ()
+            subCtls.[blockStart] <- lines
+
+let writeCtl (ctls: Ctls) snapshot options =
+    let rstHandler = if options.HandleRst then Some(getRstHandler ()) else None
+    let commentGenerator = if options.Comments then Some(getCommentGenerator ()) else None
+
+    let subCtls = Dictionary<int, ResizeArray<SubCtl>>()
+    if rstHandler.IsSome || commentGenerator.IsSome then
+        generateSubCtls snapshot ctls subCtls rstHandler commentGenerator
+
+    let formatAddress = getAddressFormat options.CtlHex (options.CtlHex = 1)
+    let start = formatAddress (Seq.min ctls.Keys)
+    writeLine (sprintf "@ %s %s" start AD_START)
+    writeLine (sprintf "@ %s %s" start AD_ORG)
+
+    // 'n' (the default base) is written as an empty string.
+    let formatBase b = if b = "n" then "" else b
+
+    for address in ctls.Keys |> Seq.filter (fun a -> a < 65536) |> Seq.sort do
+        writeLine (sprintf "%c %s" ctls.[address] (formatAddress address))
+
+        match subCtls.TryGetValue address with
+        | true, lines ->
+            for line in lines do
+                let lengths =
+                    match line.SubLengths with
+                    | [] -> ""
+                    | [ single ] -> sprintf ",%s%d" (formatBase single.Base) single.Size
+                    | many ->
+                        let total = many |> List.sumBy (fun s -> s.Size)
+                        let parts = many |> List.map (fun s -> sprintf "%s%d" (formatBase s.Base) s.Size)
+                        sprintf ",%d,%s" total (String.Join(":", parts))
+                let comment =
+                    match line.Comment with
+                    | Some c when c <> "" -> " " + c
+                    | _ -> ""
+                writeLine (sprintf "%s %s%s%s" line.Ctl (formatAddress line.Address) lengths comment)
+        | _ -> ()
+
+// ---------------------------------------------------------------------------
+// Component API
+// ---------------------------------------------------------------------------
+
+/// Generates control directives from a snapshot.
+///
+/// `start`/`finish` bound the region to consider; `codeMap` is an optional code
+/// map filename; `config` controls RST handling and text detection.
+let generateCtls (snapshot: Snapshot) start finish (codeMap: string option) config : Ctls =
+    let rstHandler = if config.HandleRst then Some(getRstHandler ()) else None
+    match codeMap with
+    | Some fname -> generateCtlsWithCodeMap snapshot start finish config rstHandler fname
+    | None -> generateCtlsWithoutCodeMap snapshot start finish config rstHandler
+```
+
+One small helper the code above assumes (the F# equivalent of `int(s, base)` with a `ValueError`):
+
+```fsharp
+module Convert =
+    let tryToInt32 (text: string) numberBase =
+        try Some(System.Convert.ToInt32(text, numberBase))
+        with _ -> None
+```
+
+Notes on the translation choices:
+
+- **Records instead of tuples** for decoded instructions, sub-lengths and sub-ctls; the Python code passes around anonymous tuples that are hard to read (`(a + size - rst_args_len, *rst_args, None)`).
+- **`Option` instead of `None`-as-sentinel** for `ctl`, `rst_handler`, `code_map` and the comment generator.
+- **`tryPick`/`tryFind` instead of nested `break` flags** in steps (3) and (5) of the code-map algorithm — this removes the `done` bookkeeping entirely.
+- **`List.pairwise` instead of `_get_blocks`'s index shuffling**, which is exactly what that function was doing.
+- The genuinely imperative parts (the ctl dictionary, the "keep extending blocks until nothing changes" loops) stay imperative, because a functional rewrite there would obscure rather than clarify the algorithm.
+- Progress reporting in `getAddresses` reads the whole file into memory rather than tracking `f.tell()`; if the maps can be huge, swap it for a `StreamReader` over a `FileStream` and use `stream.Position`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -24,7 +24,7 @@ type GameOnlyView
     ) as self =
     inherit Grid()
 
-    let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
+    let dim = Theme.dim
 
     let screenBmp = WriteableBitmap(320, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
 
@@ -105,7 +105,7 @@ type GameOnlyView
         col.Children.Add revLabel |> ignore
         self.Children.Add col |> ignore
         self.Focusable <- true
-        self.Background <- SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
+        self.Background <- Theme.bg
 
         // keyboard on the view itself: F3 hold = reverse, Escape = main menu
         self.PreviewKeyDown.Add(fun e ->

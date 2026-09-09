@@ -2743,6 +2743,175 @@ let runFlame (romPath: string) (tzxPath: string) : int =
 
 
 /// The historical regression harness.
+/// Static ctl generation (CtlGen): synthetic snapshots exercising the block
+/// splitter, data catching, zero/NOP handling and text detection, plus the
+/// control-file round trip.
+let runCtlGen () : int =
+    printfn "ctlgen: static control-map generation"
+
+    let poke (mem: byte[]) (addr: int) (bytes: byte list) =
+        bytes |> List.iteri (fun i b -> mem[addr + i] <- b)
+
+    let block start endExcl kind : Block =
+        { Start = start
+          EndExcl = endExcl
+          Name = sprintf "block_%04X" start
+          Kind = kind }
+
+    // 1. RET-terminated code: one code block to just past the RET; the zero
+    //    tail is a gap.
+    let mem = Array.zeroCreate<byte> 0x10000
+    poke mem 0x4000 [ 0x3Euy; 0x47uy; 0xC9uy ] // LD A,0x47 ; RET
+
+    let r = CtlGen.analyze mem 0x4000 0x4020 CtlGen.defaultConfig
+    let expected1 = [ block 0x4000 0x4003 Code; block 0x4003 0x4020 Gap ]
+
+    check "ret-terminated code -> code block + gap tail" (r.Blocks = expected1) (sprintf "%A" r.Blocks)
+    check "no text in plain code" (r.TextNotes = []) (sprintf "%A" r.TextNotes)
+
+    // 2. NOP prefix: leading NOPs are a gap; code starts at the first
+    //    non-zero byte.
+    let mem2 = Array.zeroCreate<byte> 0x10000
+    poke mem2 0x4000 [ 0x00uy; 0x00uy; 0xC9uy ] // NOP ; NOP ; RET
+
+    let r2 = CtlGen.analyze mem2 0x4000 0x4010 CtlGen.defaultConfig
+
+    let expected2 =
+        [ block 0x4000 0x4002 Gap; block 0x4002 0x4003 Code; block 0x4003 0x4010 Gap ]
+
+    check "nop prefix -> gap head, code at first nonzero" (r2.Blocks = expected2) (sprintf "%A" r2.Blocks)
+
+    // 3. A run of one operation beyond MaxRepeat becomes data; only the
+    //    terminal instruction stays code.
+    let mem3 = Array.zeroCreate<byte> 0x10000
+
+    poke
+        mem3
+        0x4000
+        [ 0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0xC9uy ]
+
+    let r3 = CtlGen.analyze mem3 0x4000 0x4010 CtlGen.defaultConfig
+
+    let expected3 =
+        [ block 0x4000 0x400A Data; block 0x400A 0x400B Code; block 0x400B 0x4010 Gap ]
+
+    check "repeated-op run caught as data, terminal stays code" (r3.Blocks = expected3) (sprintf "%A" r3.Blocks)
+
+    // 4. The 0x66/0x6E harmless pair: with MaxRepeat=2 two LD H,(HL) stay
+    //    code while two LD A,n of the same run length are caught.
+    let cfg2 =
+        { CtlGen.defaultConfig with
+            MaxRepeat = 2 }
+
+    let mem4 = Array.zeroCreate<byte> 0x10000
+    poke mem4 0x4000 [ 0x66uy; 0x66uy; 0xC9uy ] // LD H,(HL) ; LD H,(HL) ; RET
+
+    let r4 = CtlGen.analyze mem4 0x4000 0x4008 cfg2
+    let expected4 = [ block 0x4000 0x4003 Code; block 0x4003 0x4008 Gap ]
+
+    check "harmless 0x66 pair stays code at MaxRepeat=2" (r4.Blocks = expected4) (sprintf "%A" r4.Blocks)
+
+    let mem5 = Array.zeroCreate<byte> 0x10000
+    poke mem5 0x4000 [ 0x3Euy; 0x00uy; 0x3Euy; 0x00uy; 0xC9uy ] // LD A,0 x2 ; RET
+
+    let r5 = CtlGen.analyze mem5 0x4000 0x4008 cfg2
+
+    check
+        "same run length caught without the harmless pair"
+        (r5.Blocks
+         |> List.exists (fun b -> b.Kind = Data && b.Start = 0x4000 && b.EndExcl = 0x4004))
+        (sprintf "%A" r5.Blocks)
+
+    // 5. Text: a printable run inside a code block demotes it to data and
+    //    emits the string; text inside a data block splits that block.
+    let mem6 = Array.zeroCreate<byte> 0x10000
+    poke mem6 0x4000 [ 0x3Euy; 0x47uy; 0xC9uy ] // LD A,0x47 ; RET
+    poke mem6 0x4003 [ 0x53uy; 0x43uy; 0x4Fuy; 0x52uy; 0x45uy ] // "SCORE"
+
+    let r6 = CtlGen.analyze mem6 0x4000 0x4010 CtlGen.defaultConfig
+
+    let expected6 =
+        [ block 0x4000 0x4003 Code; block 0x4003 0x4008 Data; block 0x4008 0x4010 Data ]
+
+    check "text run demotes code block to data" (r6.Blocks = expected6) (sprintf "%A" r6.Blocks)
+
+    check
+        "text note carries the decoded string"
+        (r6.TextNotes = [ (0x4003, 0x4008, "SCORE") ])
+        (sprintf "%A" r6.TextNotes)
+
+    let mem7 = Array.zeroCreate<byte> 0x10000
+
+    poke
+        mem7
+        0x4000
+        [ 0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy
+          0x3Euy
+          0x00uy ]
+
+    poke mem7 0x400A [ 0x4Fuy; 0x4Buy ] // "OK"
+
+    let r7 = CtlGen.analyze mem7 0x4000 0x4014 CtlGen.defaultConfig
+
+    let expected7 =
+        [ block 0x4000 0x400A Data; block 0x400A 0x400C Data; block 0x400C 0x4014 Data ]
+
+    check "text inside data splits the block" (r7.Blocks = expected7) (sprintf "%A" r7.Blocks)
+    check "split block text noted" (r7.TextNotes = [ (0x400A, 0x400C, "OK") ]) (sprintf "%A" r7.TextNotes)
+
+    // 6. Round trip: toControlFile -> json -> fromJson, and the generator
+    //    side (GameProject.loadControl) accepts the map - sorted,
+    //    non-overlapping, inside the span.
+    let cf = CtlGen.toControlFile r6 0x4000 0x4000 0x4010
+    let cf2 = cf |> ControlFile.toJson |> ControlFile.fromJson
+
+    check
+        "generated control file json round trip"
+        (cf2.Blocks = cf.Blocks && cf2.Comments = cf.Comments && cf2.EntryPc = cf.EntryPc)
+        (sprintf "%A / %A" cf.Comments cf2.Comments)
+
+    check
+        "blocks are sorted, adjacent, inside the span"
+        (cf.Blocks
+         |> List.pairwise
+         |> List.forall (fun (a, b) -> a.Start < a.EndExcl && a.EndExcl <= b.Start))
+        (sprintf "%A" cf.Blocks)
+
+    let dir = Path.Combine(Path.GetTempPath(), "ctlgen-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory dir |> ignore
+
+    try
+        File.WriteAllText(Path.Combine(dir, "control.json"), ControlFile.toJson cf)
+        let gc = GameProject.loadControl dir
+
+        check
+            "GameProject.loadControl accepts the generated map"
+            (gc.Blocks.Length = cf.Blocks.Length
+             && gc.Start = cf.Start
+             && gc.EndExcl = cf.EndExcl)
+            (sprintf "%A" gc.Blocks)
+    finally
+        Directory.Delete(dir, true)
+
+    if failures.Count > 0 then 1 else 0
+
 let mainTests argv =
     try
         let tests =
@@ -2775,6 +2944,7 @@ let mainTests argv =
             | "integration" -> runIntegration ()
             | "ce" -> runCE ()
             | "control" -> runControl ()
+            | "ctlgen" -> runCtlGen ()
             | "ctrlmap" -> runCtrlMap ()
             | "flame" -> runFlame rom.Value tzx.Value
             | "all" ->
@@ -2799,6 +2969,7 @@ let mainTests argv =
                 + runIntegration ()
                 + runCE ()
                 + runControl ()
+                + runCtlGen ()
                 + runCtrlMap ()
                 + runFlame rom.Value tzx.Value
             | other ->
@@ -2809,7 +2980,7 @@ let mainTests argv =
             match tests with
             | [] ->
                 eprintfn
-                    "usage: --test disasm|trace|agree|gaps|mine|contract|validate|prompt|bench|boot|manifest|minimal|game2|flow|handoff|history|z80ops|labels|integration|ce|control|ctrlmap|all"
+                    "usage: --test disasm|trace|agree|gaps|mine|contract|validate|prompt|bench|boot|manifest|minimal|game2|flow|handoff|history|z80ops|labels|integration|ce|control|ctlgen|ctrlmap|all"
 
                 1
             | names -> List.sumBy run names

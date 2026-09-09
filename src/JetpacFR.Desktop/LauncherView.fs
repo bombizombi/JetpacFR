@@ -84,14 +84,16 @@ module LauncherView =
     type LauncherContext =
         { OpenEmulator: GameManifest -> unit
           OpenCheatEngine: GameManifest -> unit
-          OpenJustGame: GameManifest -> unit }
+          OpenJustGame: GameManifest -> unit
+          SetTheme: Theme.Mode -> unit
+          IsLight: unit -> bool }
 
     let build (ctx: LauncherContext) : DockPanel * (unit -> unit) =
-        let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
-        let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
-        let normal = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
-        let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
-        let green = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
+        let bg = Theme.bg
+        let panel = Theme.panel
+        let normal = Theme.normal
+        let dim = Theme.dim
+        let green = Theme.green
         let mono = FontFamily("Consolas")
 
         let mutable selectedGame: GameManifest option = None
@@ -201,13 +203,13 @@ module LauncherView =
             grid.Children.Add nameCol |> ignore
 
             let status = StackPanel(Orientation = Orientation.Horizontal)
-            let tracePath = Path.Combine(g.GameDirectory, StateTimelineStore.FileName)
-            let fi = FileInfo(tracePath)
+            let slots = TimelineSlots.list g.GameDirectory
+            let totalMB = slots |> List.sumBy (fun s -> float s.Bytes / (1024.0 * 1024.0))
 
-            if fi.Exists then
-                statusCell status 110.0 (sprintf "trace: %.1f MB" (float fi.Length / (1024.0 * 1024.0))) true
+            if List.isEmpty slots then
+                statusCell status 110.0 "traces: none" false
             else
-                statusCell status 110.0 "trace: none" false
+                statusCell status 110.0 (sprintf "traces: %d (%.1f MB)" slots.Length totalMB) true
 
             statusCell
                 status
@@ -326,8 +328,24 @@ module LauncherView =
             refill ()
             reselectDefault ())
 
-        Grid.SetColumn(rescan, 0)
-        bottom.Children.Add rescan |> ignore
+        let leftBox = StackPanel(Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left)
+        Grid.SetColumn(leftBox, 0)
+        bottom.Children.Add leftBox |> ignore
+        leftBox.Children.Add rescan |> ignore
+
+        let themeToggle =
+            CheckBox(
+                Content = "Light theme",
+                IsChecked = Nullable<bool>(ctx.IsLight ()),
+                Foreground = dim,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(12.0, 0.0, 0.0, 0.0),
+                ToolTip = "day/night UI theme (saved to gui.cfg)"
+            )
+
+        themeToggle.Checked.Add(fun _ -> ctx.SetTheme Theme.Light)
+        themeToggle.Unchecked.Add(fun _ -> ctx.SetTheme Theme.Dark)
+        leftBox.Children.Add themeToggle |> ignore
 
         let exit =
             Button(

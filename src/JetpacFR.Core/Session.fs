@@ -125,6 +125,11 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     let mutable replayFinished = false
     let mutable pendingReplayKeys: KeyEvent list = []
 
+    /// Live play without any recording: RunFrame executes but captures
+    /// nothing (no history deltas, no timeline states, no key log), so the
+    /// session costs one frame-0 anchor and never grows.
+    let mutable liveMode = false
+
     /// Capture the port state + keyboard matrix into the history store, and
     /// into the timeline when the frame lies beyond it. Frames below the
     /// timeline's horizon already have their stored state (a loaded recording,
@@ -244,14 +249,16 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         if replayMode then
             () // live keys ignored during scripted replay
         else
-            keyLog.Add
-                { Frame = frame
-                  Row = row
-                  Bit = bit
-                  Pressed = pressed }
+            if not liveMode then
+                keyLog.Add
+                    { Frame = frame
+                      Row = row
+                      Bit = bit
+                      Pressed = pressed }
+
+                timelineDirty <- true // key events are part of the saved recording
 
             port.SetKey(row, bit, pressed)
-            timelineDirty <- true // key events are part of the saved recording
 
     member this.Replaying = replayMode
     member this.ReplayEndFrame = replayEndFrame
@@ -407,6 +414,36 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         timelineBytesBaseline <- 0L
         timelineDirty <- false // the caller deletes the file; nothing left to save
         keyLog.Replace []
+
+    /// Live play without trace or recording. Captures stop (history keeps
+    /// whatever it has, frozen); the key log stays untouched.
+    member this.LiveMode = liveMode
+
+    member this.EnterLive() =
+        liveMode <- true
+        recorder.RecordEnabled <- false
+        replayMode <- false
+        replayFinished <- false
+        pendingReplayKeys <- []
+
+    /// Arm recording from live play: reseed the timeline at the current frame
+    /// (captures must be sequential, so the skipped live frames cannot join
+    /// the old chain), reset the trace window, resume capturing.
+    member this.ArmRecording() =
+        this.ResetTimeline()
+        recorder.Reset()
+        liveMode <- false
+        recorder.RecordEnabled <- true
+
+    /// Execute exactly `count` instructions on the live machine for manual
+    /// stepping outside a trace. Frame bookkeeping is untouched; the next
+    /// RunFrame recovers its boundary on its own.
+    member this.StepLiveInstructions(count: int) =
+        let mutable n = 0
+
+        while n < count do
+            port.Step()
+            n <- n + 1
 
     /// Branch COMMIT: having previewed `frameNumber` (or reached it during a
     /// replay or a timeline jump), abandon the old future. History and the key
@@ -582,7 +619,9 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         // frame is exactly replayEndFrame: the state after it matches the
         // recording's end.
         frame <- frame + 1
-        captureState ()
+
+        if not liveMode then
+            captureState ()
 
         if replayMode then
             if frame >= replayEndFrame then

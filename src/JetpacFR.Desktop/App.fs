@@ -88,6 +88,13 @@ type RoutineRow =
       IsSelected: bool
       Entry: int }
 
+/// How a fresh boot enters the emulator: autoplay a slot, arm a fresh
+/// recording under a new slot name, or run live with no trace at all.
+type SessionStart =
+    | AutoplaySlot of string
+    | RecordFresh of string
+    | LiveFresh
+
 type MainWindow() as self =
     inherit Window()
 
@@ -119,21 +126,23 @@ type MainWindow() as self =
     let findGamesDir () = Projects.findGamesDir ()
 
     // ---- palette -----------------------------------------------------------
-    let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
-    let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
-    let normal = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
-    let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
-    let green = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
-    let cyan = SolidColorBrush(Color.FromRgb(0x4Euy, 0xD0uy, 0xE0uy))
-    let yellow = SolidColorBrush(Color.FromRgb(0xE6uy, 0xD0uy, 0x4Euy))
-    let red = SolidColorBrush(Color.FromRgb(0xE8uy, 0x54uy, 0x54uy))
-    let orange = SolidColorBrush(Color.FromRgb(0xE8uy, 0x8Auy, 0x2Euy))
-    let sky = Color.FromRgb(0x38uy, 0xBDuy, 0xF8uy)
-    let amber = Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy)
-    let darkFg = SolidColorBrush(Color.FromRgb(0x02uy, 0x06uy, 0x17uy))
-    let hiBg = SolidColorBrush(Color.FromRgb(0x2Euy, 0x34uy, 0x44uy))
+    // Shared Theme instances (day/night switch mutates them in place; every
+    // alias below follows). Same names as before, so no use-site churn.
+    let bg = Theme.bg
+    let panel = Theme.panel
+    let normal = Theme.normal
+    let dim = Theme.dim
+    let green = Theme.green
+    let cyan = Theme.cyan
+    let yellow = Theme.yellow
+    let red = Theme.red
+    let orange = Theme.orange
+    let sky = Theme.sky
+    let amber = Theme.amber
+    let darkFg = Theme.darkFg
+    let hiBg = Theme.hiBg
     let mono = FontFamily("Consolas")
-
+    let heatLut = Theme.heatLut
     // ---- bitmaps -----------------------------------------------------------
     let gameBitmap = WriteableBitmap(320, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
     let heatBmp = WriteableBitmap(256, 256, 96.0, 96.0, PixelFormats.Bgra32, null)
@@ -142,18 +151,6 @@ type MainWindow() as self =
     let heatPixels = Array.zeroCreate<byte> (256 * 256 * 4)
     let stripPixels = Array.zeroCreate<byte> (512 * 24 * 4)
     let gfxPixels = Array.zeroCreate<byte> (256 * 256 * 4)
-
-    let heatLut =
-        [| Color.FromRgb(0x08uy, 0x08uy, 0x0Cuy)
-           Color.FromRgb(0x0Auy, 0x1Euy, 0x4Auy)
-           Color.FromRgb(0x0Auy, 0x3Auy, 0x5Euy)
-           Color.FromRgb(0x0Auy, 0x5Cuy, 0x6Auy)
-           Color.FromRgb(0x12uy, 0x86uy, 0x5Euy)
-           Color.FromRgb(0x3Auy, 0xA8uy, 0x3Cuy)
-           Color.FromRgb(0x96uy, 0xB8uy, 0x2Cuy)
-           Color.FromRgb(0xD8uy, 0xA0uy, 0x22uy)
-           Color.FromRgb(0xE8uy, 0x66uy, 0x18uy)
-           Color.FromRgb(0xF0uy, 0x38uy, 0x28uy) |]
 
     // ---- state -------------------------------------------------------------
     let mutable running = false
@@ -245,6 +242,27 @@ type MainWindow() as self =
     let timelinePath (game: GameManifest) =
         Path.Combine(game.GameDirectory, StateTimelineStore.FileName)
 
+    /// Active recording slot ("default" = the legacy timeline.jst). Autosave
+    /// and Clear both route to it; the picker and the toolbar combo switch it.
+    let mutable currentSlot = TimelineSlots.defaultName
+
+    let slotPath (game: GameManifest) (name: string) =
+        TimelineSlots.pathFor game.GameDirectory name
+
+    let mutable pendingStart: SessionStart option = None
+
+    /// Boot parked while the menu was up and the slot picker never ran:
+    /// the uiTimer shows it on re-entry instead.
+    let mutable pickQueued = false
+
+    /// No-questions entry: the single slot autoplays, nothing recorded yet
+    /// starts a fresh named recording; picker dismissal falls back to the
+    /// newest slot.
+    let defaultChoice (slots: TimelineSlots.SlotInfo list) : SessionStart =
+        match slots with
+        | [] -> RecordFresh(TimelineSlots.suggestName ())
+        | first :: _ -> AutoplaySlot first.Name
+
     /// Persist states + key log. Writes ONLY when the timeline actually
     /// changed since the last save (captures, branch truncation, key events);
     /// `force` (the Save button) rewrites even an unchanged recording. Called
@@ -259,7 +277,11 @@ type MainWindow() as self =
         match currentGame, session with
         | Some game, Some s when (force || s.TimelineDirty) && s.StateTimeline.Count > 1 ->
             match
-                StateTimelineStore.save (timelinePath game) (timelineFingerprint game) s.StateTimeline s.KeyLog.Events
+                StateTimelineStore.save
+                    (slotPath game currentSlot)
+                    (timelineFingerprint game)
+                    s.StateTimeline
+                    s.KeyLog.Events
             with
             | Ok() ->
                 s.ClearTimelineDirty()
@@ -274,8 +296,8 @@ type MainWindow() as self =
 
     /// Install a saved recording before a single frame runs: the key script
     /// drives autoplay and every frame - future included - is seekable.
-    let loadTimeline (game: GameManifest) (s: TraceSession) : bool =
-        match StateTimelineStore.tryLoad (timelinePath game) (timelineFingerprint game) with
+    let loadSlotTimeline (game: GameManifest) (s: TraceSession) (path: string) : bool =
+        match StateTimelineStore.tryLoad path (timelineFingerprint game) with
         | TimelineLoaded(timeline, events) ->
             s.LoadStateTimeline(timeline, events)
             // Big picture immediately: build a flame window for the recording's
@@ -291,11 +313,13 @@ type MainWindow() as self =
             statusText.Text <- sprintf "%s: saved timeline ignored (%s)" game.Name reason
             false
 
+    let loadTimeline (game: GameManifest) (s: TraceSession) : bool =
+        loadSlotTimeline game s (slotPath game currentSlot)
+
 
     /// Start a game from its manifest: warm cache -> fast port session; cold
     /// auto -> oracle boot (slow, first run); cold manual -> the user runs the
-    /// loader in the oracle and marks the entry point.
-    let launchGame (m: GameManifest) =
+    let launchGame (m: GameManifest, preset: SessionStart option) =
         saveTimeline false
         bootStartedAt <- System.DateTime.UtcNow
         bootScreen <- None
@@ -304,6 +328,18 @@ type MainWindow() as self =
         manualTimer.Stop()
         currentGame <- Some m
         bootGameId <- m.GameId
+        pickQueued <- false
+
+        // Entry choice: explicit (slot switch / live / record-new from the
+        // toolbar) wins; menu entry with 0-1 slots preinstalls the obvious
+        // default; 2+ slots get the picker once boot lands. Manual boots
+        // keep their own path and ignore all of this.
+        match preset with
+        | Some st -> pendingStart <- Some st
+        | None when m.Boot <> "manual" ->
+            let slots = TimelineSlots.list m.GameDirectory
+            pendingStart <- if slots.Length < 2 then Some(defaultChoice slots) else None
+        | None -> pendingStart <- None
 
         match EntryCache.tryLoad m.Rom m.Tzx with
         | Some _ ->
@@ -413,6 +449,7 @@ type MainWindow() as self =
         | Some _, _ -> set "compiled F# port - no trace recorded" dim false
         | None, Some s when s.Replaying || replaying ->
             set "\u25B6 REPLAYING saved trace (keys scripted, nothing new recorded)" orange true
+        | None, Some s when s.LiveMode -> set "▶ LIVE play - no trace, nothing recorded" green true
         | None, Some s ->
             let recOn = s.Recorder.RecordEnabled
 
@@ -563,13 +600,10 @@ type MainWindow() as self =
     let graphScroll =
         ScrollViewer(VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
 
-    let codeGraphCanvas =
-        Canvas(Background = SolidColorBrush(Color.FromRgb(0x18uy, 0x18uy, 0x20uy)))
+    let codeGraphCanvas = Canvas(Background = Theme.panel)
 
     /// Call graph surface (Functions tab, drawGraph).
-    let graphCanvas =
-        Canvas(Background = SolidColorBrush(Color.FromRgb(0x18uy, 0x18uy, 0x20uy)))
-
+    let graphCanvas = Canvas(Background = Theme.panel)
     /// Shared comment text for all mass-comment buttons.
     let commentBox = TextBox(Width = 420.0, Height = 22.0)
 
@@ -1172,10 +1206,7 @@ type MainWindow() as self =
             | Some n -> Some(n, "user symbol")
             | None ->
                 c.Blocks
-                |> List.tryFind (fun b ->
-                    b.Kind = Code
-                    && b.Start = addr
-                    && b.Name <> sprintf "block_%04X" b.Start)
+                |> List.tryFind (fun b -> b.Kind = Code && b.Start = addr && b.Name <> sprintf "block_%04X" b.Start)
                 |> Option.map (fun b -> b.Name, "block name")
         | None -> None
 
@@ -1240,9 +1271,7 @@ type MainWindow() as self =
             // a named function start shows its name at the end of the line,
             // after the comment
             let nm =
-                named
-                |> Option.map (fun (n, _) -> sprintf "  [%s]" n)
-                |> Option.defaultValue ""
+                named |> Option.map (fun (n, _) -> sprintf "  [%s]" n) |> Option.defaultValue ""
 
             { Tag = sprintf "%07d  %04X  %-11s %3dt  %s%s%s%s%s%s" idx e.Pc hex (int e.Cycles) text tail sm lifted cm nm
               Brush = brush
@@ -1507,11 +1536,10 @@ type MainWindow() as self =
             |> Set.ofSeq
         | _ -> Set.empty
 
-    /// hiBg as a brush for the memory-mode cursor row.
-    let hiBgBrush = SolidColorBrush(Color.FromRgb(0x2Euy, 0x34uy, 0x44uy))
-    /// Foreground for the cursor row: hiBg (the IsCurrent row background) is
-    /// nearly black, so the row needs its own bright text color to stay legible.
-    let bright = SolidColorBrush(Color.FromRgb(0xECuy, 0xEFuy, 0xF8uy))
+    /// hiBg as a brush for the memory-mode cursor row (shared Theme instance).
+    let hiBgBrush = Theme.hiBg
+    /// Foreground for the cursor row: contrasts HiBg in both modes.
+    let bright = Theme.bright
 
     /// One row of the linear memory sweep. The active-brush selection is
     /// passed in by the caller (computed once per refresh, never per row).
@@ -2668,6 +2696,17 @@ type MainWindow() as self =
         refreshStrip ()
         refreshCursorLabel ()
 
+    /// Day/night switch for the whole window: shared brushes, custom canvases,
+    /// data repaint, immediate gui.cfg persist. Both the menu toggle and the
+    /// emulator toolbar toggle route through here.
+    let applyTheme (m: Theme.Mode) =
+        Theme.apply m
+        flameCtrl.RefreshTheme()
+        timeline.RefreshTheme()
+        controlMap.RefreshTheme()
+        refreshAll ()
+        GuiConfig.save ()
+
     let syncSlider () =
         let n = currentEntryCount ()
         syncingSlider <- true
@@ -3022,7 +3061,7 @@ type MainWindow() as self =
 
             match currentGame with
             | Some g ->
-                launchGame g
+                launchGame (g, None)
                 loadControlForGame ()
             | None -> ()
 
@@ -3097,6 +3136,18 @@ type MainWindow() as self =
                     statusText.Text <- sprintf "no state for frame %d (%s) - step is display-only" frameNo ex.Message
         | _ -> ()
 
+    /// After any step: point the editors at the live machine. Memory/graph
+    /// view centers on PC - a full jump, so a wheeled-away viewport recenters
+    /// and the cursor row lands in view; the comment pane is memCursor-bound,
+    /// so the 10 Hz pane poll picks it up everywhere within a tick.
+    let followLivePc (reason: string) =
+        match session with
+        | Some s ->
+            labelEditor <- None
+            gotoMemCursor (int (s.Regs.Pc()) &&& 0xFFFF) reason
+            refreshDisasm ()
+        | None -> ()
+
     /// Debugger-style stepping: move the trace cursor, then park the machine
     /// on the new entry so registers, memory and the screen reflect the exact
     /// state of that moment (recording stays suppressed; Run resumes live
@@ -3105,38 +3156,52 @@ type MainWindow() as self =
     /// site: the next executed entry at the call's fall-through address (a
     /// not-taken conditional call therefore just advances one). If the routine
     /// never returns inside the recorded trace, the cursor parks on the last
-    /// entry instead.
     let stepInto () =
-        pauseGame ()
-        seek 1
-        syncToCursor ()
+        match session with
+        | Some s when s.LiveMode ->
+            // No trace: advance the live machine one instruction and show it.
+            pauseGame ()
+            s.StepLiveInstructions(1)
+            presentGame ()
+            showLiveRegs s |> ignore
+        | _ ->
+            pauseGame ()
+            seek 1
+            syncToCursor ()
+
+        followLivePc "step into"
 
     let stepBack () =
         pauseGame ()
         seek -1
         syncToCursor ()
+        followLivePc "step back"
 
     let stepOver () =
-        pauseGame ()
+        match session with
+        | Some _s when _s.LiveMode -> statusText.Text <- "step over needs a trace - use step into (F11) in live play"
+        | _ ->
+            pauseGame ()
 
-        match currentTrace () with
-        | Some t when t.Entries.Length > 0 ->
-            let c = max 0 (min cursor (t.Entries.Length - 1))
-            let e = t.Entries[c]
+            match currentTrace () with
+            | Some t when t.Entries.Length > 0 ->
+                let c = max 0 (min cursor (t.Entries.Length - 1))
+                let e = t.Entries[c]
 
-            if e.Length > 0uy && isCall e.B0 && c < t.Entries.Length - 1 then
-                let fallThrough = (int e.Pc + int e.Length) &&& 0xFFFF
-                let mutable k = c + 1
+                if e.Length > 0uy && isCall e.B0 && c < t.Entries.Length - 1 then
+                    let fallThrough = (int e.Pc + int e.Length) &&& 0xFFFF
+                    let mutable k = c + 1
 
-                while k < t.Entries.Length && int t.Entries[k].Pc <> fallThrough do
-                    k <- k + 1
+                    while k < t.Entries.Length && int t.Entries[k].Pc <> fallThrough do
+                        k <- k + 1
 
-                seek (min (t.Entries.Length - 1) k - c)
-            else
-                seek 1
-        | _ -> ()
+                    seek (min (t.Entries.Length - 1) k - c)
+                else
+                    seek 1
+            | _ -> ()
 
-        syncToCursor ()
+            syncToCursor ()
+            followLivePc "step over"
 
     /// "Jump to previous execution of this instruction" (code row menu): scan
     /// the browsed trace backwards from the clicked entry for the same PC, and
@@ -3273,6 +3338,62 @@ type MainWindow() as self =
                     s.KeyLog.Count
         | None -> ()
 
+    /// Install a booted session per the entry choice: autoplay a slot (falls
+    /// back to recording into it when the file is missing), arm a fresh
+    /// recording, or run live with no trace. Callers repaint + gate after.
+    let installSession (game: GameManifest) (s: TraceSession) (start: SessionStart) =
+        session <- Some s
+        flameTrace <- None
+        flameCache.Clear()
+        // The window on screen belongs to the previous session (or none): a
+        // live play session has no trace to show, and a recording's window is
+        // reinstalled by its build. The bump also cancels a build in flight
+        // for the previous session.
+        flameGeneration <- flameGeneration + 1
+        flameBuilding <- false
+        flameCtrl.Clear()
+        cursor <- 0
+        execViewHold <- false
+
+        match start with
+        | AutoplaySlot name ->
+            currentSlot <- name
+
+            if loadSlotTimeline game s (slotPath game name) then
+                replayExtent <- max 1 s.TimelineExtent
+                s.StartReplay()
+                replaying <- true
+                startGame ()
+
+                statusText.Text <-
+                    sprintf
+                        "%s: slot '%s' loaded (%d frames) - autoplay, seek anywhere"
+                        game.Name
+                        name
+                        s.StateTimeline.Count
+            else
+                replaying <- false
+                s.Recorder.RecordEnabled <- true
+                startGame ()
+                statusText.Text <- sprintf "%s: slot '%s' is empty - recording" game.Name name
+        | RecordFresh name ->
+            currentSlot <- name
+            replaying <- false
+            s.Recorder.RecordEnabled <- true
+            startGame ()
+            statusText.Text <- sprintf "%s: recording into new slot '%s'" game.Name name
+        | LiveFresh ->
+            currentSlot <- ""
+            s.EnterLive()
+            replaying <- false
+            recordToggle.IsChecked <- Nullable<bool>(false)
+            running <- true
+            frameTimer.Start()
+            statusText.Text <- sprintf "%s: live play - no trace, nothing recorded (Pause breaks)" game.Name
+
+        syncSlider ()
+        refreshAll ()
+
     // ---- single-window phase state -----------------------------------------
     // Both contents of the one window plus the picker's refresh hook: the
     // picker do block fills these, BuildEmulator and the back button swap
@@ -3334,11 +3455,21 @@ type MainWindow() as self =
     do
         GameImages.register () // CE availability for the status chips
         self.Title <- "ZX Spectrum Game Changer"
-        // One size for the whole app lifetime: the emulator layout needs this
-        // room, and neither phase ever resizes the window.
-        self.Width <- 1560.0
-        self.Height <- 900.0
-        self.WindowStartupLocation <- WindowStartupLocation.CenterScreen
+        // Window bounds come from gui.cfg when a previous run saved them;
+        // otherwise the emulator layout's default size, centered. Either way
+        // the phases never resize: only the user does.
+        match GuiConfig.bounds () with
+        | Some(w, h, x, y) ->
+            self.Width <- w
+            self.Height <- h
+            self.Left <- x
+            self.Top <- y
+            self.WindowStartupLocation <- WindowStartupLocation.Manual
+        | None ->
+            self.Width <- 1560.0
+            self.Height <- 900.0
+            self.WindowStartupLocation <- WindowStartupLocation.CenterScreen
+
         self.Background <- bg
 
         // Open a project per the chosen phase: "emulator" swaps the full
@@ -3367,22 +3498,32 @@ type MainWindow() as self =
 
         let ctx: LauncherView.LauncherContext =
             { OpenEmulator =
-                  fun g ->
-                      launchPhase <- "emulator"
-                      openProject g
+                fun g ->
+                    launchPhase <- "emulator"
+                    openProject g
               OpenCheatEngine =
-                  fun g ->
-                      launchPhase <- "cheat"
-                      openProject g
+                fun g ->
+                    launchPhase <- "cheat"
+                    openProject g
               OpenJustGame =
-                  fun g ->
-                      launchPhase <- "game"
-                      openProject g }
+                fun g ->
+                    launchPhase <- "game"
+                    openProject g
+              SetTheme = applyTheme
+              IsLight = fun () -> Theme.isLight () }
 
         let root, refreshLauncher = LauncherView.build ctx
         pickerRoot <- root
         refreshPicker <- refreshLauncher
         self.Content <- root
+
+        // Unimportant GUI state outlives the process here: theme is already
+        // synced on every toggle, bounds snapshot from RestoreBounds so a
+        // maximized close still restores a sane placement next launch.
+        self.Closing.Add(fun _ ->
+            let b = self.RestoreBounds
+            GuiConfig.setBounds (b.Width, b.Height, b.X, b.Y)
+            GuiConfig.save ())
 
     // ---- construction ------------------------------------------------------
     /// Build the emulator UI into this window (replacing the picker content)
@@ -3664,7 +3805,7 @@ type MainWindow() as self =
                 Width = 4.0,
                 VerticalAlignment = VerticalAlignment.Stretch,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = SolidColorBrush(Color.FromRgb(0x22uy, 0x26uy, 0x30uy)),
+                Background = Theme.hiBg,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext
             )
 
@@ -3775,9 +3916,8 @@ type MainWindow() as self =
                         | Some c when
                             c.Blocks
                             |> List.exists (fun b ->
-                                b.Kind = Code
-                                && b.Start = addr
-                                && b.Name <> sprintf "block_%04X" b.Start) ->
+                                b.Kind = Code && b.Start = addr && b.Name <> sprintf "block_%04X" b.Start)
+                            ->
                             "block name"
                         | _ -> "generated label"
 
@@ -3800,7 +3940,8 @@ type MainWindow() as self =
                     let btnRow =
                         StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 6.0, 0.0, 0.0))
 
-                    let renameBtn = Button(Content = "Rename", Width = 90.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
+                    let renameBtn =
+                        Button(Content = "Rename", Width = 90.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
 
                     let apply () =
                         match control with
@@ -3834,173 +3975,175 @@ type MainWindow() as self =
                             labelEditor <- None
                             refreshDisasm ()
                             rebuildCommentPane true)
-            | None ->
-                rebuildCommentRows force
+            | None -> rebuildCommentRows force
 
         and rebuildCommentRows (force: bool) =
-                let controlRef = control |> Option.map box |> Option.defaultValue null
+            let controlRef = control |> Option.map box |> Option.defaultValue null
 
-                if
-                    force
-                    || paneAddr <> Some memCursor
-                    || not (Object.ReferenceEquals(paneControl, controlRef))
-                then
-                    // The editing selection is address-bound: moving the cursor away
-                    // leaves edit mode (the drafted text stays in the box).
-                    match editingComment with
-                    | Some m when m.Addr <> memCursor ->
-                        editingComment <- None
-                        cmtPaneAddBtn.Content <- "add line comment"
-                    | _ -> ()
+            if
+                force
+                || paneAddr <> Some memCursor
+                || not (Object.ReferenceEquals(paneControl, controlRef))
+            then
+                // The editing selection is address-bound: moving the cursor away
+                // leaves edit mode (the drafted text stays in the box).
+                match editingComment with
+                | Some m when m.Addr <> memCursor ->
+                    editingComment <- None
+                    cmtPaneAddBtn.Content <- "add line comment"
+                | _ -> ()
 
-                    paneAddr <- Some memCursor
-                    paneControl <- controlRef
-                    cmtPaneRows.Children.Clear()
-                    cmtPaneTitle.Text <- sprintf "comments at %04X" memCursor
+                paneAddr <- Some memCursor
+                paneControl <- controlRef
+                cmtPaneRows.Children.Clear()
+                cmtPaneTitle.Text <- sprintf "comments at %04X" memCursor
 
-                    match control with
-                    | None ->
-                        cmtPaneRows.Children.Add(
-                            TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)
+                match control with
+                | None ->
+                    cmtPaneRows.Children.Add(
+                        TextBlock(Text = "no control file - click New ctrl first", Foreground = dim, FontSize = 11.0)
+                    )
+                    |> ignore
+                | Some c ->
+                    // Name/label section: in execution mode there are no
+                    // label rows, so a named address shows its name here
+                    // for editing (and an unnamed one offers a box to add
+                    // one). renameSymbol upserts, empty text removes.
+                    let named = nameAtAddr memCursor
+
+                    let kindText, boxText, btnText =
+                        match named with
+                        | Some(n, k) -> k, n, "Rename"
+                        | None -> "no name", "", "Add name"
+
+                    cmtPaneRows.Children.Add(
+                        TextBlock(
+                            Text = sprintf "name: %s  ($%04X)" kindText memCursor,
+                            Foreground = dim,
+                            FontSize = 11.0,
+                            Margin = Thickness(0.0, 0.0, 0.0, 3.0)
                         )
-                        |> ignore
-                    | Some c ->
-                        // Name/label section: in execution mode there are no
-                        // label rows, so a named address shows its name here
-                        // for editing (and an unnamed one offers a box to add
-                        // one). renameSymbol upserts, empty text removes.
-                        let named = nameAtAddr memCursor
+                    )
+                    |> ignore
 
-                        let kindText, boxText, btnText =
-                            match named with
-                            | Some(n, k) -> k, n, "Rename"
-                            | None -> "no name", "", "Add name"
+                    let nameRow =
+                        StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 8.0))
 
-                        cmtPaneRows.Children.Add(
+                    let nameBox =
+                        TextBox(Text = boxText, Width = 190.0, FontFamily = mono, FontSize = 11.5)
+
+                    let applyName () =
+                        if not (String.IsNullOrWhiteSpace nameBox.Text) then
+                            control <- Some(ControlFile.renameSymbol c memCursor (nameBox.Text.Trim()))
+                            refreshControlLists ()
+                            refreshDisasm ()
+                            rebuildCommentPane true
+                        elif named.IsSome then
+                            // empty text removes the name
+                            control <- Some(ControlFile.renameSymbol c memCursor "")
+                            refreshControlLists ()
+                            refreshDisasm ()
+                            rebuildCommentPane true
+
+                    let nameBtn =
+                        Button(Content = btnText, MinWidth = 80.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
+
+                    nameBtn.Click.Add(fun _ -> applyName ())
+
+                    nameBox.KeyDown.Add(fun e ->
+                        if e.Key = Key.Enter then
+                            e.Handled <- true
+                            applyName ())
+
+                    nameRow.Children.Add nameBox |> ignore
+                    nameRow.Children.Add nameBtn |> ignore
+                    cmtPaneRows.Children.Add nameRow |> ignore
+
+                    // Comment rows are read-only one-liners: clicking a line comment
+                    // loads it into the single editor below (whose button turns into
+                    // "update comment"), so rows never carry text boxes and the pane
+                    // height stays bounded.
+                    let mkRow (label: string) (labelColor: Brush) (text: string) (original: ControlComment option) =
+                        let row =
+                            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
+
+                        let tag =
                             TextBlock(
-                                Text = sprintf "name: %s  ($%04X)" kindText memCursor,
-                                Foreground = dim,
+                                Text = label,
+                                Foreground = labelColor,
                                 FontSize = 11.0,
-                                Margin = Thickness(0.0, 0.0, 0.0, 3.0)
+                                VerticalAlignment = VerticalAlignment.Center,
+                                MinWidth = 150.0
                             )
+
+                        row.Children.Add tag |> ignore
+
+                        let body =
+                            TextBlock(
+                                Text = text,
+                                Foreground = normal,
+                                FontSize = 11.0,
+                                VerticalAlignment = VerticalAlignment.Center
+                            )
+
+                        row.Children.Add body |> ignore
+
+                        match original with
+                        | Some m ->
+                            row.Cursor <- Cursors.Hand
+
+                            row.MouseLeftButtonDown.Add(fun _ ->
+                                Seq.cast<Panel> cmtPaneRows.Children
+                                |> Seq.iter (fun el -> el.Background <- null)
+
+                                row.Background <- hiBgBrush
+                                editingComment <- Some m
+                                cmtPaneAddBox.Text <- m.Text
+                                cmtPaneAddBtn.Content <- "update comment")
+
+                            let del =
+                                Button(Content = "del", Width = 38.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
+
+                            del.Click.Add(fun _ ->
+                                if editingComment = Some m then
+                                    editingComment <- None
+                                    cmtPaneAddBox.Text <- ""
+                                    cmtPaneAddBtn.Content <- "add line comment"
+
+                                control <- Some(ControlFile.removeComment c m)
+                                refreshDisasm ()
+                                rebuildCommentPane true)
+
+                            row.Children.Add del |> ignore
+                        | None -> ()
+
+                        cmtPaneRows.Children.Add row |> ignore
+
+                    let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = memCursor)
+
+                    let covering kind =
+                        c.Comments
+                        |> List.filter (fun m -> m.Kind = kind && m.Addr <= memCursor && memCursor < m.EndExcl)
+                        |> List.sortBy (fun m -> m.EndExcl - m.Addr)
+
+                    if
+                        List.isEmpty lines
+                        && List.isEmpty (covering Range)
+                        && List.isEmpty (covering Name)
+                    then
+                        cmtPaneRows.Children.Add(
+                            TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)
                         )
                         |> ignore
 
-                        let nameRow =
-                            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 8.0))
+                    for m in lines do
+                        mkRow "line" normal m.Text (Some m)
 
-                        let nameBox = TextBox(Text = boxText, Width = 190.0, FontFamily = mono, FontSize = 11.5)
+                    for m in covering Range do
+                        mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
 
-                        let applyName () =
-                            if not (String.IsNullOrWhiteSpace nameBox.Text) then
-                                control <- Some(ControlFile.renameSymbol c memCursor (nameBox.Text.Trim()))
-                                refreshControlLists ()
-                                refreshDisasm ()
-                                rebuildCommentPane true
-                            elif named.IsSome then
-                                // empty text removes the name
-                                control <- Some(ControlFile.renameSymbol c memCursor "")
-                                refreshControlLists ()
-                                refreshDisasm ()
-                                rebuildCommentPane true
-
-                        let nameBtn = Button(Content = btnText, MinWidth = 80.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
-                        nameBtn.Click.Add(fun _ -> applyName ())
-
-                        nameBox.KeyDown.Add(fun e ->
-                            if e.Key = Key.Enter then
-                                e.Handled <- true
-                                applyName ())
-
-                        nameRow.Children.Add nameBox |> ignore
-                        nameRow.Children.Add nameBtn |> ignore
-                        cmtPaneRows.Children.Add nameRow |> ignore
-
-                        // Comment rows are read-only one-liners: clicking a line comment
-                        // loads it into the single editor below (whose button turns into
-                        // "update comment"), so rows never carry text boxes and the pane
-                        // height stays bounded.
-                        let mkRow (label: string) (labelColor: Brush) (text: string) (original: ControlComment option) =
-                            let row =
-                                StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 1.0, 0.0, 1.0))
-
-                            let tag =
-                                TextBlock(
-                                    Text = label,
-                                    Foreground = labelColor,
-                                    FontSize = 11.0,
-                                    VerticalAlignment = VerticalAlignment.Center,
-                                    MinWidth = 150.0
-                                )
-
-                            row.Children.Add tag |> ignore
-
-                            let body =
-                                TextBlock(
-                                    Text = text,
-                                    Foreground = normal,
-                                    FontSize = 11.0,
-                                    VerticalAlignment = VerticalAlignment.Center
-                                )
-
-                            row.Children.Add body |> ignore
-
-                            match original with
-                            | Some m ->
-                                row.Cursor <- Cursors.Hand
-
-                                row.MouseLeftButtonDown.Add(fun _ ->
-                                    Seq.cast<Panel> cmtPaneRows.Children
-                                    |> Seq.iter (fun el -> el.Background <- null)
-
-                                    row.Background <- hiBgBrush
-                                    editingComment <- Some m
-                                    cmtPaneAddBox.Text <- m.Text
-                                    cmtPaneAddBtn.Content <- "update comment")
-
-                                let del =
-                                    Button(Content = "del", Width = 38.0, Margin = Thickness(6.0, 0.0, 0.0, 0.0))
-
-                                del.Click.Add(fun _ ->
-                                    if editingComment = Some m then
-                                        editingComment <- None
-                                        cmtPaneAddBox.Text <- ""
-                                        cmtPaneAddBtn.Content <- "add line comment"
-
-                                    control <- Some(ControlFile.removeComment c m)
-                                    refreshDisasm ()
-                                    rebuildCommentPane true)
-
-                                row.Children.Add del |> ignore
-                            | None -> ()
-
-                            cmtPaneRows.Children.Add row |> ignore
-
-                        let lines = c.Comments |> List.filter (fun m -> m.Kind = Line && m.Addr = memCursor)
-
-                        let covering kind =
-                            c.Comments
-                            |> List.filter (fun m -> m.Kind = kind && m.Addr <= memCursor && memCursor < m.EndExcl)
-                            |> List.sortBy (fun m -> m.EndExcl - m.Addr)
-
-                        if
-                            List.isEmpty lines
-                            && List.isEmpty (covering Range)
-                            && List.isEmpty (covering Name)
-                        then
-                            cmtPaneRows.Children.Add(
-                                TextBlock(Text = "none - add one below", Foreground = dim, FontSize = 11.0)
-                            )
-                            |> ignore
-
-                        for m in lines do
-                            mkRow "line" normal m.Text (Some m)
-
-                        for m in covering Range do
-                            mkRow (sprintf "[block range %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
-
-                        for m in covering Name do
-                            mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
+                    for m in covering Name do
+                        mkRow (sprintf "[block name %04X-%04X]" m.Addr m.EndExcl) cyan m.Text None
 
         let commitComment () =
             match control with
@@ -4079,7 +4222,16 @@ type MainWindow() as self =
         // Stepping toolbar over the code pane: moves the trace cursor (F10/F11
         // keys mirror the buttons; execution mode only). Memory mode has no
         // trace cursor, so the buttons no-op there for now.
-        let stepBackBtn =
+        let breakBtn =
+            Button(
+                Content = "Break",
+                Width = 64.0,
+                ToolTip = "break into the debugger: pause the emulator where it stands (same as Pause)"
+            )
+
+        breakBtn.IsEnabled <- false
+
+        let traceStepBackBtn =
             Button(
                 Content = "Step back",
                 Width = 76.0,
@@ -4100,15 +4252,30 @@ type MainWindow() as self =
                 ToolTip = "when the cursor is on a call, advance to its return site; parks the machine there"
             )
 
-        stepBackBtn.Click.Add(fun _ -> stepBack ())
+        breakBtn.Click.Add(fun _ ->
+            pauseGame ()
+
+            // Live play has no trace cursor to keep: the machine's PC is the
+            // truth after a break, so the registers and the code window follow
+            // it. With a trace, break stays on the cursor - the recording is
+            // the working context there.
+            match session with
+            | Some s when s.LiveMode ->
+                presentGame ()
+                showLiveRegs s |> ignore
+                followLivePc "break"
+            | _ -> ())
+
+        traceStepBackBtn.Click.Add(fun _ -> stepBack ())
         stepIntoBtn.Click.Add(fun _ -> stepInto ())
         stepOverBtn.Click.Add(fun _ -> stepOver ())
         let stepRow = StackPanel(Orientation = Orientation.Horizontal)
 
         for b in
-            [ stepIntoBtn :> FrameworkElement
+            [ breakBtn :> FrameworkElement
+              stepIntoBtn :> FrameworkElement
               stepOverBtn :> FrameworkElement
-              stepBackBtn :> FrameworkElement ] do
+              traceStepBackBtn :> FrameworkElement ] do
             b.Margin <- Thickness(2.0)
             stepRow.Children.Add b |> ignore
         // jump helpers (handlers wired later - they need focusCodeView)
@@ -4173,7 +4340,7 @@ type MainWindow() as self =
             GridSplitter(
                 Height = 4.0,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = SolidColorBrush(Color.FromRgb(0x22uy, 0x26uy, 0x30uy)),
+                Background = Theme.hiBg,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext
             )
 
@@ -4699,14 +4866,14 @@ type MainWindow() as self =
         let saveTimelineBtn =
             Button(
                 Content = "Save timeline",
-                ToolTip = "save the per-frame state timeline + keys to games/<id>/timeline.jst"
+                ToolTip = "save the per-frame state timeline + keys to the active slot file"
             )
 
         let clearTimelineBtn =
             Button(
                 Content = "Clear timeline",
                 ToolTip =
-                    "delete the recorded gameplay: wipes the states and key script in memory and deletes timeline.jst from the game folder (the project is untouched)"
+                    "delete the active slot: wipes the states and key script in memory and deletes its file from the game folder (the project is untouched)"
             )
 
         let loadBtn = Button(Content = "Load trace")
@@ -4807,11 +4974,11 @@ type MainWindow() as self =
                 match currentGame with
                 | Some game ->
                     try
-                        File.Delete(timelinePath game)
+                        File.Delete(slotPath game currentSlot)
                     with _ ->
                         ()
 
-                    statusText.Text <- sprintf "%s: recording cleared" game.Name
+                    statusText.Text <- sprintf "%s: slot '%s' cleared" game.Name currentSlot
                 | None -> ()
 
                 syncSlider ()
@@ -4871,19 +5038,16 @@ type MainWindow() as self =
                 statusText.Text <- sprintf "replaying keys until frame %d" s.ReplayEndFrame
             | None -> ())
 
-        recordToggle.Checked.Add(fun _ ->
-            match session with
-            | Some s -> s.Recorder.RecordEnabled <- true
-            | None -> ())
-
-        recordToggle.Unchecked.Add(fun _ ->
-            match session with
-            | Some s -> s.Recorder.RecordEnabled <- false
-            | None -> ())
 
         recordToggle.ToolTip <- "record every executed instruction into the ring buffer"
         recordToggle.Foreground <- normal
         recordToggle.VerticalAlignment <- VerticalAlignment.Center
+
+        /// Day/night switch from inside the emulator: shared coordinator plus
+        /// the comment-pane rebuild the menu path has no use for.
+        let setTheme (m: Theme.Mode) =
+            applyTheme m
+            rebuildCommentPane true
 
         let soundToggle = CheckBox(Content = "Mute", IsChecked = Nullable<bool>(true))
         soundToggle.ToolTip <- "beeper audio is muted by default; uncheck for low-volume audio"
@@ -5153,6 +5317,129 @@ type MainWindow() as self =
             | :? string as s -> cinemaSpeed <- Int32.Parse s
             | _ -> ())
 
+        // Recording slots: switch timelines, start live play, or arm a fresh
+        // recording. Switching reboots warm into the choice (entry cache, no
+        // oracle wait) and reuses the boot-completion path.
+        let liveChoice = "▶ Live play"
+        let recordChoice = "● Record new…"
+
+        let slotCombo =
+            ComboBox(
+                Width = 150.0,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "recording slot: switch timelines, play live, or record new"
+            )
+
+        let mutable syncingSlots = false
+
+        let refreshSlotCombo () =
+            syncingSlots <- true
+
+            try
+                slotCombo.Items.Clear()
+
+                match currentGame with
+                | Some game ->
+                    for s in TimelineSlots.list game.GameDirectory do
+                        slotCombo.Items.Add s.Name |> ignore
+                | None -> ()
+
+                slotCombo.Items.Add liveChoice |> ignore
+                slotCombo.Items.Add recordChoice |> ignore
+
+                let current =
+                    match session with
+                    | Some s when s.LiveMode -> liveChoice
+                    | _ -> if currentSlot = "" then liveChoice else currentSlot
+
+                slotCombo.SelectedItem <- current
+            finally
+                syncingSlots <- false
+
+        let switchChoice (text: string) =
+            match currentGame with
+            | None -> ()
+            | Some game ->
+                pauseGame ()
+                saveTimeline false
+
+                let preset =
+                    if text = liveChoice then
+                        LiveFresh
+                    elif text = recordChoice then
+                        RecordFresh(TimelineSlots.suggestName ())
+                    else
+                        AutoplaySlot text
+
+                match bootTask with
+                | Some _ ->
+                    // Boot already in flight: queue the choice onto it instead of
+                    // starting a second boot that would race the first.
+                    pendingStart <- Some preset
+                    statusText.Text <- "boot in flight - choice applies on arrival"
+                | None -> launchGame (game, Some preset)
+
+        slotCombo.SelectionChanged.Add(fun _ ->
+            if not syncingSlots then
+                match slotCombo.SelectedItem with
+                | :? string as text ->
+                    let alreadyThere =
+                        match session with
+                        | Some s when s.LiveMode -> text = liveChoice
+                        | _ -> text <> liveChoice && text = currentSlot
+
+                    if not alreadyThere then
+                        switchChoice text
+                | _ -> ())
+
+        /// Live play has no trace: execution view, trace stepping, replay and
+        /// seeking have nothing to work on. Memory/graph views, live stepping
+        /// (into), scan and comments keep working.
+        let applyLiveGating () =
+            let live =
+                match session with
+                | Some s -> s.LiveMode
+                | None -> false
+
+            execModeBtn.IsEnabled <- not live
+            stepOverBtn.IsEnabled <- not live
+            traceStepBackBtn.IsEnabled <- not live
+            stepBackBtn.IsEnabled <- not live
+            b100.IsEnabled <- not live
+            b10.IsEnabled <- not live
+            b1.IsEnabled <- not live
+            f1.IsEnabled <- not live
+            f10.IsEnabled <- not live
+            f100.IsEnabled <- not live
+            playBtn.IsEnabled <- not live
+            rewindSlider.IsEnabled <- not live
+            replayBtn.IsEnabled <- not live
+            goBtn.IsEnabled <- not live
+            recordToggle.IsEnabled <- true
+
+            if live && not disasmModeMemory && not disasmModeGraph then
+                memModeBtn.IsChecked <- Nullable<bool>(true)
+
+        recordToggle.Checked.Add(fun _ ->
+            match session with
+            | Some s when s.LiveMode ->
+                // Leaving live play: reseed the timeline at the live frame and
+                // capture from here (the skipped frames cannot join any chain).
+                s.ArmRecording()
+                currentSlot <- TimelineSlots.suggestName ()
+                applyLiveGating ()
+                refreshSlotCombo ()
+                refreshAll ()
+                rebuildCommentPane true
+                statusText.Text <- sprintf "recording armed from live play into slot '%s'" currentSlot
+            | Some s -> s.Recorder.RecordEnabled <- true
+            | None -> ())
+
+        recordToggle.Unchecked.Add(fun _ ->
+            match session with
+            | Some s -> s.Recorder.RecordEnabled <- false
+            | None -> ())
+
         // game selection + manual boot + script export
         // CE registry moved to GameImages.register (the launcher needs it
         // before this window is constructed).
@@ -5218,6 +5505,7 @@ type MainWindow() as self =
                 // instead of installing the old game's window.
                 flameGeneration <- flameGeneration + 1
                 flameBuilding <- false
+                flameCtrl.Clear() // the old game's window must not show through the boot
                 cursor <- 0 // the old cursor indexed the previous game's trace
                 execViewCenter <- 0
                 execViewHold <- false
@@ -5251,7 +5539,7 @@ type MainWindow() as self =
                 scanCountLabel.Text <- ""
                 engineCombo.IsEnabled <- hasCE g
                 saveControlNow () // persist the PREVIOUS project's dirty labels/comments first
-                launchGame g
+                launchGame (g, None)
                 loadControlForGame ()
                 refreshControlLists () // names/mass lists must not keep the previous game's rows
             | _ -> ())
@@ -5266,7 +5554,7 @@ type MainWindow() as self =
 
                 match currentGame with
                 | Some g ->
-                    launchGame g
+                    launchGame (g, None)
                     loadControlForGame ()
                 | None -> ()
             | None -> statusText.Text <- "no manual boot running (the game has a cached entry or boots automatically)")
@@ -5347,7 +5635,8 @@ type MainWindow() as self =
               saveBtn :> FrameworkElement
               saveTimelineBtn :> FrameworkElement
               clearTimelineBtn :> FrameworkElement
-              loadBtn :> FrameworkElement ] do
+              loadBtn :> FrameworkElement
+              slotCombo :> FrameworkElement ] do
             c.Margin <- Thickness(4.0, 0.0, 4.0, 0.0)
             toolbar.Children.Add c |> ignore
 
@@ -5436,8 +5725,7 @@ type MainWindow() as self =
             GridSplitter(
                 Width = 4.0,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = SolidColorBrush(Color.FromRgb(0x22uy, 0x26uy, 0x30uy)),
+                Background = Theme.hiBg,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext
             )
 
@@ -5463,7 +5751,7 @@ type MainWindow() as self =
                 Width = 4.0,
                 VerticalAlignment = VerticalAlignment.Stretch,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = SolidColorBrush(Color.FromRgb(0x22uy, 0x26uy, 0x30uy)),
+                Background = Theme.hiBg,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext
             )
 
@@ -5481,12 +5769,9 @@ type MainWindow() as self =
         // Just-the-Game / Cheat phases: the emulator machinery is built
         // (timers, wiring, boot) but stays invisible - only the chosen
         // bare view shows.
-        if launchPhase = "game" then
-            self.ShowGameOnly()
-        elif launchPhase = "cheat" then
-            self.ShowCheatEngine()
-        else
-            self.Content <- root
+        if launchPhase = "game" then self.ShowGameOnly()
+        elif launchPhase = "cheat" then self.ShowCheatEngine()
+        else self.Content <- root
 
         // ---- control GUI wiring ------------------------------------------------
         // Preview = replay the selection as a movie lasting exactly one second
@@ -5713,8 +5998,7 @@ type MainWindow() as self =
                 statusText.Text <- msg
 
             match control with
-            | None ->
-                addRow "no control file loaded - use 'New ctrl' or 'Import ctrl...' first" dim -1 []
+            | None -> addRow "no control file loaded - use 'New ctrl' or 'Import ctrl...' first" dim -1 []
             | Some c ->
                 // named function entry points (feed the flame graph labels);
                 // right-click deletes the symbol
@@ -5736,11 +6020,7 @@ type MainWindow() as self =
                         | Data -> "data"
                         | Gap -> "gap"
 
-                    addRow
-                        (sprintf "block    %04X..%04X  %s  (%s)" b.Start b.EndExcl b.Name kind)
-                        cyan
-                        b.Start
-                        []
+                    addRow (sprintf "block    %04X..%04X  %s  (%s)" b.Start b.EndExcl b.Name kind) cyan b.Start []
 
                 // every comment in the file; right-click deletes it
                 for m in c.Comments do
@@ -5828,6 +6108,7 @@ type MainWindow() as self =
         // here also fires the refresh above, populating the list at startup.
         right.Items.Insert(0, namesTab)
         right.SelectedIndex <- 0
+
         right.SelectionChanged.Add(fun e ->
             if Object.ReferenceEquals(e.OriginalSource, right) && right.SelectedItem = namesTab then
                 refreshNamesList ())
@@ -6169,18 +6450,18 @@ type MainWindow() as self =
             match session with
             | None ->
                 statusText.Text <-
-                    sprintf
-                        "flame click: %s - but there is no live session (CE engine active), nothing to seek"
-                        reason
+                    sprintf "flame click: %s - but there is no live session (CE engine active), nothing to seek" reason
             | Some s ->
                 let target = max 0 (min frame s.TimelineExtent)
 
                 let clampNote =
-                    if frame > s.TimelineExtent then " - beyond the recording, clamped" else ""
+                    if frame > s.TimelineExtent then
+                        " - beyond the recording, clamped"
+                    else
+                        ""
 
                 if target = s.Frame && not running && not replaying then
-                    statusText.Text <-
-                        sprintf "flame click: %s - already parked at frame %d%s" reason target clampNote
+                    statusText.Text <- sprintf "flame click: %s - already parked at frame %d%s" reason target clampNote
                 else
                     statusText.Text <- sprintf "flame click: %s - frame seek to %d%s" reason target clampNote
                     scrubToFrame (int64 frame)
@@ -6382,9 +6663,54 @@ type MainWindow() as self =
             | None -> statusText.Text <- "no control file loaded")
 
         newCtrlBtn.Click.Add(fun _ ->
-            control <- Some(ControlFile.empty 0x4000 0x10000)
+            // Prefer a generated map: the live machine's memory, else the
+            // game's cached entry snapshot; the bare skeleton only when no
+            // snapshot is reachable. Dirty so "Save ctrl" persists it.
+            let generated =
+                match session with
+                | Some s ->
+                    let start, endExcl = CtlGen.ramSpan s.Memory
+                    let entryPc = (int (s.Regs.Pc())) &&& 0xFFFF
+
+                    Some(
+                        CtlGen.toControlFile
+                            (CtlGen.analyze s.Memory start endExcl CtlGen.defaultConfig)
+                            entryPc
+                            start
+                            endExcl
+                    )
+                | None ->
+                    match currentGame with
+                    | Some game ->
+                        match EntryCache.tryLoad game.Rom game.Tzx with
+                        | Some(mem, _state) ->
+                            let start, endExcl = CtlGen.ramSpan mem
+
+                            Some(
+                                CtlGen.toControlFile
+                                    (CtlGen.analyze mem start endExcl CtlGen.defaultConfig)
+                                    0
+                                    start
+                                    endExcl
+                            )
+                        | None -> None
+                    | None -> None
+
+            match generated with
+            | Some cf ->
+                control <- Some { cf with Dirty = true }
+                statusText.Text <- sprintf "control map generated: %d blocks - Save ctrl writes it" cf.Blocks.Length
+            | None ->
+                control <-
+                    Some
+                        { ControlFile.empty 0x4000 0x10000 with
+                            Dirty = true }
+
+                statusText.Text <- "empty control file created over $4000-$FFFF (no snapshot available)"
+
             controlGameDir <- controlDir ()
-            statusText.Text <- sprintf "empty control file created over $4000-$FFFF")
+            syncMapData ()
+            refreshControlLists ())
 
         // engine radios reuse switchEngine for oracle/CE; differential runs a
         // short lockstep validation and reports in statusText.
@@ -7092,6 +7418,252 @@ type MainWindow() as self =
                         (if mb.TapePlaying then "playing" else "stopped")
             | None -> ())
 
+        /// Entry picker: 2+ recording slots -> modal choice of slot, fresh
+        /// recording, or live play. Dismissal (X) falls back to the newest.
+        let showStartPicker (game: GameManifest) (slots: TimelineSlots.SlotInfo list) : SessionStart =
+            let choice = ref (defaultChoice slots)
+
+            let win =
+                Window(
+                    Title = sprintf "Choose trace - %s" game.Name,
+                    Width = 560.0,
+                    Height = 440.0,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = self,
+                    Background = bg
+                )
+
+            let body = StackPanel(Margin = Thickness(12.0))
+
+            body.Children.Add(
+                TextBlock(
+                    Text = "Play a recording, record a new one, or play live.",
+                    Foreground = dim,
+                    FontSize = 12.0,
+                    Margin = Thickness(0.0, 0.0, 0.0, 8.0)
+                )
+            )
+            |> ignore
+
+            let list =
+                ListBox(
+                    Background = panel,
+                    BorderThickness = Thickness(0.0),
+                    FontFamily = mono,
+                    FontSize = 12.0,
+                    MinHeight = 200.0
+                )
+
+            for s in slots do
+                let frames =
+                    match s.Frames with
+                    | Some f -> sprintf "%d frames" f
+                    | None -> "unreadable"
+
+                let item =
+                    ListBoxItem(
+                        Content =
+                            TextBlock(
+                                Text =
+                                    sprintf
+                                        "%-24s %12s %8.1f MB  %s"
+                                        s.Name
+                                        frames
+                                        (float s.Bytes / (1024.0 * 1024.0))
+                                        (s.Modified.ToLocalTime().ToString("yyyy-MM-dd HH:mm")),
+                                Foreground = normal,
+                                FontFamily = mono,
+                                FontSize = 12.0,
+                                Margin = Thickness(6.0, 2.0, 6.0, 2.0)
+                            ),
+                        Tag = box s.Name
+                    )
+
+                list.Items.Add item |> ignore
+
+            if list.Items.Count > 0 then
+                list.SelectedIndex <- 0
+
+            let playSelected () =
+                match list.SelectedItem with
+                | :? ListBoxItem as it ->
+                    match it.Tag with
+                    | :? string as name -> choice := AutoplaySlot name
+                    | _ -> ()
+                | _ -> ()
+
+                win.Close()
+
+            list.MouseDoubleClick.Add(fun _ -> playSelected ())
+            body.Children.Add list |> ignore
+
+            let row =
+                StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 10.0, 0.0, 0.0))
+
+            let playBtn =
+                Button(Content = "Play", Width = 110.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
+
+            let newBtn =
+                Button(Content = "Record new", Width = 110.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
+
+            let liveBtn = Button(Content = "Live play", Width = 110.0)
+            playBtn.Click.Add(fun _ -> playSelected ())
+
+            newBtn.Click.Add(fun _ ->
+                choice := RecordFresh(TimelineSlots.suggestName ())
+                win.Close())
+
+            liveBtn.Click.Add(fun _ ->
+                choice := LiveFresh
+                win.Close())
+
+            row.Children.Add playBtn |> ignore
+            row.Children.Add newBtn |> ignore
+            row.Children.Add liveBtn |> ignore
+            body.Children.Add row |> ignore
+            win.Content <- body
+            win.ShowDialog() |> ignore
+            !choice
+
+        let finishInstall () =
+            applyLiveGating ()
+            refreshSlotCombo ()
+            rebuildCommentPane true
+
+        /// 2+ slots and no preset: pause, ask once, install the answer. False
+        /// when there is nothing to ask (0-1 slots keep the default path).
+        let maybePickStart (game: GameManifest) : bool =
+            match session with
+            | None -> false
+            | Some s ->
+                let slots = TimelineSlots.list game.GameDirectory
+
+                if slots.Length < 2 then
+                    false
+                else
+                    pauseGame ()
+                    let choice = showStartPicker game slots
+                    installSession game s choice
+                    finishInstall ()
+                    true
+
+        /// First boot of a project without a control.json: run the static
+        /// analyzer (CtlGen) over the game-entry snapshot and persist a
+        /// default block map. Every boot completion converges here (presets,
+        /// legacy single-slot, parked-in-menu; a manual boot reaches it once
+        /// "Set as game entry" has relaunched warm), so a new project picks
+        /// up a code/data/text map without hand-drawing blocks first. An
+        /// in-memory import is never stomped: generation runs only while no
+        /// file exists on disk AND the loaded control is still the pristine
+        /// empty stub.
+        let maybeGenerateDefaultControl (game: GameManifest) (s: TraceSession) =
+            if not (File.Exists(Path.Combine(game.GameDirectory, "control.json"))) then
+                let pristine =
+                    match control with
+                    | Some c -> c.Comments.IsEmpty && c.Symbols.IsEmpty && c.Blocks.Length <= 1
+                    | None -> true
+
+                if pristine then
+                    try
+                        let start, endExcl = CtlGen.ramSpan s.Memory
+                        let entryPc = (int (s.Regs.Pc())) &&& 0xFFFF
+
+                        let generated =
+                            CtlGen.toControlFile
+                                (CtlGen.analyze s.Memory start endExcl CtlGen.defaultConfig)
+                                entryPc
+                                start
+                                endExcl
+
+                        control <- Some(ControlFile.save game.GameDirectory generated)
+                        controlGameDir <- game.GameDirectory
+
+                        let count kind =
+                            generated.Blocks |> List.filter (fun b -> b.Kind = kind) |> List.length
+
+                        statusText.Text <-
+                            sprintf
+                                "control file created: %d blocks (%d code / %d data / %d gap)"
+                                generated.Blocks.Length
+                                (count Code)
+                                (count Data)
+                                (count Gap)
+
+                        syncMapData ()
+                        refreshControlLists ()
+                    with ex ->
+                        statusText.Text <- sprintf "control file generation failed: %s" ex.Message
+
+        /// A finished boot replaces whatever session is installed: the queued
+        /// preset installs, or (2+ slots, no preset) the picker runs once, or
+        /// the legacy single-slot autoplay takes over. Shared by both uiTimer
+        /// branches - a slot switch / live play / record-new choice arrives
+        /// while an old session is up, and the finished boot must land there
+        /// too (consuming it only when no session existed kept the old machine
+        /// alive and silently dropped the choice).
+        let consumeFinishedBoot (t: System.Threading.Tasks.Task<TraceSession>) =
+            try
+                let loadedSession = t.Result
+                bootTask <- None
+                session <- Some loadedSession
+                flameTrace <- None
+                flameCache.Clear()
+                // Drop the previous session's flame window and cancel its build:
+                // the paths that do not run installSession (parked-in-menu,
+                // legacy single-slot autoplay) must not keep it on screen.
+                flameGeneration <- flameGeneration + 1
+                flameBuilding <- false
+                flameCtrl.Clear()
+
+                match currentGame with
+                | Some game when game.GameId = bootGameId ->
+                    maybeGenerateDefaultControl game loadedSession
+
+                    if menuOpen then
+                        // The picker is on screen: install the session parked.
+                        // A queued picker (2+ slots, no preset) waits for
+                        // re-entry; a preset installs on the next tick.
+                        replaying <- false
+
+                        if pendingStart.IsNone && TimelineSlots.list game.GameDirectory |> List.length >= 2 then
+                            pickQueued <- true
+
+                        statusText.Text <- sprintf "%s: boot finished (parked in main menu)" game.Name
+                    else
+                        match pendingStart with
+                        | Some st ->
+                            pendingStart <- None
+                            installSession game loadedSession st
+                            finishInstall ()
+                        | None ->
+                            if not (maybePickStart game) then
+                                // Single slot or nothing recorded: legacy path.
+                                let hasTimeline = loadTimeline game loadedSession
+
+                                if hasTimeline then
+                                    replayExtent <- max 1 loadedSession.TimelineExtent
+                                    loadedSession.StartReplay()
+                                    replaying <- true
+                                else
+                                    replaying <- false
+
+                                startGame ()
+
+                                if hasTimeline then
+                                    statusText.Text <-
+                                        sprintf
+                                            "%s: timeline loaded (%d frames) - autoplay, seek anywhere"
+                                            game.Name
+                                            loadedSession.StateTimeline.Count
+
+                                finishInstall ()
+                | _ ->
+                    pendingStart <- None // stale choice must not leak into an unrelated boot
+                    replaying <- false
+                    startGame ()
+            with ex ->
+                statusText.Text <- "boot failed: " + ex.Message
+
         uiTimer.Tick.Add(fun _ ->
             match session with
             | None ->
@@ -7107,52 +7679,7 @@ type MainWindow() as self =
                         sprintf "CE engine: frame=%d tick=%.2fM" c.Frame (float c.CycleCount / 1_000_000.0)
                 | None ->
                     match bootTask with
-                    | Some t when t.IsCompleted ->
-                        try
-                            let loadedSession = t.Result
-                            bootTask <- None
-                            session <- Some loadedSession
-                            flameTrace <- None
-                            flameCache.Clear()
-
-                            let hasTimeline =
-                                match currentGame with
-                                | Some game when game.GameId = bootGameId -> loadTimeline game loadedSession
-                                | _ -> false
-
-                            if hasTimeline then
-                                // Autoplay with the whole recorded timeline seekable from
-                                // frame 0: states are restored, not re-executed.
-                                replayExtent <- max 1 loadedSession.TimelineExtent
-
-                            if menuOpen then
-                                // The picker is on screen: install the session parked -
-                                // no autoplay until the project is reopened.
-                                replaying <- false
-
-                                statusText.Text <-
-                                    sprintf
-                                        "%s: boot finished (parked in main menu)"
-                                        (match currentGame with
-                                         | Some g -> g.Name
-                                         | None -> "game")
-                            else
-                                if hasTimeline then
-                                    loadedSession.StartReplay()
-                                    replaying <- true
-                                else
-                                    replaying <- false
-
-                                startGame ()
-
-                                if hasTimeline then
-                                    statusText.Text <-
-                                        sprintf
-                                            "%s: timeline loaded (%d frames) - autoplay, seek anywhere"
-                                            currentGame.Value.Name
-                                            loadedSession.StateTimeline.Count
-                        with ex ->
-                            statusText.Text <- "boot failed: " + ex.Message
+                    | Some t when t.IsCompleted -> consumeFinishedBoot t
                     | Some t ->
                         match bootScreen with
                         | Some buf -> gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), buf, 320 * 4, 0)
@@ -7169,6 +7696,31 @@ type MainWindow() as self =
                             sprintf "booting %s to game entry... %ds, tape frame %d" gameName secs bootFrameNo
                     | None -> ()
             | Some s ->
+                // A queued slot switch / live play / record-new choice finishes
+                // its boot HERE: the completed task replaces the installed
+                // session. This tick's updates below still describe the old
+                // machine for one tick; installSession already refreshed the
+                // views for the new one.
+                match bootTask with
+                | Some t when t.IsCompleted -> consumeFinishedBoot t
+                | _ -> ()
+
+                breakBtn.IsEnabled <- running
+
+                // Deferred entry: boot parked while the menu was up. A queued
+                // preset installs within one tick of re-entry; a queued picker
+                // shows once and settles the same way.
+                if not menuOpen && bootTask.IsNone then
+                    match pendingStart, currentGame with
+                    | Some st, Some game ->
+                        pendingStart <- None
+                        installSession game s st
+                        finishInstall ()
+                    | None, Some game when pickQueued ->
+                        pickQueued <- false
+                        ignore (maybePickStart game)
+                    | _ -> ()
+
                 if not rewinding then
                     rewindSlider.Maximum <- float (if replaying then replayExtent else max 0 s.TimelineExtent)
                     rewindSlider.Value <- float s.Frame
@@ -7230,7 +7782,7 @@ type MainWindow() as self =
         statsTimer.Start()
 
         // Launch the manifest-selected default game.
-        launchGame startupGame
+        launchGame (startupGame, None)
         loadControlForGame ()
         refreshControlLists ()
 
@@ -7250,6 +7802,7 @@ type MainWindow() as self =
         presentGame ()
         refreshAll ()
         syncSlider ()
+        setTheme Theme.mode
 
     /// Open (or focus) the cheat-engine window. It shares the machine: the
     /// accessors hand out the live session's own screen buffer and memory,

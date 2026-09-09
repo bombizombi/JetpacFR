@@ -102,8 +102,52 @@ type FlameGraph() as self =
     let viewportChanged = Event<unit>()
     let rectMenu = Event<FlameRect * int * int>() // (rect, frame, entry index)
 
-    let bgBrush = SolidColorBrush(Color.FromRgb(0x0Euy, 0x0Euy, 0x14uy))
-    let borderPen = Pen(SolidColorBrush(Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)), 1.0)
+    // Per-mode canvas chrome. Hue-based flame boxes + amber cursor + tints are
+    // identical in both modes; only the canvas, lines and lane fills change.
+    let chromeBg () =
+        if Theme.isLight () then
+            Color.FromRgb(0xF8uy, 0xFAuy, 0xFCuy)
+        else
+            Color.FromRgb(0x0Euy, 0x0Euy, 0x14uy)
+
+    let chromeBorder () =
+        if Theme.isLight () then
+            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
+        else
+            Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
+
+    let chromePlay () =
+        if Theme.isLight () then
+            Color.FromRgb(0x0Fuy, 0x17uy, 0x2Auy)
+        else
+            Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
+
+    let chromeLane () =
+        if Theme.isLight () then
+            Color.FromRgb(0xEEuy, 0xF2uy, 0xF7uy)
+        else
+            Color.FromRgb(0x26uy, 0x2Auy, 0x34uy)
+
+    let chromeLanePen () =
+        if Theme.isLight () then
+            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
+        else
+            Color.FromRgb(0x4Auy, 0x50uy, 0x60uy)
+
+    let chromeLaneEdge () =
+        if Theme.isLight () then
+            Color.FromArgb(0xB0uy, 0x0Fuy, 0x17uy, 0x2Auy)
+        else
+            Color.FromArgb(0xB0uy, 0xE8uy, 0xE8uy, 0xE8uy)
+
+    let chromeMixed () =
+        if Theme.isLight () then
+            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
+        else
+            Color.FromRgb(0x3Auy, 0x3Euy, 0x4Auy)
+
+    let bgBrush = SolidColorBrush(chromeBg ())
+    let borderPen = Pen(SolidColorBrush(chromeBorder ()), 1.0)
 
     let gridPen =
         Pen(SolidColorBrush(Color.FromArgb(0x40uy, 0x80uy, 0x80uy, 0x90uy)), 1.0)
@@ -111,13 +155,14 @@ type FlameGraph() as self =
     let framePen =
         Pen(SolidColorBrush(Color.FromArgb(0x55uy, 0x40uy, 0xC4uy, 0xFFuy)), 1.0)
 
-    let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
+    let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
     /// Execution-view cursor: dashed amber so it reads apart from the solid
-    /// white frame playhead.
+    /// frame playhead.
     let cursorBrush = SolidColorBrush(Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy))
     let cursorPen = Pen(cursorBrush, 1.5)
     do cursorPen.DashStyle <- DashStyles.Dash
-    let labelFg = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
+    // Shared Theme instance: label text follows the day/night switch untouched.
+    let labelFg = Theme.dim
 
     let typeface =
         Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal)
@@ -128,11 +173,10 @@ type FlameGraph() as self =
     let skyTint = SolidColorBrush(Color.FromArgb(0x1Euy, 0x38uy, 0xBDuy, 0xF8uy))
     let amberTint = SolidColorBrush(Color.FromArgb(0x1Euy, 0xFBuy, 0xBFuy, 0x24uy))
     // Mass-comment lanes: deliberately muted next to the code boxes.
-    let laneBrush = SolidColorBrush(Color.FromRgb(0x26uy, 0x2Auy, 0x34uy))
-    let lanePen = Pen(SolidColorBrush(Color.FromRgb(0x4Auy, 0x50uy, 0x60uy)), 1.0)
+    let laneBrush = SolidColorBrush(chromeLane ())
+    let lanePen = Pen(SolidColorBrush(chromeLanePen ()), 1.0)
 
-    let laneEdgePen =
-        Pen(SolidColorBrush(Color.FromArgb(0xB0uy, 0xE8uy, 0xE8uy, 0xE8uy)), 2.0)
+    let laneEdgePen = Pen(SolidColorBrush(chromeLaneEdge ()), 2.0)
 
     /// Warm flame palette: hue hashed per entry address so a function keeps
     /// its color across the whole view. Mid luminance keeps black text legible.
@@ -151,11 +195,8 @@ type FlameGraph() as self =
             brushMemo[entry] <- brush
             brush
 
-    /// Gray for LOD cells no single function dominates, and coverage-blended
-    /// brushes: the dominant function's color pulled toward the background as
-    /// its share of the cell drops (bucket 3 = >= 75% = full color).
-    let mixedBrush =
-        let b = SolidColorBrush(Color.FromRgb(0x3Auy, 0x3Euy, 0x4Auy))
+    let mutable mixedBrush: Brush =
+        let b = SolidColorBrush(chromeMixed ())
         b.Freeze()
         b :> Brush
 
@@ -173,7 +214,7 @@ type FlameGraph() as self =
             | true, b -> b
             | _ ->
                 let f = funcColor entry
-                let bg = Color.FromRgb(0x0Euy, 0x0Euy, 0x14uy)
+                let bg = chromeBg ()
                 let t = 0.35 + 0.2 * float bucket
 
                 let lerp (a: byte) (b: byte) =
@@ -225,6 +266,23 @@ type FlameGraph() as self =
     [<CLIEvent>]
     member _.RectMenu = rectMenu.Publish
 
+    /// Day/night switch: re-tint the canvas chrome, drop the background-blended
+    /// memo (hue-only boxes survive), repaint. Call after Theme.apply.
+    member this.RefreshTheme() =
+        let setBrush (b: Brush) (c: Color) = (b :?> SolidColorBrush).Color <- c
+        let setPen (p: Pen) (c: Color) = setBrush p.Brush c
+        bgBrush.Color <- chromeBg ()
+        setPen borderPen (chromeBorder ())
+        setPen playPen (chromePlay ())
+        laneBrush.Color <- chromeLane ()
+        setPen lanePen (chromeLanePen ())
+        setPen laneEdgePen (chromeLaneEdge ())
+        let b = SolidColorBrush(chromeMixed ())
+        b.Freeze()
+        mixedBrush <- b :> Brush
+        covMemo.Clear()
+        this.InvalidateVisual()
+
     /// Resolves an entry address into a display name (symbols > blocks > $XXXX).
     member _.LabelFor
         with get () = labelFor
@@ -244,6 +302,17 @@ type FlameGraph() as self =
         cursorTick <- -1L // the old window's tick is meaningless in the new one
         lod <- None
         this.ZoomToFit()
+
+    /// Drop the installed window: the canvas falls back to the empty hint.
+    /// Session switches call this - a live play session has no trace at all,
+    /// and a new recording's window arrives via SetWindow once its build lands.
+    member this.Clear() =
+        window <- None
+        lod <- None
+        firstDepth <- 0
+        cursorTick <- -1L
+        playheadFrame <- -1
+        this.InvalidateVisual()
 
     member this.PlayheadFrame
         with get () = playheadFrame

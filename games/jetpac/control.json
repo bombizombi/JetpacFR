@@ -301,6 +301,14 @@
   ],
   "symbols": [
     {
+      "addr": 28376,
+      "name": "WriteShiftedSpriteToBuff"
+    },
+    {
+      "addr": 28313,
+      "name": "ShiftSprite2Right"
+    },
+    {
       "addr": 29126,
       "name": "clearAttribs"
     },

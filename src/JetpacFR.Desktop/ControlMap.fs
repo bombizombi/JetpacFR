@@ -23,36 +23,29 @@ type ControlMap() as self =
     let menuRequested = Event<int>()
 
     // ---- palette -----------------------------------------------------------
-    let unmappedCol = Color.FromRgb(0x0Auy, 0x0Auy, 0x10uy)
+    // Block-kind hues are identical in both modes except the extremes, which
+    // track the canvas. Text/pen accents are shared Theme instances and
+    // follow the day/night switch untouched.
+    let mutable unmappedCol = Color.FromRgb(0x0Auy, 0x0Auy, 0x10uy)
     let codeCol = Color.FromRgb(0x2Euy, 0x7Duy, 0xD1uy)
     let dataCol = Color.FromRgb(0xC8uy, 0x8Auy, 0x2Euy)
-    let gapCol = Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
-    let mixedCol = Color.FromRgb(0x55uy, 0x51uy, 0x6Buy)
+    let mutable gapCol = Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
+    let mutable mixedCol = Color.FromRgb(0x55uy, 0x51uy, 0x6Buy)
 
-    let heatLut =
-        [| Color.FromRgb(0x08uy, 0x08uy, 0x0Cuy)
-           Color.FromRgb(0x0Auy, 0x1Euy, 0x4Auy)
-           Color.FromRgb(0x0Auy, 0x3Auy, 0x5Euy)
-           Color.FromRgb(0x0Auy, 0x5Cuy, 0x6Auy)
-           Color.FromRgb(0x12uy, 0x86uy, 0x5Euy)
-           Color.FromRgb(0x3Auy, 0xA8uy, 0x3Cuy)
-           Color.FromRgb(0x96uy, 0xB8uy, 0x2Cuy)
-           Color.FromRgb(0xD8uy, 0xA0uy, 0x22uy)
-           Color.FromRgb(0xE8uy, 0x66uy, 0x18uy)
-           Color.FromRgb(0xF0uy, 0x38uy, 0x28uy) |]
+    let heatLut = Theme.heatLut
 
     let selfModPen = Pen(SolidColorBrush(Color.FromRgb(0xF0uy, 0x30uy, 0xF0uy)), 2.0)
-    let commentPen = Pen(SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy)), 2.0)
+    let commentPen = Pen(Theme.green, 2.0)
     let rangeBrush = SolidColorBrush(Color.FromArgb(0x30uy, 0x4Euy, 0xE0uy, 0x60uy))
-    let cursorPen = Pen(SolidColorBrush(Color.FromRgb(0x4Euy, 0xD0uy, 0xE0uy)), 1.0)
+    let cursorPen = Pen(Theme.cyan, 1.0)
 
     let thumbPen =
         Pen(SolidColorBrush(Color.FromArgb(0x80uy, 0xFFuy, 0xFFuy, 0xFFuy)), 1.0)
 
-    let labelFg = SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xECuy))
-    let snipFg = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
-    let cmtFg = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
-    let rulerFg = SolidColorBrush(Color.FromRgb(0x6Auy, 0x6Auy, 0x74uy))
+    let labelFg = Theme.normal
+    let snipFg = Theme.normal
+    let cmtFg = Theme.green
+    let rulerFg = Theme.dim
 
     let typeface =
         Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal)
@@ -132,6 +125,23 @@ type ControlMap() as self =
             if not (obj.ReferenceEquals(controlData, v)) then
                 controlData <- v
                 self.InvalidateVisual()
+
+    /// Day/night switch: re-tint the canvas extremes + overlays, repaint.
+    /// Kind hues and shared Theme pens follow untouched. Call after Theme.apply.
+    member this.RefreshTheme() =
+        if Theme.isLight () then
+            unmappedCol <- Color.FromRgb(0xE6uy, 0xE9uy, 0xF0uy)
+            gapCol <- Color.FromRgb(0xB9uy, 0xC0uy, 0xCCuy)
+            mixedCol <- Color.FromRgb(0xA8uy, 0xA3uy, 0xC8uy)
+            (thumbPen.Brush :?> SolidColorBrush).Color <- Color.FromArgb(0x80uy, 0x0Fuy, 0x17uy, 0x2Auy)
+        else
+            unmappedCol <- Color.FromRgb(0x0Auy, 0x0Auy, 0x10uy)
+            gapCol <- Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
+            mixedCol <- Color.FromRgb(0x55uy, 0x51uy, 0x6Buy)
+            (thumbPen.Brush :?> SolidColorBrush).Color <- Color.FromArgb(0x80uy, 0xFFuy, 0xFFuy, 0xFFuy)
+        let g = Theme.green.Color
+        rangeBrush.Color <- Color.FromArgb(0x30uy, g.R, g.G, g.B)
+        this.InvalidateVisual()
 
     member _.ExecCounts
         with get () = execCounts

@@ -13,6 +13,7 @@
     <Compile Include="Trace.fs" />
     <Compile Include="Flame.fs" />
     <Compile Include="ControlFile.fs" />
+    <Compile Include="CtlGen.fs" />
     <Compile Include="CtrlMapModel.fs" />
     <Compile Include="Miner.fs" />
     <Compile Include="Contract.fs" />

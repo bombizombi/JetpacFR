@@ -164,6 +164,30 @@ Why is the jst file saved on the last run, shouldn't we only save it if there we
 
 
 
+20260909
+
+
+--sent bug I start the program, select first game with a trace recorded, go into the emulator, the trace replay starts.  I take the slider and move it all the way to the end of the trace.  this stops the recorded trace from running.  While I drag the slider to the right, the pc register in the registers pane changes values, and loses the synchronization with the code pane.  
+
+pressing "jump to pc" in the code pane does nothing. (the code pane says "end of executed log" at the bottom, we are still in execution mode).  switching to memory mode, and pressing "jump to pc" puts us at the address the pc register was showing.  now pressing "step into" changes pc value to a new value (looks unrelated to the old value) and code pane stays at the old address. this is the first problem, when doing "step into" if the pc value changes, the code window in memory mode should follow, too.  also, I still do not understand why the pc value changed so much.
+
+
+now, i turn off "rec trace" check box and switch the combo to "live play", and press "run".  the game seems to get running from the same screen picture that was displayed in the screen pane.  now, pressing "break" stops the game running, pc changes to a new value, but code pane does not get updated with this new position, again i have to manually click "jump to pc" to get it to the correct place.
+
+now, when i click "step into", the screen pane totally changes, in what looks like the moment in time when i first moved the slider after the app start, completelly ignoring our fresh live play.  and pc again changes, and loses sync with the code.  and we get thrown into the totally unexpected state in the history.  can you explain this behavior.  the debugger should be debugging the live play, not some stale state from trace replay that was cancelled long time ago.
+
+also, with one step of "step into" now our debugger completelly stops working.  pressing "step into" again has no effect.  so, can you explain those bugs, and fix the issues?
+
+
+
+- static analysis on first load
+- "boot" process needs to be replaced with tap2sna logic, and the emulated tape is pure eye candy in the future
+
+773a pc mem
+
+
+
+
 
 
 

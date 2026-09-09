@@ -77,8 +77,9 @@ type TimelineSelector() as self =
     let scrubbed = Event<int64>()
     let viewportChanged = Event<unit>()
 
-    let sky = Color.FromRgb(0x38uy, 0xBDuy, 0xF8uy)
-    let amber = Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy)
+    // sky/amber accents are identical in both modes; canvas + labels follow it.
+    let sky = Theme.sky
+    let amber = Theme.amber
     let skyBrush = SolidColorBrush(sky)
     let amberBrush = SolidColorBrush(amber)
     let skyPen = Pen(skyBrush, 2.0)
@@ -86,10 +87,20 @@ type TimelineSelector() as self =
     let skyTint = SolidColorBrush(Color.FromArgb(0x26uy, sky.R, sky.G, sky.B))
     let amberTint = SolidColorBrush(Color.FromArgb(0x26uy, amber.R, amber.G, amber.B))
     let chipFg = SolidColorBrush(Color.FromRgb(0x02uy, 0x06uy, 0x17uy))
-    let labelFg = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
+    // Shared Theme instance: labels follow the day/night switch untouched.
+    let labelFg = Theme.dim
     let labelPen = Pen(labelFg, 1.0)
-    let bgBrush = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
-    let borderPen = Pen(SolidColorBrush(Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)), 1.0)
+    let chromeBg () =
+        if Theme.isLight () then Color.FromRgb(0xF8uy, 0xFAuy, 0xFCuy)
+        else Color.FromRgb(0x10uy, 0x10uy, 0x16uy)
+    let chromeBorder () =
+        if Theme.isLight () then Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
+        else Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
+    let chromePlay () =
+        if Theme.isLight () then Color.FromRgb(0x0Fuy, 0x17uy, 0x2Auy)
+        else Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
+    let bgBrush = SolidColorBrush(chromeBg ())
+    let borderPen = Pen(SolidColorBrush(chromeBorder ()), 1.0)
 
     let typeface =
         Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal)
@@ -131,6 +142,12 @@ type TimelineSelector() as self =
 
     [<CLIEvent>]
     member _.ViewportChanged = viewportChanged.Publish
+    /// Day/night switch: re-tint the canvas + border, repaint. Labels are a
+    /// shared Theme brush and follow untouched. Call after Theme.apply.
+    member this.RefreshTheme() =
+        bgBrush.Color <- chromeBg ()
+        (borderPen.Brush :?> SolidColorBrush).Color <- chromeBorder ()
+        this.InvalidateVisual()
 
     /// Pixels per visible unit; fit mode computed from the actual width.
     member private this.PpUnit =
@@ -479,14 +496,10 @@ type TimelineSelector() as self =
                 let x = xOf playhead
 
                 if x >= -1.0 && x <= w + 1.0 then
-                    let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
+                    let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
                     dc.DrawLine(playPen, Point(x, top), Point(x, bottom))
 
-                    dc.DrawRectangle(
-                        SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)),
-                        null,
-                        Rect(x - 2.5, top, 5.0, 5.0)
-                    )
+                    dc.DrawRectangle(SolidColorBrush(chromePlay ()), null, Rect(x - 2.5, top, 5.0, 5.0))
 
             // x scale: round tick marks over the visible span, 3-4 visible,
             // labels at round units
@@ -509,13 +522,13 @@ type TimelineSelector() as self =
 type TimelineDemoWindow(getFrames: unit -> int64) as self =
     inherit Window()
 
-    let sky = Color.FromRgb(0x38uy, 0xBDuy, 0xF8uy)
-    let amber = Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy)
-    let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
-    let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
-    let normal = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
-    let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
-    let darkFg = SolidColorBrush(Color.FromRgb(0x02uy, 0x06uy, 0x17uy))
+    let sky = Theme.sky
+    let amber = Theme.amber
+    let bg = Theme.bg
+    let panel = Theme.panel
+    let normal = Theme.normal
+    let dim = Theme.dim
+    let darkFg = Theme.darkFg
     let mono = FontFamily("Consolas")
 
     let mutable len = max 1L (getFrames ())

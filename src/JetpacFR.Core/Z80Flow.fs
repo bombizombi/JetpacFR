@@ -69,7 +69,11 @@ module Z80Flow =
             | 0xC0uy
             | 0xC8uy
             | 0xD0uy
-            | 0xD8uy -> Return
+            | 0xD8uy
+            | 0xE0uy
+            | 0xE8uy
+            | 0xF0uy
+            | 0xF8uy -> Return
             | 0xE9uy -> Jump None // JP (HL)
             | 0xEDuy when b1 = 0x45uy || b1 = 0x4Duy -> Return // RETN/RETI
             | 0xDDuy when b1 = 0xE9uy -> Jump None
