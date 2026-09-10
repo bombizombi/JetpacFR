@@ -367,3 +367,4 @@ MigrationBackup/
 # Node modules (npm dependencies)
 node_modules/
 FodyWeavers.xsd
+/games/jetpac/timeline.jst

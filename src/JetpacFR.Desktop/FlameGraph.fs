@@ -149,60 +149,18 @@ type FlameGraph() as self =
     let bgBrush = SolidColorBrush(chromeBg ())
     let borderPen = Pen(SolidColorBrush(chromeBorder ()), 1.0)
 
-    let chromeBorder () =
-        if Theme.isLight () then
-            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
-        else
-            Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
-
-    let chromePlay () =
-        if Theme.isLight () then
-            Color.FromRgb(0x0Fuy, 0x17uy, 0x2Auy)
-        else
-            Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
-
-    let chromeLane () =
-        if Theme.isLight () then
-            Color.FromRgb(0xEEuy, 0xF2uy, 0xF7uy)
-        else
-            Color.FromRgb(0x26uy, 0x2Auy, 0x34uy)
-
-    let chromeLanePen () =
-        if Theme.isLight () then
-            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
-        else
-            Color.FromRgb(0x4Auy, 0x50uy, 0x60uy)
-
-    let chromeLaneEdge () =
-        if Theme.isLight () then
-            Color.FromArgb(0xB0uy, 0x0Fuy, 0x17uy, 0x2Auy)
-        else
-            Color.FromArgb(0xB0uy, 0xE8uy, 0xE8uy, 0xE8uy)
-
-    let chromeMixed () =
-        if Theme.isLight () then
-            Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
-        else
-            Color.FromRgb(0x3Auy, 0x3Euy, 0x4Auy)
-
-    let bgBrush = SolidColorBrush(chromeBg ())
-    let borderPen = Pen(SolidColorBrush(chromeBorder ()), 1.0)
-
     let gridPen =
         Pen(SolidColorBrush(Color.FromArgb(0x40uy, 0x80uy, 0x80uy, 0x90uy)), 1.0)
 
     let framePen =
         Pen(SolidColorBrush(Color.FromArgb(0x55uy, 0x40uy, 0xC4uy, 0xFFuy)), 1.0)
 
-    let playPen = Pen(SolidColorBrush(Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)), 1.5)
     let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
     /// Execution-view cursor: dashed amber so it reads apart from the solid
-    /// white frame playhead.
     /// frame playhead.
     let cursorBrush = SolidColorBrush(Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy))
     let cursorPen = Pen(cursorBrush, 1.5)
     do cursorPen.DashStyle <- DashStyles.Dash
-    let labelFg = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
     // Shared Theme instance: label text follows the day/night switch untouched.
     let labelFg = Theme.dim
 
@@ -215,13 +173,9 @@ type FlameGraph() as self =
     let skyTint = SolidColorBrush(Color.FromArgb(0x1Euy, 0x38uy, 0xBDuy, 0xF8uy))
     let amberTint = SolidColorBrush(Color.FromArgb(0x1Euy, 0xFBuy, 0xBFuy, 0x24uy))
     // Mass-comment lanes: deliberately muted next to the code boxes.
-    let laneBrush = SolidColorBrush(Color.FromRgb(0x26uy, 0x2Auy, 0x34uy))
-    let lanePen = Pen(SolidColorBrush(Color.FromRgb(0x4Auy, 0x50uy, 0x60uy)), 1.0)
     let laneBrush = SolidColorBrush(chromeLane ())
     let lanePen = Pen(SolidColorBrush(chromeLanePen ()), 1.0)
 
-    let laneEdgePen =
-        Pen(SolidColorBrush(Color.FromArgb(0xB0uy, 0xE8uy, 0xE8uy, 0xE8uy)), 2.0)
     let laneEdgePen = Pen(SolidColorBrush(chromeLaneEdge ()), 2.0)
     /// Instruction-level separators: constant translucent black, frozen once so
     /// the raw paint path reuses one pen instead of allocating per rectangle.
@@ -245,11 +199,6 @@ type FlameGraph() as self =
             brushMemo[entry] <- brush
             brush
 
-    /// Gray for LOD cells no single function dominates, and coverage-blended
-    /// brushes: the dominant function's color pulled toward the background as
-    /// its share of the cell drops (bucket 3 = >= 75% = full color).
-    let mixedBrush =
-        let b = SolidColorBrush(Color.FromRgb(0x3Auy, 0x3Euy, 0x4Auy))
     let mutable mixedBrush: Brush =
         let b = SolidColorBrush(chromeMixed ())
         b.Freeze()
@@ -269,7 +218,6 @@ type FlameGraph() as self =
             | true, b -> b
             | _ ->
                 let f = funcColor entry
-                let bg = Color.FromRgb(0x0Euy, 0x0Euy, 0x14uy)
                 let bg = chromeBg ()
                 let t = 0.35 + 0.2 * float bucket
 
@@ -695,24 +643,12 @@ type FlameGraph() as self =
                         float firstCellTicks * ppTick
 
                 if cheapFramePx >= 1.0 && cheapFramePx < 10.0 then
-                let lodData =
-                    match lod with
-                    | Some l -> Some l
+                    let lodData =
+                        match lod with
                         | Some l -> l
-                    | None ->
-                        let l = FlameLod.build win
-                        lod <- Some l
-                        Some l
-
-                let framePx =
-                    match lodData with
-                    | Some l when l.Levels.Length > 0 ->
-                        let a, b = FlameLod.cellTickRange l l.Levels[0] 0
-                        float (b - a) * ppTick
-                    | _ -> 0.0
-
-                if framePx >= 1.0 && framePx < 10.0 then
-                    let level = lodData.Value.Levels[FlameLod.pickLevel lodData.Value ppTick 1.0]
+                        | None ->
+                            let l = FlameLod.build win
+                            lod <- Some l
                             l
                     let level = lodData.Levels[FlameLod.pickLevel lodData ppTick 1.0]
                     let depthLast = min win.MaxDepth (firstDepth + visibleRows)
@@ -721,15 +657,12 @@ type FlameGraph() as self =
                         let y = this.RowOf depth
 
                         if y > -this.RowH && y < h then
-                            let cellFrom = max 0 (FlameLod.cellAt lodData.Value level.Shift leftTick)
                             let cellFrom = max 0 (FlameLod.cellAt lodData level.Shift leftTick)
 
                             let cellTo =
-                                min level.Cols ((FlameLod.cellAt lodData.Value level.Shift rightTick) + 1)
                                 min level.Cols ((FlameLod.cellAt lodData level.Shift rightTick) + 1)
 
                             let rFuncs, rBuckets, rStarts, rLens =
-                                FlameLod.runs lodData.Value level depth cellFrom cellTo
                                 FlameLod.runs lodData level depth cellFrom cellTo
 
                             for r in 0 .. rFuncs.Length - 1 do
@@ -737,8 +670,6 @@ type FlameGraph() as self =
                                 let bucket = rBuckets[r]
 
                                 if func >= 0 && bucket >= 0 then
-                                    let a, _ = FlameLod.cellTickRange lodData.Value level rStarts[r]
-                                    let _, b = FlameLod.cellTickRange lodData.Value level (rStarts[r] + rLens[r] - 1)
                                     let a, _ = FlameLod.cellTickRange lodData level rStarts[r]
                                     let _, b = FlameLod.cellTickRange lodData level (rStarts[r] + rLens[r] - 1)
                                     let x0 = max -1.0 (this.XOf a)
@@ -761,11 +692,6 @@ type FlameGraph() as self =
                                                 else
                                                     labelFg :> Brush
 
-                                            let mutable ftText = ft text 10.5 fg true
-
-                                            if ftText.Width > rw - 5.0 then
-                                                let t2 = elide text (int (rw / 6.0))
-                                                ftText <- ft t2 10.5 fg true
                                             // Single measure: Consolas is monospace with advance well
                                             // above 5px at 10.5pt, so len*5 <= avail implies the full
                                             // text might fit; otherwise the full text cannot fit and
@@ -778,7 +704,6 @@ type FlameGraph() as self =
                                                     text
                                             let ftText = ft candidate 10.5 fg true
 
-                                            if ftText.Width <= rw - 5.0 then
                                             if ftText.Width <= avail then
                                                 dc.DrawText(
                                                     ftText,
@@ -800,15 +725,9 @@ type FlameGraph() as self =
                             if x1 > 0.0 then
                                 let brush = brushFor (int r.Entry)
                                 dc.DrawRectangle(brush, null, Rect(x0, y, rw, this.RowH - 1.0))
-                                let name = labelFor (int r.Entry)
                                 let minWidth = if r.Depth = 0 then 54.0 else 26.0
 
-                                    let mutable text = if r.Depth = 0 then "(window root)" else name
-                                    let mutable ftText = ft text 10.5 blackBrush true
-
-                                    if ftText.Width > rw - 5.0 then
-                                        text <- elide text (int (rw / 6.0))
-                                        ftText <- ft text 10.5 blackBrush true
+                                if rw >= minWidth && this.RowH >= 12.0 then
                                     let text = if r.Depth = 0 then "(window root)" else labelFor (int r.Entry)
                                     let avail = rw - 5.0
                                     let candidate =
@@ -817,10 +736,8 @@ type FlameGraph() as self =
                                         else
                                             text
                                     let ftText = ft candidate 10.5 blackBrush true
-                                if rw >= minWidth && this.RowH >= 12.0 then
-                                    if ftText.Width <= rw - 5.0 then
-                                    if ftText.Width <= avail then
 
+                                    if ftText.Width <= avail then
                                         dc.DrawText(
                                             ftText,
                                             Point(x0 + 3.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0)
@@ -829,16 +746,14 @@ type FlameGraph() as self =
                                 // detail tier and instructions are wide enough to matter.
                                 match win.EntryTicks with
                                 | Some ticks when ppTick >= 3.0 && r.EndIndex - r.StartIndex <= 512 ->
-                                    let pen = Pen(SolidColorBrush(Color.FromArgb(0x60uy, 0x00uy, 0x00uy, 0x00uy)), 1.0)
                                     let mutable e = r.StartIndex + 1
                                     let stop = min (r.EndIndex) ticks.Length
 
                                     while e < stop do
                                         let x = this.XOf ticks[e]
 
-                                            dc.DrawLine(pen, Point(x, y), Point(x, y + this.RowH - 1.0))
-                                            dc.DrawLine(sepPen, Point(x, y), Point(x, y + this.RowH - 1.0))
                                         if x >= 0.0 && x <= w then
+                                            dc.DrawLine(sepPen, Point(x, y), Point(x, y + this.RowH - 1.0))
 
                                         e <- e + 1
                                 | _ -> ()
@@ -849,10 +764,8 @@ type FlameGraph() as self =
                 // (order kept) so the annotations stay readable at any depth. Edges
                 // inside the viewport get accent ticks; a range spanning the whole
                 // viewport is just the long muted box with its text.
+                let rawRanges = frameRangesFor ()
                 let ranges =
-                    frameRangesFor ()
-                    |> List.sortBy (fun (a, _, _) -> a)
-                    |> List.filter (fun (a, b, _) -> b > leftTick && a < rightTick)
                     if List.isEmpty rawRanges then
                         []
                     elif rawRanges.Length <= 1 then
