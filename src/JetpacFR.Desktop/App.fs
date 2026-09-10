@@ -1438,12 +1438,17 @@ type MainWindow() as self =
 
     let codeSetFromControl () : Set<int> =
         match control with
-        | Some c ->
-            c.Blocks
-            |> List.filter (fun b -> b.Kind = Code)
-            |> List.collect (fun b -> [ b.Start .. b.EndExcl - 1 ])
-            |> Set.ofList
-        | None -> Set.empty
+        | Some c when c.Blocks |> List.exists (fun b -> b.Kind = Code) ->
+            (Set.empty, c.Blocks)
+            ||> List.fold (fun acc b ->
+                if b.Kind = Code then
+                    let mutable s = acc
+                    for a = b.Start to b.EndExcl - 1 do
+                        s <- Set.add a s
+                    s
+                else
+                    acc)
+        | _ -> Set.empty
 
     /// Active-brush tints for the code view (match the timeline chip colors).
     let tintA = SolidColorBrush(Color.FromArgb(0x30uy, 0x38uy, 0xBDuy, 0xF8uy))
@@ -1513,17 +1518,17 @@ type MainWindow() as self =
 
                 let controlBox =
                     match control with
-                    | Some c ->
-                        let codes = c.Blocks |> List.filter (fun b -> b.Kind = Code)
+                    | Some c when c.Blocks |> List.exists (fun b -> b.Kind = Code) ->
+                        let lo, hi =
+                            ((Int32.MaxValue, Int32.MinValue), c.Blocks)
+                            ||> List.fold (fun (lo, hi) b ->
+                                if b.Kind = Code then
+                                    (min lo b.Start, max hi b.EndExcl)
+                                else
+                                    (lo, hi))
 
-                        if codes.IsEmpty then
-                            None
-                        else
-                            Some(
-                                (codes |> List.minBy (fun b -> b.Start)).Start,
-                                (codes |> List.maxBy (fun b -> b.EndExcl)).EndExcl
-                            )
-                    | None -> None
+                        Some(lo, hi)
+                    | _ -> None
 
                 let overlaps (a1, b1) (a2, b2) = a1 < b2 && a2 < b1
 
@@ -1582,6 +1587,9 @@ type MainWindow() as self =
     let refreshScanList () : unit =
         match currentMemory () with
         | None -> scanCountLabel.Text <- "no live session - cannot scan"
+        | Some _ when List.isEmpty scanResults ->
+            scanList.ItemsSource <- ([] : DisasmRow list)
+            scanCountLabel.Text <- "0 addresses"
         | Some mem ->
             let rows =
                 scanResults
@@ -7264,10 +7272,19 @@ type MainWindow() as self =
                 let pcHere = int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc
 
                 let start =
-                    c.Blocks
-                    |> List.filter (fun b -> b.Start <= pcHere)
-                    |> List.map (fun b -> b.Start)
-                    |> fun xs -> if List.isEmpty xs then 0x4000 else List.max xs
+                    let best =
+                        (None, c.Blocks)
+                        ||> List.fold (fun acc b ->
+                            if b.Start <= pcHere then
+                                match acc with
+                                | None -> Some b.Start
+                                | Some m -> Some(max m b.Start)
+                            else
+                                acc)
+
+                    match best with
+                    | None -> 0x4000
+                    | Some m -> m
 
                 addComment
                     { Kind = Name

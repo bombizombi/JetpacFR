@@ -163,7 +163,6 @@ module CtlGen =
 
             while addr < finish do
                 let len = max 1 (min (Disasm.disasmLength memory addr) (finish - addr))
-                let opBytes = memory[addr .. addr + len - 1]
 
                 if isTerminal memory addr then
                     ctlAddr <- catchData ctlList ctlAddr count config.MaxRepeat addr prevBytes
@@ -181,6 +180,7 @@ module CtlGen =
                     | None -> ()
 
                     prevKey <- Some(opKey memory addr len)
+                    let opBytes = memory[addr .. addr + len - 1]
                     prevBytes <- opBytes
 
                 addr <- addr + len

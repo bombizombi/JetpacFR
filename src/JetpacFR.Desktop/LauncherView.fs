@@ -205,40 +205,25 @@ module LauncherView =
 
             let status = StackPanel(Orientation = Orientation.Horizontal)
             let slots = TimelineSlots.list g.GameDirectory
-            let totalMB = slots |> List.sumBy (fun s -> float s.Bytes / (1024.0 * 1024.0))
+            let hasKeys = FileInfo(ReplayStore.path g).Exists
+            let hasCtrl = FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists
+            let hasCE = GameRegistry.tryFind g.GameId |> Option.isSome
 
             if List.isEmpty slots then
                 statusCell status 110.0 "traces: none" false
             else
+                let totalMB = slots |> List.sumBy (fun s -> float s.Bytes / (1024.0 * 1024.0))
                 statusCell status 110.0 (sprintf "traces: %d (%.1f MB)" slots.Length totalMB) true
 
-            statusCell
-                status
-                82.0
-                (sprintf "keys: %s" (if FileInfo(ReplayStore.path g).Exists then "yes" else "no"))
-                (FileInfo(ReplayStore.path g).Exists)
+            statusCell status 82.0 (sprintf "keys: %s" (if hasKeys then "yes" else "no")) hasKeys
 
             statusCell
                 status
                 106.0
-                (sprintf
-                    "control: %s"
-                    (if FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists then
-                         "yes"
-                     else
-                         "no"))
-                (FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists)
+                (sprintf "control: %s" (if hasCtrl then "yes" else "no"))
+                hasCtrl
 
-            statusCell
-                status
-                86.0
-                (sprintf
-                    "CE: %s"
-                    (if GameRegistry.tryFind g.GameId |> Option.isSome then
-                         "yes"
-                     else
-                         "no"))
-                (GameRegistry.tryFind g.GameId |> Option.isSome)
+            statusCell status 86.0 (sprintf "CE: %s" (if hasCE then "yes" else "no")) hasCE
 
             statusCell status 92.0 (sprintf "boot: %s" g.Boot) true
             Grid.SetColumn(status, 1)

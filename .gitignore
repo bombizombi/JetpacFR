@@ -360,4 +360,10 @@ MigrationBackup/
 .ionide/
 
 # Fody - auto-generated XML schema
+
+# Large trace/timeline recording files
+*.jst
+
+# Node modules (npm dependencies)
+node_modules/
 FodyWeavers.xsd

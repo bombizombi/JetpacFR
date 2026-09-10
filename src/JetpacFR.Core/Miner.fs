@@ -196,10 +196,10 @@ module Miner =
                         if stack.Count > 0 then
                             stack[stack.Count - 1].Inclusive <- stack[stack.Count - 1].Inclusive + childIncl
 
-                        let si = TraceQuery.nearestSnapshotBefore trace.Snapshots e.Tick
-
-                        if si >= 0 && a.ExitTicks.Add trace.Snapshots[si].Tick && a.Exits.Count < 5 then
-                            a.Exits.Add trace.Snapshots[si]
+                        if a.Exits.Count < 5 then
+                            let si = TraceQuery.nearestSnapshotBefore trace.Snapshots e.Tick
+                            if si >= 0 && a.ExitTicks.Add trace.Snapshots[si].Tick then
+                                a.Exits.Add trace.Snapshots[si]
                 elif e.Taken = 1uy && int e.Target < int e.Pc && stack.Count > 0 then
                     // Taken backward branch: one more loop iteration.
                     let f = stack[stack.Count - 1]

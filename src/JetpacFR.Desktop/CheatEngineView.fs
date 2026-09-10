@@ -74,8 +74,8 @@ type CheatEngineView
     let isWord () : bool =
         (unbox<string> scanType.SelectedItem).StartsWith "Word"
 
-    let valueAt (mem: byte[]) (a: int) : int =
-        if isWord () then
+    let valueAt (mem: byte[]) (word: bool) (a: int) : int =
+        if word then
             (int mem[a &&& 0xFFFF]) ||| (int mem[(a + 1) &&& 0xFFFF] <<< 8)
         else
             int mem[a]
@@ -83,20 +83,22 @@ type CheatEngineView
     let showResults () =
         resultsList.Items.Clear()
 
+        let mutable n = 0
+
         match getMemory () with
         | Some mem ->
-            for a in List.truncate 500 results do
-                resultsList.Items.Add(sprintf "$%04X   %d" a (valueAt mem a)) |> ignore
-        | None -> ()
+            let word = isWord ()
+
+            for a in results do
+                if n < 500 then
+                    resultsList.Items.Add(sprintf "$%04X   %d" a (valueAt mem word a)) |> ignore
+
+                n <- n + 1
+        | None ->
+            n <- List.length results
 
         countLabel.Text <-
-            sprintf
-                "%d matches%s"
-                (List.length results)
-                (if List.length results > 500 then
-                     "  (showing first 500)"
-                 else
-                     "")
+            sprintf "%d matches%s" n (if n > 500 then "  (showing first 500)" else "")
 
     let doScan (first: bool) : unit =
         match getMemory () with
@@ -105,15 +107,17 @@ type CheatEngineView
             match parseValue valueBox.Text with
             | None -> setStatus "enter a value first (decimal, or 0x/$ for hex)" red
             | Some v ->
+                let word = isWord ()
+
                 if first then
-                    let hi = if isWord () then 0xFFFE else 0xFFFF
+                    let hi = if word then 0xFFFE else 0xFFFF
 
                     results <-
                         [ for a in 0x4000..hi do
-                              if valueAt mem a = v then
+                              if valueAt mem word a = v then
                                   a ]
                 else
-                    results <- results |> List.filter (fun a -> valueAt mem a = v)
+                    results <- results |> List.filter (fun a -> valueAt mem word a = v)
 
                 showResults ()
 
@@ -126,22 +130,23 @@ type CheatEngineView
 
     let doPoke () : unit =
         match resultsList.SelectedIndex with
-        | i when i >= 0 && i < List.length results ->
-            match parseValue pokeBox.Text with
-            | None -> setStatus "poke: enter a value first" red
-            | Some v ->
-                match getMemory () with
-                | None -> setStatus "no live machine" red
-                | Some mem ->
-                    let addr = List.item i results
+        | i when i >= 0 ->
+            match List.tryItem i results with
+            | None -> setStatus "select a result row first" red
+            | Some addr ->
+                match parseValue pokeBox.Text with
+                | None -> setStatus "poke: enter a value first" red
+                | Some v ->
+                    match getMemory () with
+                    | None -> setStatus "no live machine" red
+                    | Some mem ->
+                        if isWord () then
+                            mem[addr &&& 0xFFFF] <- byte (v &&& 0xFF)
+                            mem[(addr + 1) &&& 0xFFFF] <- byte ((v >>> 8) &&& 0xFF)
+                        else
+                            mem[addr &&& 0xFFFF] <- byte (v &&& 0xFF)
 
-                    if isWord () then
-                        mem[addr &&& 0xFFFF] <- byte (v &&& 0xFF)
-                        mem[(addr + 1) &&& 0xFFFF] <- byte ((v >>> 8) &&& 0xFF)
-                    else
-                        mem[addr &&& 0xFFFF] <- byte (v &&& 0xFF)
-
-                    setStatus (sprintf "poked $%04X" addr) green
+                        setStatus (sprintf "poked $%04X" addr) green
         | _ -> setStatus "select a result row first" red
 
     let resetScan () : unit =

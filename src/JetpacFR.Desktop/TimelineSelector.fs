@@ -101,6 +101,8 @@ type TimelineSelector() as self =
         else Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
     let bgBrush = SolidColorBrush(chromeBg ())
     let borderPen = Pen(SolidColorBrush(chromeBorder ()), 1.0)
+    let playBrush = SolidColorBrush(chromePlay ())
+    let playPen = Pen(playBrush, 1.5)
 
     let typeface =
         Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal)
@@ -147,6 +149,7 @@ type TimelineSelector() as self =
     member this.RefreshTheme() =
         bgBrush.Color <- chromeBg ()
         (borderPen.Brush :?> SolidColorBrush).Color <- chromeBorder ()
+        playBrush.Color <- chromePlay ()
         this.InvalidateVisual()
 
     /// Pixels per visible unit; fit mode computed from the actual width.
@@ -496,10 +499,8 @@ type TimelineSelector() as self =
                 let x = xOf playhead
 
                 if x >= -1.0 && x <= w + 1.0 then
-                    let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
                     dc.DrawLine(playPen, Point(x, top), Point(x, bottom))
-
-                    dc.DrawRectangle(SolidColorBrush(chromePlay ()), null, Rect(x - 2.5, top, 5.0, 5.0))
+                    dc.DrawRectangle(playBrush, null, Rect(x - 2.5, top, 5.0, 5.0))
 
             // x scale: round tick marks over the visible span, 3-4 visible,
             // labels at round units

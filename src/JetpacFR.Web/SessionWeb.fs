@@ -260,7 +260,6 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
 
         while port.CycleCount() < frameEnd do
             let irq = port.IrqPending && port.Iff1
-            let pc = port.Regs.Pc()
             let flagsBefore = port.Flags().ToU8()
             let cyclesBefore = port.CycleCount()
 
@@ -319,6 +318,7 @@ type TraceSession(romBytes: byte[], tzxBytes: byte[], capacity: int) =
                       FlagsAfter = uint8 (port.Flags().ToU8())
                       Taken = (if after <> next then 1uy else 0uy) }
             else
+                let pc = port.Regs.Pc()
                 let insn = Disasm.disasmMemory port.Memory pc
                 let m = port.Memory
                 let b0 = m[pc &&& 0xFFFF]

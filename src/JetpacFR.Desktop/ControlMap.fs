@@ -73,6 +73,19 @@ type ControlMap() as self =
         else
             blend baseC heatLut[min 9 heat] (0.15 + 0.65 * float heat / 9.0)
 
+    /// Memoized and frozen like FlameGraph.brushMemo: the paint path must not
+    /// allocate brushes per row-run per frame.
+    let brushMemo = System.Collections.Generic.Dictionary<Color, Brush>()
+
+    let brushFor (col: Color) : Brush =
+        match brushMemo.TryGetValue col with
+        | true, b -> b
+        | _ ->
+            let brush = SolidColorBrush(col)
+            brush.Freeze()
+            brushMemo[col] <- brush
+            brush :> Brush
+
     // ---- host-supplied data -------------------------------------------------
     let mutable controlData: ControlFile option = None
     let mutable execCounts = Array.empty<int>
@@ -141,6 +154,7 @@ type ControlMap() as self =
             (thumbPen.Brush :?> SolidColorBrush).Color <- Color.FromArgb(0x80uy, 0xFFuy, 0xFFuy, 0xFFuy)
         let g = Theme.green.Color
         rangeBrush.Color <- Color.FromArgb(0x30uy, g.R, g.G, g.B)
+        brushMemo.Clear()
         this.InvalidateVisual()
 
     member _.ExecCounts
@@ -268,9 +282,7 @@ type ControlMap() as self =
                         else
                             y2 <- m.Rows.Length
 
-                    let brush = SolidColorBrush(col)
-                    brush.Freeze()
-                    dc.DrawRectangle(brush, null, Rect(0.0, float y * rowH, w, float (y2 - y) * rowH + 0.5))
+                    dc.DrawRectangle(brushFor col, null, Rect(0.0, float y * rowH, w, float (y2 - y) * rowH + 0.5))
                     // left-edge ticks: self-mod magenta at x0, comment green at x2
                     for yy in y .. y2 - 1 do
                         let ry = float yy * rowH

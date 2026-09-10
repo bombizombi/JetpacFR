@@ -424,8 +424,9 @@ module Disasm =
                 { Text = edText get (pc + 1)
                   Length = edLen inner + 1 }
             else
-                let text = renderBase get (pc + 1) (Some(name, s8 (get (pc + 2)), usesHlMem inner))
-                let len = baseLen inner + (if usesHlMem inner then 1 else 0) + 1
+                let withDisp = usesHlMem inner
+                let len = baseLen inner + (if withDisp then 1 else 0) + 1
+                let text = renderBase get (pc + 1) (Some(name, s8 (get (pc + 2)), withDisp))
                 { Text = text; Length = len }
         | 0xCB ->
             let op2 = int (get (pc + 1))
