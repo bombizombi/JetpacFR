@@ -34,9 +34,6 @@ module EntryCache =
         sha.ComputeHash bytes
         |> Array.map (fun b -> b.ToString("x2"))
         |> String.concat ""
-        sha.ComputeHash bytes
-        |> Array.map (fun b -> b.ToString("x2"))
-        |> String.concat ""
 
     /// The cache marker: asset hashes plus the boot mode. The fast (ROM-trap
     /// flash load) and slow (emulated tape) boots land in distinct slots - the
@@ -105,36 +102,9 @@ module EntryCache =
         with _ ->
             () // the cache is an optimization; a failed write must not break startup
 
-    let private metaPath romPath tzxPath =
-        Path.Combine(dir romPath tzxPath, "meta.txt")
-
-    /// Some(mem, state) when a cache exists, matches the current assets, and is
-    /// structurally intact; None otherwise (cold boot needed).
-    let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option =
-        try
-            let mp = memoryPath romPath tzxPath
-
-            if
-                File.Exists mp
-                && File.Exists(statePath romPath tzxPath)
-                && File.Exists(metaPath romPath tzxPath)
-            then
-                let current = marker romPath tzxPath
-                let stored = File.ReadAllText(metaPath romPath tzxPath)
-
-                if stored = current then
-                    let mem = File.ReadAllBytes mp
-
-                    if mem.Length = 0x10000 then
-                        Some(mem, File.ReadAllText(statePath romPath tzxPath))
-                    else
-                        None
-                else
-                    None
-            else
-                None
-        with _ ->
-            None
+    /// Legacy (slow-boot oracle) slots: the same three files the cache has
+    /// always used, so existing warm states keep loading without a re-boot.
+    let tryLoad (romPath: string) (tzxPath: string) : (byte[] * string) option = tryLoadMode romPath tzxPath false
 
     let save (romPath: string) (tzxPath: string) (mem: byte[]) (state: string) =
         saveMode romPath tzxPath false mem state
@@ -207,21 +177,6 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         for row, bit in port.Keyboard.PressedCells() do
             port.SetKey(row, bit, false)
 
-  /// Put the port into the game-entry state. Warm: load the cached snapshot.
-  /// Cold: boot the oracle to the entry and cache its state for next time.
-  let loadEntryState () =
-    match EntryCache.tryLoad romPath tzxPath with
-    | Some (mem, state) ->
-      try
-        port.LoadState(mem, state)
-        warmStart <- true
-      with _ ->
-        let oracle, _ = Jetpac3.Core.Boot.bootToEntry romPath tzxPath onFrame
-        let mem, state = oracle.SaveState()
-        EntryCache.save romPath tzxPath mem state
-        port.LoadState(mem, state)
-        warmStart <- false
-    | None ->
     /// Put the port into the game-entry state. Warm: load the cached snapshot.
     /// Cold: boot the oracle to the entry and cache its state for next time -
     /// via the flash loader when fastBoot, via emulated tape otherwise.
@@ -249,49 +204,65 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
             EntryCache.saveMode romPath tzxPath fastBoot mem state
             port.LoadState(mem, state)
             warmStart <- false
-      Ix = uint16 (r.Ix())
-      Iy = uint16 (r.Iy())
-      Sp = uint16 (r.Sp())
-      Pc = uint16 (r.Pc())
-      I = uint8 (r.I())
-      R = uint8 (r.R()) }
 
-  do
-    Jetpac2.Core.Z80Table.EnsureInstalled()
-    // Run lifted routines in the live session too: per-address dispatch, so
-    // each Step still executes one logical instruction and the trace records
-    // exactly what ran (same bytes/lengths as the generated layer).
-    port.Override <- Jetpac3.Core.LiftedRoutines.registryHook
-    port.AddMemoryWriteHandler(fun e ->
-      recorder.RecordWrite
-        { Tick = uint32 e.Tick
-          Address = uint16 e.Address
-          OldValue = e.OldValue
-          NewValue = e.NewValue })
-    port.AddOutHandler(fun p v ->
-      recorder.RecordPort
+    let snapshotOf () =
+        let r = port.Regs
+
         { Tick = uint32 (port.CycleCount())
-          Port = uint16 p
-          Value = uint8 (v &&& 0xFF)
-          Border = uint8 (v &&& 7) })
-    loadEntryState ()
-    captureState () // frame 0 anchor: the slider's always-reachable minimum
-    recorder.RecordSnapshot(snapshotOf ())
+          Af = uint16 (r.Get Jetpac2.Core.R16.AF)
+          Bc = uint16 (r.Get Jetpac2.Core.R16.BC)
+          De = uint16 (r.Get Jetpac2.Core.R16.DE)
+          Hl = uint16 (r.Get Jetpac2.Core.R16.HL)
+          Af2 = uint16 (r.Get Jetpac2.Core.R16.AF_)
+          Bc2 = uint16 (r.Get Jetpac2.Core.R16.BC_)
+          De2 = uint16 (r.Get Jetpac2.Core.R16.DE_)
+          Hl2 = uint16 (r.Get Jetpac2.Core.R16.HL_)
+          Ix = uint16 (r.Ix())
+          Iy = uint16 (r.Iy())
+          Sp = uint16 (r.Sp())
+          Pc = uint16 (r.Pc())
+          I = uint8 (r.I())
+          R = uint8 (r.R()) }
+
+    do
+        Jetpac2.Core.Z80Table.EnsureInstalled()
+        // Run lifted routines in the live session too: per-address dispatch, so
+        // each Step still executes one logical instruction and the trace records
+        // exactly what ran (same bytes/lengths as the generated layer).
+        port.Override <- Jetpac3.Core.LiftedRoutines.registryHook
+
+        port.AddMemoryWriteHandler(fun e ->
+            recorder.RecordWrite
+                { Tick = uint32 e.Tick
+                  Address = uint16 e.Address
+                  OldValue = e.OldValue
+                  NewValue = e.NewValue })
+
+        port.AddOutHandler(fun p v ->
+            recorder.RecordPort
+                { Tick = uint32 (port.CycleCount())
+                  Port = uint16 p
+                  Value = uint8 (v &&& 0xFF)
+                  Border = uint8 (v &&& 7) })
+
+        loadEntryState ()
+        captureState () // frame 0 anchor: the slider's always-reachable minimum
+        recorder.RecordSnapshot(snapshotOf ())
 
 
-  /// True when the entry state came from the cache (no oracle boot needed).
-  member this.WarmStart = warmStart
-  member this.Frame = frame
-  member this.Recorder = recorder
-  member this.CycleCount = port.CycleCount()
-  member this.Regs = port.Regs
-  member this.Memory = port.Memory
+    /// True when the entry state came from the cache (no oracle boot needed).
+    member this.WarmStart = warmStart
+    member this.Frame = frame
+    member this.Recorder = recorder
+    member this.CycleCount = port.CycleCount()
+    member this.Regs = port.Regs
+    member this.Memory = port.Memory
 
-  /// The live matrix, e.g. for shells/tests asserting a clean handoff.
-  member this.Keyboard = port.Keyboard
+    /// The live matrix, e.g. for shells/tests asserting a clean handoff.
+    member this.Keyboard = port.Keyboard
 
-  /// Rendered frame (BGRA 320x256) from the port's video state.
-  member this.ScreenBuffer = port.Video.BlitTo()
+    /// Rendered frame (BGRA 320x256) from the port's video state.
+    member this.ScreenBuffer = port.Video.BlitTo()
 
     member this.SetKey(row: int, bit: int, pressed: bool) =
         if replayMode then
@@ -307,27 +278,49 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
                 timelineDirty <- true // key events are part of the saved recording
 
             port.SetKey(row, bit, pressed)
-  /// Drain the frame's beeper transitions and synthesize the 882 samples for
-  /// the just-executed frame.
-  member this.DrainBeeperSamples(frameStart: int64) : float32[] =
-    let trace = port.BeeperTrace |> Seq.toList
-    port.BeeperTrace.Clear()
-    Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
 
-  member this.SetKey(row: int, bit: int, pressed: bool) =
-    if replayMode then () // live keys ignored during scripted replay
-    else
-      keyLog.Add { Frame = frame; Row = row; Bit = bit; Pressed = pressed }
-      port.SetKey(row, bit, pressed)
+    /// Drain the frame's beeper transitions and synthesize the 882 samples for
+    /// the just-executed frame.
+    member this.DrainBeeperSamples(frameStart: int64) : float32[] =
+        let trace = port.BeeperTrace |> Seq.toList
+        port.BeeperTrace.Clear()
+        Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
 
-  member this.Replaying = replayMode
-  member this.ReplayEndFrame = replayEndFrame
-  member this.History = history
-  member this.KeyLog = keyLog
+    member this.Replaying = replayMode
+    member this.ReplayEndFrame = replayEndFrame
+    member this.History = history
+    member this.KeyLog = keyLog
+    member this.StateTimeline = stateTimeline
 
-  /// True when a replay reached the end of the recording in the last
-  /// RunFrame; the UI pauses the frame timer and hands control back.
-  member this.ReplayFinished = replayFinished
+    /// Frames captured live by this session (loaded states don't count); the
+    /// recording stats display and save-dirty tracking are driven from it.
+    member this.LiveCapturedFrames = liveCaptured
+
+    /// Bytes the timeline gained during this session (loaded content excluded).
+    member this.TimelineSessionBytes =
+        max 0L (stateTimeline.BytesUsed - timelineBytesBaseline)
+
+    /// Highest seekable frame: executed history or the end of the loaded
+    /// recording - whichever reaches further.
+    member this.TimelineExtent = max history.LastFrame stateTimeline.EndFrame
+
+    /// Install a recording loaded from disk (states + key script) so autoplay
+    /// and any-frame seeking work before a single frame executes here.
+    member this.LoadStateTimeline(timeline: StateTimeline, events: KeyEvent seq) =
+        stateTimeline <- timeline
+        timelineBytesBaseline <- timeline.BytesUsed
+        liveCaptured <- 0
+        timelineLoadedFromDisk <- true
+        timelineDirty <- false // identical to the file it came from
+        keyLog.Replace events
+
+    /// True when the in-memory timeline differs from what is on disk.
+    member this.TimelineDirty = timelineDirty
+    member this.ClearTimelineDirty() = timelineDirty <- false
+
+    /// True when a replay reached the end of the recording in the last
+    /// RunFrame; the UI pauses the frame timer and hands control back.
+    member this.ReplayFinished = replayFinished
 
     /// Rewind PREVIEW: restore the machine (registers, memory, keyboard) to
     /// the state after `frameNumber` completed, without destroying anything.

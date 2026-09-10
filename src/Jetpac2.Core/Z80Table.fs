@@ -7661,18 +7661,6 @@ module Z80Table =
                m.Write(m.Regs.Wz(), lhs ||| (1 <<< 7)))
            None |]
 
-            match second with
-            | 0xCB -> run fd_cb (int m.Memory[(pc + 3) &&& 0xFFFF])  m pc
-            | 0xDD
-            | 0xFD
-            | 0xED -> run fd second  m pc
-            | _ -> run fd second  m pc
-        | 0xED -> run ed (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
-        | 0xCB -> run cb (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
-        | _ -> run main op m pc
-
-    *)
-
 
     //optimization
     let inline run (table: (Machine -> unit) option[]) (idx: int) m pc =
