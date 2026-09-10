@@ -7661,11 +7661,14 @@ module Z80Table =
                m.Write(m.Regs.Wz(), lhs ||| (1 <<< 7)))
            None |]
 
+    (*
+    old step before optimization
     let step (m: Machine) =
         let pc = m.Regs.Pc()
         let op = int m.Memory[pc &&& 0xFFFF]
 
-        let run (table: (Machine -> unit) option[]) (idx: int) =
+        //optimization
+        let inline run (table: (Machine -> unit) option[]) (idx: int) =
             match table[idx] with
             | Some f -> f m
             | None -> failwithf "no code at 0x%04X" pc
@@ -7692,6 +7695,43 @@ module Z80Table =
         | 0xED -> run ed (int m.Memory[(pc + 1) &&& 0xFFFF])
         | 0xCB -> run cb (int m.Memory[(pc + 1) &&& 0xFFFF])
         | _ -> run main op
+
+    *)
+
+
+    //optimization
+    let inline run (table: (Machine -> unit) option[]) (idx: int) m pc =
+        match table[idx] with
+        | Some f -> f m
+        | None -> failwithf "no code at 0x%04X" pc
+
+    let step (m: Machine) =
+        let pc = m.Regs.Pc()
+        let op = int m.Memory[pc &&& 0xFFFF]
+
+
+        match op with
+        | 0xDD ->
+            let second = int m.Memory[(pc + 1) &&& 0xFFFF]
+
+            match second with
+            | 0xCB -> run dd_cb (int m.Memory[(pc + 3) &&& 0xFFFF]) m pc
+            | 0xDD
+            | 0xFD
+            | 0xED -> run dd second  m pc// nested prefix: consume+dispatch
+            | _ -> run dd second  m pc
+        | 0xFD ->
+            let second = int m.Memory[(pc + 1) &&& 0xFFFF]
+
+            match second with
+            | 0xCB -> run fd_cb (int m.Memory[(pc + 3) &&& 0xFFFF])  m pc
+            | 0xDD
+            | 0xFD
+            | 0xED -> run fd second  m pc
+            | _ -> run fd second  m pc
+        | 0xED -> run ed (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
+        | 0xCB -> run cb (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
+        | _ -> run main op m pc
 
     /// Install the generic step into Machine (replaces the per-address pages).
     let EnsureInstalled () = Machine.GeneratedStep <- step

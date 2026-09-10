@@ -712,11 +712,10 @@ type FlameGraph() as self =
                             if x1 > 0.0 then
                                 let brush = brushFor (int r.Entry)
                                 dc.DrawRectangle(brush, null, Rect(x0, y, rw, this.RowH - 1.0))
-                                let name = labelFor (int r.Entry)
                                 let minWidth = if r.Depth = 0 then 54.0 else 26.0
 
                                 if rw >= minWidth && this.RowH >= 12.0 then
-                                    let mutable text = if r.Depth = 0 then "(window root)" else name
+                                    let mutable text = if r.Depth = 0 then "(window root)" else labelFor (int r.Entry)
                                     let mutable ftText = ft text 10.5 blackBrush true
 
                                     if ftText.Width > rw - 5.0 then

@@ -4,6 +4,25 @@ Converting tap files to snapshot files
 Can you convert this code into F#, make it as nice F# as possible.
 
 
+to send for planing
+
+--
+
+Can you create a plan to give another option for loading games if we have a tape file.  Right now, we have a boot process which takes 40 or more seconds, and that is terribly slow.  This code should produce a snapshot file instatnly, just parts of it need to be changed so that it does not create a file, but a record in memory should be fine.     Also, all the support for other machines other than the ZX spectrum 48 should be ignored for now.
+
+The old way of booting the game should also be left as an option, perhaps there could be a choise presented to the user when loading new tape file, or better, one command that automatically converts with this new approach, and other (with a smaller button on the main menu) that do it the old way.  
+
+
+--then append terra code which is the first answer after orig python code
+
+
+
+
+
+
+
+
+
 
 
 

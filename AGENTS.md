@@ -5,28 +5,16 @@ ZX Spectrum emulator + trace-driven reverse-engineering workbench, F#/.NET).
 
 ## F# coding conventions (required)
 
-### Indentation — 4 spaces, enforced by Fantomas
+### Indentation — 4 spaces
 
-All F# code is indented with **4 spaces** (never 2, never tabs). The whole
-codebase is formatted with **Fantomas** (pinned as a local dotnet tool in
-`dotnet-tools.json`, settings in `.fantomasconfig.json`: indent 4 spaces,
-max line length 120).
+All F# code is indented with **4 spaces** (never 2, never tabs), max line
+length 120. The codebase was formatted with **Fantomas** 7.0.6 (settings in
+`.fantomasconfig.json`, pinned as a local dotnet tool in `dotnet-tools.json`).
 
-After editing or creating `.fs` files, format them:
-
-```
-dotnet fantomas path/to/file.fs
-```
-
-or all files at once:
-
-```
-dotnet fantomas src tests games tools -r
-```
-
-(`-r` recurses; Fantomas skips `bin`/`obj` content it is given explicitly.)
-A whole-codebase reformat from 2-space to 4-space was done with Fantomas
-7.0.6 - do not hand-reformat or reintroduce 2-space indentation.
+Do NOT run Fantomas as a routine step - not after edits, not on builds.
+Write new code directly in the existing style. (A whole-codebase reformat
+from 2-space to 4-space was done with Fantomas - do not reintroduce
+2-space indentation.)
 
 ### Array/list/string indexing — modern syntax only
 

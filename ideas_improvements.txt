@@ -1,0 +1,45 @@
+I'll map the full user journey through the app, then give you an assessment. The codebase has one huge file (App.fs, ~7900 lines), so I'll delegate a sweep of that to an explore agent while I read the smaller view files myself.
+
+The sweep of App.fs is done. Let me read the launcher and game-only views myself to complete the picture.
+
+One quick verification of the default-boot behavior before I write up the assessment:
+
+Here's my assessment. I mapped the full interaction flow (launcher → the three phases, the boot pipeline, and all the controls in between) by sweeping App.fs plus the four view files.
+
+## The big picture as designed
+
+One window, four phases swapped in place: the launcher ("ZX Spectrum Game Changer") lists projects with status chips (traces/keys/control/CE/boot), and three buttons — **Emulator** (full reverse-engineering workbench: screen, trace/step controls, timeline with A/B brushes, flame graph, code pane, control map, scan tab, mining, theater), **Just the Game** (bare screen + hold-to-reverse), **Cheat Engine** (screen + memory scanner). All phases share one boot pipeline: the game flash-loads (or emulates the tape) in the background to a cached entry state, then installs a session — autoplay a recorded slot, record a new one, or "Live play" — chosen by a preset, a default, or a modal picker when 2+ slots exist. Leaving any phase pauses the machine and saves the timeline; the session stays alive for re-entry.
+
+The design idea — a workbench where the same live machine can be observed as a player, poked as a cheater, or dissected as a reverse engineer — is good, and the launcher's status chips are genuinely nice. The weak spots are almost all in the seams between the phases.
+
+## Weak spots
+
+**1. The phase loop fights the most common activity — playing while poking.** Leaving any phase pauses the machine (`returnToMenu`, `src/JetpacFR.Desktop/App.fs:3447`), and nothing ever resumes it: re-entering the cheat engine just redraws the frozen screen buffer. So "go check a value in the cheat engine" from a running game costs four steps (exit, re-open, discover it's paused, go back to the emulator to press Run, exit, re-open again). The fact that you had to ask me earlier *"how do I start a live play in the cheat engine window"* is itself the strongest evidence this seam leaks. Related inconsistencies: the game/cheat phases support Escape to leave, but the emulator phase has no Escape at all — only the small `<- back to main menu` button — and the window title is the only phase indicator.
+
+**2. There are two cheat engines and the launcher opens the weak one.** The emulator's **Scan tab** is far more capable — changed/unchanged/`<`/`>`/value filters, written/executed filters, include ROM/screen, code-only masks — while the Cheat Engine phase has only first-scan/next-scan/poke (`src/JetpacFR.Desktop/CheatEngineView.fs:101-145`). The cheat view also doesn't live-refresh its results list (values are drawn only when you scan, so the column goes stale while the game runs), shows raw addresses with no symbol names even though the workbench maintains a whole names/comments database (control.json), and has no freeze or undo-poke. Scans run synchronously on the UI thread, though 48 KB makes that tolerable.
+
+**3. Recording starts silently in contexts where nobody asked for it.** Opening a project with no saved slots — through *any* phase, including Cheat Engine and Just the Game — arms a fresh recording by default (`defaultChoice`, `src/JetpacFR.Desktop/App.fs:261-264`), and recordings grow megabytes per minute. A casual cheater or player is unknowingly writing a timeline slot. Meanwhile "Live play" — the mode these users actually want — is only reachable through the picker (which appears only with 2+ slots) or the emulator's slot combo. Two more silent-fallback spots: dismissing the slot picker with X quietly autoplays the newest slot, and picking a slot while a boot is in flight silently defers it ("boot in flight - choice applies on arrival", status text only).
+
+**4. Data-loss windows and unguarded destructive actions.** The timeline is written only on game switch, back-to-menu, window close, or the explicit Save button — pause and scrub don't save. The app clearly anticipates crashes (there's a `crash.log` handler), yet a crash loses the recording since the last save. `Clear timeline` deletes the slot file instantly, with no confirmation, and swallows the delete's exceptions (`App.fs:5012`). `Go` truncates history (`BranchAt`) — another destructive, unconfirmable action sitting right next to harmless transport buttons.
+
+**5. The status line is the only feedback channel.** Boot progress, saves, errors, flame-graph fallback explanations, scan counts — all one wrapping TextBlock at the bottom. There is no MessageBox anywhere in the app; an error is indistinguishable in weight from chatter and gets overwritten by the next message. Some things are outright silent: `Comment A-only/B-only` no-ops without a trace, and the `Clear timeline` delete error above.
+
+**6. Keyboard focus is a trap in the emulator phase.** Space and Enter get eaten by whatever button last held focus — that's why clicking the game screen is the required "I want to play" gesture (the comment at `App.fs:3578-3584` admits it). Every Spectrum player's reflex is Space to fire; new users will trigger random toolbar buttons. F10/F11 only work in the Execution code view, and Escape does nothing. Shortcuts exist only as button labels, documented nowhere together.
+
+**7. Three overlapping time controls with different semantics.** The trace instruction slider (±1/10/100 instructions, Cinema), the frame rewind slider (jump to any recorded frame), and the timeline selector scrub (A/B brushes) all move "time", but with different pausing behavior and different effects — and `Go` destructively branches history. Nothing on screen explains which control owns the machine at a given moment.
+
+**8. Small duplications and ghosts.** Two engine switchers (the `Interpreter/CE` combo and the `Oracle/CE/Both` radios) must be manually kept in sync. A comment at `App.fs:2716-2718` describes a toolbar theme toggle that doesn't exist — theme switching lives only on the launcher. The Graph view builds on the UI thread and its own comment admits it can block "for minutes" behind a wait cursor, while the flame graph already showed the pattern of building on a worker.
+
+**9. Structural risk.** All of this lives in one 7,951-line App.fs whose emulator construction is, per AGENTS.md, deliberately coupled to MainWindow state. That's fine today, but every improvement above lands in that file, and the phase seams are where the coupling bites.
+
+## What I'd improve, in order of payoff
+
+1. **Make run-state sticky across phase switches.** Either don't pause in `returnToMenu`, or remember "was running" and auto-resume when a phase re-attaches; put a Run/Pause chip in the game and cheat views so they're self-sufficient. Add Escape to the emulator phase.
+2. **One scanner, not two.** Reuse the Scan-tab engine in the cheat view (or make the cheat engine a floating palette over the emulator). Add live value refresh on the existing 100 ms UI timer, symbol names from control.json, freeze and undo-poke.
+3. **Make "Live play" the default for the game/cheat phases** — don't arm a recording unless the user picked one; make picker dismissal park instead of silently autoplaying.
+4. **Close the data-loss gap:** autosave the timeline on pause and every ~30 s; confirm before `Clear timeline` and `Go`; stop swallowing delete errors.
+5. **Promote important feedback** (errors, saves, destructive results) to a transient infobar or toast; keep the status line for chatter.
+6. **Fix the focus model:** when no text control has focus, route Space/Enter to the machine instead of buttons; publish a one-page shortcut list.
+7. **Label or unify the three time domains,** and move the Graph build to a worker like the flame graph already does.
+
+The common thread: the individual phases are well-built, but the transitions between them lose state (run/pause), pick modes silently (record vs. live vs. autoplay), and hide everything in one status line. Fixing the seams would do more for the app than any single feature.

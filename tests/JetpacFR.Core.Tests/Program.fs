@@ -747,7 +747,7 @@ let runPrompt (romPath: string) (tzxPath: string) : int =
         0
 
 let runBench (romPath: string) (tzxPath: string) : int =
-    printfn "bench: bare machine vs session (recording off/on), 600 frames"
+    printfn "bench: bare machine vs session (recording off/on) vs free play, 600 frames"
 
     let mem, state =
         match EntryCache.tryLoad romPath tzxPath with
@@ -802,9 +802,42 @@ let runBench (romPath: string) (tzxPath: string) : int =
             (float s.Recorder.EntryCount / float framesN)
             (float s.Recorder.EntryCount / sw.Elapsed.TotalSeconds / 1e6)
 
+    /// Free play exactly as the desktop app drives it (LiveFresh -> EnterLive):
+    /// no trace, no history captures, and the per-frame presentation the app
+    /// pays every tick - the BGRA screen blit and the beeper sample drain
+    /// (Audio.Play only buffers, it never blocks; the WPF WritePixels stays
+    /// out of reach here). 50 warmup frames let the JIT settle before the
+    /// stopwatch starts. Real-time reference: 50 fps gives a 20 ms budget.
+    let runLive () =
+        let s = TraceSession(romPath, tzxPath, 4_000_000)
+        s.EnterLive()
+
+        let frameWork () =
+            let frameStart, _ = s.RunFrame()
+            s.ScreenBuffer |> ignore
+            s.DrainBeeperSamples(frameStart) |> ignore
+
+        for _ in 1..50 do
+            frameWork ()
+
+        let sw = System.Diagnostics.Stopwatch.StartNew()
+
+        for _ in 1..framesN do
+            frameWork ()
+
+        sw.Stop()
+        let msPerFrame = float sw.Elapsed.TotalMilliseconds / float framesN
+
+        printfn
+            "  free play (live)      : %6.2f ms/frame  %6.1f fps  %5.1fx real time"
+            msPerFrame
+            (1000.0 / msPerFrame)
+            (20.0 / msPerFrame)
+
     runBare ()
     runSession false
     runSession true
+    runLive ()
     if failures.Count > 0 then 1 else 0
 
 let runHistory (romPath: string) (tzxPath: string) : int =

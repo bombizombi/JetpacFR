@@ -120,6 +120,76 @@ type MainWindow() as self =
     let mutable gamesList: GameManifest list = []
     let manualTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 20.0)
 
+    // TEMP DEBUG LOGGING (remove before shipping): flame/heatmap/control-map
+    // rebuild tracing. Each event goes to the VS Output window (Debug.WriteLine)
+    // AND is appended to frame_debug.log next to the exe, with the current
+    // frame and the seconds since the previous logged event.
+    let dbgPath = System.IO.Path.Combine(AppContext.BaseDirectory, "frame_debug.log")
+    let mutable dbgLast = System.DateTime.MinValue
+
+    let dbgLog (what: string) =
+        let now = System.DateTime.Now
+
+        let frame =
+            match ceGame with
+            | Some c -> c.Frame
+            | None ->
+                match session with
+                | Some s -> s.Frame
+                | None -> -1
+
+        let delta = if dbgLast = System.DateTime.MinValue then 0.0 else (now - dbgLast).TotalSeconds
+        dbgLast <- now
+        let line = sprintf "%s frame=%d time=%s (+%.3fs)" what frame (now.ToString("HH:mm:ss.fff")) delta
+        System.Diagnostics.Debug.WriteLine line
+
+        try
+            System.IO.File.AppendAllText(dbgPath, line + "\n")
+        with _ ->
+            ()
+
+    // Frames executed vs WPF render passes per second: if the two track, the
+    // loop is gated by per-frame rendering (each WritePixels forces a full
+    // composition pass), not by emulator work.
+    let mutable dbgFramesSinceDump = 0
+    let mutable dbgRendersSinceDump = 0
+    // Wall-clock gap between frame starts and the per-frame duration: splits
+    // "frames are slow" from "frames are fast but the timer is starved".
+    let mutable dbgLastFrameMs = -1L
+    let mutable dbgGapTotal = 0L
+    let mutable dbgGapMax = 0L
+    let mutable dbgGapN = 0
+    let mutable dbgDurTotal = 0L
+    let mutable dbgDurMax = 0L
+    let dbgRendered () = dbgRendersSinceDump <- dbgRendersSinceDump + 1
+    do System.Windows.Media.CompositionTarget.Rendering.Add(fun _ -> dbgRendered ())
+
+    let dbgTimer = DispatcherTimer(Interval = TimeSpan.FromSeconds 1.0)
+
+    do
+        dbgTimer.Tick.Add(fun _ ->
+            let gapAvg = if dbgGapN = 0 then 0L else dbgGapTotal / int64 dbgGapN
+
+            dbgLog
+                (sprintf
+                    "summary: frames=%d renders=%d gapAvg=%dms gapMax=%dms durAvg=%dms durMax=%dms"
+                    dbgFramesSinceDump
+                    dbgRendersSinceDump
+                    gapAvg
+                    dbgGapMax
+                    (if dbgFramesSinceDump = 0 then 0L else dbgDurTotal / int64 dbgFramesSinceDump)
+                    dbgDurMax)
+
+            dbgFramesSinceDump <- 0
+            dbgRendersSinceDump <- 0
+            dbgGapTotal <- 0L
+            dbgGapMax <- 0L
+            dbgGapN <- 0
+            dbgDurTotal <- 0L
+            dbgDurMax <- 0L)
+
+        dbgTimer.Start()
+
     /// Walk up from the app base directory to the first folder containing a
     /// games/ directory (the manifests live at the repository root). Shared
     /// with the launcher window (Projects.findGamesDir).
@@ -940,9 +1010,17 @@ type MainWindow() as self =
         | Some s ->
             let recorder = s.Recorder
 
-            if builtAtCount <> recorder.EntryCount then
-                built <- Some(recorder.Build())
-                builtAtCount <- recorder.EntryCount
+            // Build() linearizes the whole recorder ring - O(window) work its
+            // docs scope to pause/save. While the machine runs the ring refills
+            // as fast as it drains, so rebuilding per EntryCount change here
+            // re-linearized millions of entries on every UI tick and starved
+            // the 20 ms frame timer. Build once per session (so views always
+            // have a trace) and otherwise only while parked; pauseGame runs
+            // buildTraceNow, so taking over refreshes the window.
+            if builtAtCount = -1 || not (running || replaying) then
+                if builtAtCount <> recorder.EntryCount then
+                    built <- Some(recorder.Build())
+                    builtAtCount <- recorder.EntryCount
         | None -> ()
 
     let currentTrace () : Trace option =
@@ -1130,9 +1208,27 @@ type MainWindow() as self =
             match session with
             | Some s ->
                 try
+                    let nowMs = System.Environment.TickCount64
+
+                    if dbgLastFrameMs >= 0 then
+                        let gap = nowMs - dbgLastFrameMs
+                        dbgGapTotal <- dbgGapTotal + gap
+                        dbgGapN <- dbgGapN + 1
+                        if gap > dbgGapMax then dbgGapMax <- gap
+
+                    dbgLastFrameMs <- nowMs
+                    let dbgDurAt = System.Diagnostics.Stopwatch.GetTimestamp()
                     let frameStart, _ = s.RunFrame()
                     presentGame ()
                     Audio.Play(s.DrainBeeperSamples(frameStart))
+                    dbgFramesSinceDump <- dbgFramesSinceDump + 1
+
+                    let durMs =
+                        (System.Diagnostics.Stopwatch.GetTimestamp() - dbgDurAt) * 1000L
+                        / System.Diagnostics.Stopwatch.Frequency
+
+                    dbgDurTotal <- dbgDurTotal + durMs
+                    if durMs > dbgDurMax then dbgDurMax <- durMs
 
                     if s.ReplayFinished then
                         // Replay reached the recording's end: stop and hand to live Run.
@@ -1148,6 +1244,40 @@ type MainWindow() as self =
                     statusText.Text <- sprintf "emulator error at 0x%04X: %s" pc ex.Message
                     showErrorDisasm pc
             | None -> ()
+
+    // ---- frame pacing (render-loop stepper) ---------------------------------
+    // The old 20 ms DispatcherTimer sat at Background priority, and vsync-
+    // paced render passes monopolize the dispatcher above it - the timer only
+    // got serviced ~15x/s, so a 4 ms frame ran at 15-20 fps. Step frames from
+    // the render loop instead (the classic game loop): every Rendering event
+    // accumulates real time and runs one 20 ms tick per due frame, capped at
+    // 4 frames so a long stall never fast-forwards the replay. `running`
+    // remains the single run gate (Run/Pause/startGame/CE switch all toggle
+    // it); the leftover frameTimer Start/Stop calls are inert - its Tick
+    // handler is gone.
+    let mutable stepAcc = 0L // Stopwatch ticks owed a 20 ms frame
+    let mutable stepLast = 0L
+    let stepTickTicks = int64 (0.020 * float System.Diagnostics.Stopwatch.Frequency)
+
+    do
+        System.Windows.Media.CompositionTarget.Rendering.Add(fun _ ->
+            if running then
+                let now = System.Diagnostics.Stopwatch.GetTimestamp()
+
+                if stepLast <> 0L then
+                    stepAcc <- stepAcc + now - stepLast
+                    let mutable steps = 0
+
+                    while stepAcc >= stepTickTicks && steps < 4 do
+                        stepAcc <- stepAcc - stepTickTicks
+                        steps <- steps + 1
+                        renderFrame ()
+
+                    if steps = 4 then stepAcc <- 0L // drop the backlog after a stall
+
+                stepLast <- now
+            else
+                stepLast <- 0L)
 
     let currentSelfModified () : bool[] =
         match flameTrace with
@@ -2517,6 +2647,7 @@ type MainWindow() as self =
         flameCtrl.PlayheadFrame <- s.Frame
 
     let refreshHeatmap () =
+        dbgLog "heatmap rebuilt"
         let counts = currentCounts ()
         let selfMod = currentSelfModified ()
         let maxC = max 1 (Array.max counts)
@@ -2627,9 +2758,14 @@ type MainWindow() as self =
                     stripPixels[p + 3] <- 255uy
 
             stripBmp.WritePixels(Int32Rect(0, 0, 512, 24), stripPixels, 512 * 4, 0)
-        // The scrollable t-count range: first and last tick of the current trace
-        // window, its span in raw T-states and ms at 3.5 MHz, plus coverage.
-        match currentTrace () with
+        // The T-range label needs a built trace, but currentTrace() can
+        // linearize the recorder's whole ring - while the machine runs that
+        // ring refills as fast as it drains, so a per-tick rebuild here cost
+        // hundreds of ms and starved the frame timer. While live, describe
+        // the last built window instead (pauseGame rebuilds on taking over).
+        let stripTrace = if running || replaying then built else currentTrace ()
+
+        match stripTrace with
         | Some t when t.Entries.Length > 0 ->
             let firstT = int64 t.Entries[0].Tick
             let lastE = t.Entries[t.Entries.Length - 1]
@@ -3727,6 +3863,208 @@ type MainWindow() as self =
         left.Children.Add(regHeader) |> ignore
         left.Children.Add(regGrid) |> ignore
         left.Children.Add(flagsPanel) |> ignore
+
+        // ---- project files + trace autoplay timing (below the registers) -----
+        // control.json: created (on disk) and modified (unsaved edits). CE
+        // file: the game's compiled-port source (Game.fs, or the materialized
+        // CeProgram.fs) - created vs missing, and whether it changed on disk
+        // since this game was loaded. Autoplay timing: the UI timer marks the
+        // real clock when a trace replay starts (the app-entry autoplay or
+        // the Replay button) and when it ends or is interrupted, then reports
+        // elapsed real time and achieved fps against the 50 Hz frame target
+        // (one frame per 20 ms timer tick). Refreshed from the UI timer like
+        // updateModeLabel, so no individual handler needs instrumenting.
+        let filesHeader =
+            TextBlock(
+                Text = "project files",
+                Foreground = dim,
+                FontSize = 12.0,
+                Margin = Thickness(0.0, 10.0, 0.0, 2.0)
+            )
+
+        let controlFileLabel =
+            TextBlock(Foreground = dim, FontFamily = mono, FontSize = 11.5, TextWrapping = TextWrapping.Wrap)
+
+        let ceFileLabel =
+            TextBlock(
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.5,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = Thickness(0.0, 2.0, 0.0, 0.0)
+            )
+
+        let replayHeader =
+            TextBlock(
+                Text = "trace autoplay timing (target 50 fps)",
+                Foreground = dim,
+                FontSize = 12.0,
+                Margin = Thickness(0.0, 10.0, 0.0, 2.0)
+            )
+
+        let replayStartLabel =
+            TextBlock(
+                Text = "no autoplay yet",
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.5,
+                TextWrapping = TextWrapping.Wrap
+            )
+
+        let replayEndLabel =
+            TextBlock(
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.5,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = Thickness(0.0, 2.0, 0.0, 0.0)
+            )
+
+        // CE file watched for the current game: its path and stamp when the
+        // game was loaded; "modified" = the on-disk stamp differs now.
+        let mutable ceWatchGameId = ""
+        let mutable ceWatchPath = ""
+        let mutable ceWatchStamp = DateTime.MinValue
+
+        let mutable replayTimingActive = false
+        let mutable replayTimingStart = DateTime.MinValue
+        let mutable replayTimingStartFrame = 0
+        let mutable replayTimingLastFrame = 0
+        let mutable replayTimingSession: TraceSession option = None
+
+        let updateFileStatusPanel () =
+            match control with
+            | Some c when controlGameDir <> "" ->
+                let created = File.Exists(Path.Combine(controlGameDir, "control.json"))
+
+                controlFileLabel.Text <-
+                    sprintf
+                        "control.json: %s, %s (%d comments)"
+                        (if created then "created" else "not created")
+                        (if c.Dirty then "modified - use Save ctrl" else "saved")
+                        c.Comments.Length
+
+                controlFileLabel.Foreground <- (if c.Dirty then orange else dim)
+            | None when controlGameDir <> "" ->
+                controlFileLabel.Text <- "control.json: load failed"
+                controlFileLabel.Foreground <- red
+            | _ -> controlFileLabel.Text <- "control.json: -"
+
+            let gameId =
+                match currentGame with
+                | Some g -> g.GameId
+                | None -> ""
+
+            if gameId <> ceWatchGameId then
+                ceWatchGameId <- gameId
+                ceWatchPath <- ""
+                ceWatchStamp <- DateTime.MinValue
+                let dir = controlDir ()
+
+                if dir <> "" then
+                    match
+                        [ "Game.fs"; "CeProgram.fs" ]
+                        |> List.map (fun n -> Path.Combine(dir, n))
+                        |> List.tryFind File.Exists
+                    with
+                    | Some p ->
+                        ceWatchPath <- p
+                        ceWatchStamp <- File.GetLastWriteTime p
+                    | None -> ()
+
+            if gameId = "" then
+                ceFileLabel.Text <- "CE file: -"
+                ceFileLabel.Foreground <- dim
+            elif ceWatchPath = "" then
+                ceFileLabel.Text <- "CE file: missing (interpreter only)"
+                ceFileLabel.Foreground <- dim
+            else
+                let modified = File.GetLastWriteTime ceWatchPath <> ceWatchStamp
+
+                ceFileLabel.Text <-
+                    sprintf
+                        "CE file %s: created %s, %s"
+                        (Path.GetFileName ceWatchPath)
+                        (ceWatchStamp.ToString("yyyy-MM-dd HH:mm"))
+                        (if modified then
+                             "modified on disk since load"
+                         else
+                             "unchanged since load")
+
+                ceFileLabel.Foreground <- (if modified then orange else dim)
+
+        let updateReplayTiming () =
+            match session with
+            | Some s when s.Replaying || replaying ->
+                let isNewReplay =
+                    (not replayTimingActive)
+                    || (match replayTimingSession with
+                        | Some prev -> not (Object.ReferenceEquals(prev, s))
+                        | None -> true)
+
+                if isNewReplay then
+                    replayTimingActive <- true
+                    replayTimingSession <- Some s
+                    replayTimingStart <- DateTime.Now
+                    replayTimingStartFrame <- s.Frame
+                    replayTimingLastFrame <- s.Frame
+
+                    replayStartLabel.Text <-
+                        sprintf "started %s at frame %d" (replayTimingStart.ToString("HH:mm:ss")) s.Frame
+
+                    replayStartLabel.Foreground <- green
+                else
+                    replayTimingLastFrame <- s.Frame
+
+                    let elapsed = (DateTime.Now - replayTimingStart).TotalSeconds
+                    let frames = replayTimingLastFrame - replayTimingStartFrame
+                    let fps = if elapsed > 0.5 then float frames / elapsed else 0.0
+
+                    replayEndLabel.Text <- sprintf "running: %.1f s real, %d frames, %.1f fps" elapsed frames fps
+
+                    replayEndLabel.Foreground <- green
+            | _ ->
+                if replayTimingActive then
+                    replayTimingActive <- false
+
+                    let ended = DateTime.Now
+                    let elapsed = (ended - replayTimingStart).TotalSeconds
+                    let frames = max 0 (replayTimingLastFrame - replayTimingStartFrame)
+                    let fps = if elapsed > 0.5 then float frames / elapsed else 0.0
+
+                    let sameSession =
+                        match session, replayTimingSession with
+                        | Some cur, Some s -> Object.ReferenceEquals(cur, s)
+                        | _ -> false
+
+                    let replayDone =
+                        match session with
+                        | Some s -> s.ReplayFinished
+                        | None -> false
+
+                    let reason =
+                        if not sameSession then "session switched"
+                        elif replayDone then "reached recording end"
+                        else "interrupted"
+
+                    replayEndLabel.Text <-
+                        sprintf
+                            "ended %s - %s after %.1f s real: %d frames, %.1f fps"
+                            (ended.ToString("HH:mm:ss"))
+                            reason
+                            elapsed
+                            frames
+                            fps
+
+                    replayEndLabel.Foreground <- (if reason = "reached recording end" then green else orange)
+
+        left.Children.Add filesHeader |> ignore
+        left.Children.Add controlFileLabel |> ignore
+        left.Children.Add ceFileLabel |> ignore
+        left.Children.Add replayHeader |> ignore
+        left.Children.Add replayStartLabel |> ignore
+        left.Children.Add replayEndLabel |> ignore
+        updateFileStatusPanel ()
 
         // center: timeline selector, mode buttons, disassembly, comment toolbar
         let center = DockPanel(Margin = Thickness(8.0))
@@ -6392,6 +6730,7 @@ type MainWindow() as self =
                                         flameTrace <- traceOfWindow w
                                         clampCursor ()
                                         flameCtrl.SetWindow stored
+                                        dbgLog "flame graph rebuilt"
 
                                         if zoom then
                                             flameCtrl.ZoomToFit()
@@ -7209,7 +7548,8 @@ type MainWindow() as self =
             controlMap.InstrStarts <- getInstrStarts ()
             controlMap.MemoryImage <- currentMemory ()
             controlMap.ExecCounts <- currentCounts ()
-            controlMap.SelfModified <- currentSelfModified ())
+            controlMap.SelfModified <- currentSelfModified ()
+            dbgLog "control map updated")
 
         // interactions
         slider.ValueChanged.Add(fun _ ->
@@ -7411,10 +7751,11 @@ type MainWindow() as self =
                         | None -> ())
 
         // timers
-        frameTimer.Tick.Add(fun _ ->
-            if running then
-                renderFrame ())
-
+        // frameTimer no longer renders: frame pacing moved to the render-loop
+        // stepper above (the Background-priority timer starved to ~15 fps
+        // behind vsync-paced render passes). Its Start/Stop calls elsewhere
+        // are inert now, kept to mark the old run/pause intents.
+        frameTimer.Tick.Add(fun _ -> ())
         cinemaTimer.Tick.Add(fun _ ->
             if cinemaPlaying then
                 let n = currentEntryCount ()
@@ -7810,7 +8151,9 @@ type MainWindow() as self =
         // comment pane follows the cursor and control-file changes
         uiTimer.Tick.Add(fun _ ->
             rebuildCommentPane false
-            updateModeLabel ())
+            updateModeLabel ()
+            updateFileStatusPanel ()
+            updateReplayTiming ())
 
         uiTimer.Start()
         manualTimer.Start()

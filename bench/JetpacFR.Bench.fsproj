@@ -6,13 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="GenGame.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\JetpacFR.Core\JetpacFR.Core.fsproj" />
-    <ProjectReference Include="..\..\games\minimal\JetpacFR.Game.Minimal.fsproj" />
+    <ProjectReference Include="..\src\JetpacFR.Core\JetpacFR.Core.fsproj" />
   </ItemGroup>
 
 </Project>

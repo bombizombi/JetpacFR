@@ -498,9 +498,13 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     /// history restarts from here but the key log is KEPT as the script
     /// (events after the point are replayed). Live keys are ignored while
     /// replaying; RunFrame reports ReplayFinished at the recording's end.
+    /// Recording is disabled: a replay must not re-log the whole script into
+    /// the ring (the mode bar's "nothing new recorded"), and an ever-growing
+    /// ring made every ring consumer O(window) mid-run.
     member this.StartReplay() =
         releaseAllKeys () // user-held keys would stay latched through the whole script
         replayMode <- true
+        recorder.RecordEnabled <- false
         // After a process restart, history contains only the frame-0 entry
         // anchor; a loaded timeline carries the recording's true extent (the
         // key log's last event can precede the final frames), and a live
