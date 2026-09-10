@@ -69,6 +69,7 @@ module Z80Flow =
             | 0xC0uy
             | 0xC8uy
             | 0xD0uy
+            | 0xD8uy -> Return
             | 0xD8uy
             | 0xE0uy
             | 0xE8uy

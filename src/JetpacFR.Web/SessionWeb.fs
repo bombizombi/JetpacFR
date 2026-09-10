@@ -128,6 +128,13 @@ module private ReplayCache =
                     (AssetHash.ofBytes tzxBytes)
                     eventText
 
+            let body =
+                sprintf
+                    "{\"format\":\"jetpacfr-replay\",\"version\":1,\"gameId\":\"jetpac\",\"romSha256\":\"%s\",\"tzxSha256\":\"%s\",\"events\":[%s]}"
+                    (AssetHash.ofBytes romBytes)
+                    (AssetHash.ofBytes tzxBytes)
+                    eventText
+
             storage?setItem (key romBytes tzxBytes, body)
         with _ ->
             ()

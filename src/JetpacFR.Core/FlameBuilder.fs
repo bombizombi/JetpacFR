@@ -66,6 +66,7 @@ module FlameBuilder =
 
                 while port.CycleCount() < frameEnd do
                     let irq = port.IrqPending && port.Iff1
+                    let pc = port.Regs.Pc()
                     let cyclesBefore = port.CycleCount()
 
                     if irq then
@@ -116,7 +117,6 @@ module FlameBuilder =
                               FlagsAfter = 0uy
                               Taken = (if after <> ((vector + vlen) &&& 0xFFFF) then 1uy else 0uy) }
                     else
-                        let pc = port.Regs.Pc()
                         let len = Disasm.disasmLength port.Memory pc
                         let m = port.Memory
                         let b0 = m[pc &&& 0xFFFF]

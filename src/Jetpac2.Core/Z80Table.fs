@@ -7661,40 +7661,15 @@ module Z80Table =
                m.Write(m.Regs.Wz(), lhs ||| (1 <<< 7)))
            None |]
 
-    (*
-    old step before optimization
-    let step (m: Machine) =
-        let pc = m.Regs.Pc()
-        let op = int m.Memory[pc &&& 0xFFFF]
-
-        //optimization
-        let inline run (table: (Machine -> unit) option[]) (idx: int) =
-            match table[idx] with
-            | Some f -> f m
-            | None -> failwithf "no code at 0x%04X" pc
-
-        match op with
-        | 0xDD ->
-            let second = int m.Memory[(pc + 1) &&& 0xFFFF]
-
             match second with
-            | 0xCB -> run dd_cb (int m.Memory[(pc + 3) &&& 0xFFFF])
+            | 0xCB -> run fd_cb (int m.Memory[(pc + 3) &&& 0xFFFF])  m pc
             | 0xDD
             | 0xFD
-            | 0xED -> run dd second // nested prefix: consume+dispatch
-            | _ -> run dd second
-        | 0xFD ->
-            let second = int m.Memory[(pc + 1) &&& 0xFFFF]
-
-            match second with
-            | 0xCB -> run fd_cb (int m.Memory[(pc + 3) &&& 0xFFFF])
-            | 0xDD
-            | 0xFD
-            | 0xED -> run fd second
-            | _ -> run fd second
-        | 0xED -> run ed (int m.Memory[(pc + 1) &&& 0xFFFF])
-        | 0xCB -> run cb (int m.Memory[(pc + 1) &&& 0xFFFF])
-        | _ -> run main op
+            | 0xED -> run fd second  m pc
+            | _ -> run fd second  m pc
+        | 0xED -> run ed (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
+        | 0xCB -> run cb (int m.Memory[(pc + 1) &&& 0xFFFF])  m pc
+        | _ -> run main op m pc
 
     *)
 

@@ -305,56 +305,72 @@
       "name": "WriteShiftedSpriteToBuff"
     },
     {
+      "kind": "line",
+      "addr": 25397,
+      "text": "new game key pressed"
+    }
+  ],
+  "symbols": [
       "addr": 28313,
       "name": "ShiftSprite2Right"
     },
     {
-      "addr": 29126,
-      "name": "clearAttribs"
+      "addr": 29422,
+      "name": "HL_previous_line"
     },
     {
       "addr": 24714,
       "name": "ResetScreen"
     },
     {
-      "addr": 28980,
-      "name": "implDispText"
+      "kind": "line",
+      "addr": 29466,
+      "text": "menu idle"
     },
     {
-      "addr": 28972,
-      "name": "DispHighScore"
+      "kind": "line",
+      "addr": 29467,
+      "text": "menu idle"
     },
     {
-      "addr": 28962,
-      "name": "DispP2Score"
+      "kind": "line",
+      "addr": 29468,
+      "text": "menu idle"
     },
     {
-      "addr": 28952,
-      "name": "DisplayP1Score"
+      "kind": "line",
+      "addr": 29469,
+      "text": "menu idle"
     },
     {
-      "addr": 29036,
-      "name": "DrawString"
+      "kind": "line",
+      "addr": 29470,
+      "text": "menu idle"
     },
     {
-      "addr": 29004,
-      "name": "DrawFontChar"
+      "kind": "line",
+      "addr": 29472,
+      "text": "menu idle"
     },
     {
-      "addr": 29198,
-      "name": "pixelXY_to_attrib"
+      "kind": "line",
+      "addr": 29474,
+      "text": "menu idle"
     },
     {
-      "addr": 29448,
-      "name": "pixelXY_to_screen"
+      "kind": "line",
+      "addr": 29475,
+      "text": "menu idle"
     },
     {
-      "addr": 25345,
-      "name": "MenuWriteText"
+      "kind": "line",
+      "addr": 29476,
+      "text": "menu idle"
     },
     {
-      "addr": 29422,
-      "name": "HL_previous_line"
+      "kind": "line",
+      "addr": 29477,
+      "text": "menu idle"
     },
     {
       "addr": 29112,

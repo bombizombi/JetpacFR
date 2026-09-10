@@ -84,12 +84,18 @@ module LauncherView =
     type LauncherContext =
         { OpenEmulator: GameManifest -> unit
           OpenCheatEngine: GameManifest -> unit
+          OpenJustGame: GameManifest -> unit }
           OpenJustGame: GameManifest -> unit
           BootSlow: GameManifest -> unit
           SetTheme: Theme.Mode -> unit
           IsLight: unit -> bool }
 
     let build (ctx: LauncherContext) : DockPanel * (unit -> unit) =
+        let bg = SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
+        let panel = SolidColorBrush(Color.FromRgb(0x18uy, 0x1Cuy, 0x24uy))
+        let normal = SolidColorBrush(Color.FromRgb(0xC8uy, 0xC8uy, 0xCEuy))
+        let dim = SolidColorBrush(Color.FromRgb(0x8Auy, 0x8Auy, 0x92uy))
+        let green = SolidColorBrush(Color.FromRgb(0x4Euy, 0xE0uy, 0x60uy))
         let bg = Theme.bg
         let panel = Theme.panel
         let normal = Theme.normal
@@ -204,25 +210,52 @@ module LauncherView =
             grid.Children.Add nameCol |> ignore
 
             let status = StackPanel(Orientation = Orientation.Horizontal)
+            let tracePath = Path.Combine(g.GameDirectory, StateTimelineStore.FileName)
+            let fi = FileInfo(tracePath)
             let slots = TimelineSlots.list g.GameDirectory
             let hasKeys = FileInfo(ReplayStore.path g).Exists
             let hasCtrl = FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists
             let hasCE = GameRegistry.tryFind g.GameId |> Option.isSome
 
+            if fi.Exists then
+                statusCell status 110.0 (sprintf "trace: %.1f MB" (float fi.Length / (1024.0 * 1024.0))) true
             if List.isEmpty slots then
                 statusCell status 110.0 "traces: none" false
             else
+                statusCell status 110.0 "trace: none" false
                 let totalMB = slots |> List.sumBy (fun s -> float s.Bytes / (1024.0 * 1024.0))
                 statusCell status 110.0 (sprintf "traces: %d (%.1f MB)" slots.Length totalMB) true
 
+            statusCell
+                status
+                82.0
+                (sprintf "keys: %s" (if FileInfo(ReplayStore.path g).Exists then "yes" else "no"))
+                (FileInfo(ReplayStore.path g).Exists)
             statusCell status 82.0 (sprintf "keys: %s" (if hasKeys then "yes" else "no")) hasKeys
 
             statusCell
                 status
                 106.0
+                (sprintf
+                    "control: %s"
+                    (if FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists then
+                         "yes"
+                     else
+                         "no"))
+                (FileInfo(Path.Combine(g.GameDirectory, "control.json")).Exists)
                 (sprintf "control: %s" (if hasCtrl then "yes" else "no"))
                 hasCtrl
 
+            statusCell
+                status
+                86.0
+                (sprintf
+                    "CE: %s"
+                    (if GameRegistry.tryFind g.GameId |> Option.isSome then
+                         "yes"
+                     else
+                         "no"))
+                (GameRegistry.tryFind g.GameId |> Option.isSome)
             statusCell status 86.0 (sprintf "CE: %s" (if hasCE then "yes" else "no")) hasCE
 
             statusCell status 92.0 (sprintf "boot: %s" g.Boot) true
@@ -314,8 +347,48 @@ module LauncherView =
             refill ()
             reselectDefault ())
 
+        Grid.SetColumn(rescan, 0)
+        bottom.Children.Add rescan |> ignore
         let leftBox =
             StackPanel(Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left)
+
+        Grid.SetColumn(leftBox, 0)
+        bottom.Children.Add leftBox |> ignore
+        leftBox.Children.Add rescan |> ignore
+
+        // The deliberately small alternative boot path: emulate the real tape
+        // instead of the flash loader (for custom loaders the trap cannot
+        // serve, or for authenticity).
+        let slowBoot =
+            Button(
+                Content = "Slow tape boot",
+                Width = 112.0,
+                Height = 24.0,
+                Margin = Thickness(8.0, 0.0, 0.0, 0.0),
+                ToolTip =
+                    "open the selected game by emulating the real tape load (the flash loader is skipped; ~40 s the first time, cached afterwards)"
+            )
+
+        slowBoot.Click.Add(fun _ ->
+            match selectedGame with
+            | Some g -> ctx.BootSlow g
+            | None -> ())
+
+        leftBox.Children.Add slowBoot |> ignore
+
+        let themeToggle =
+            CheckBox(
+                Content = "Light theme",
+                IsChecked = Nullable<bool>(ctx.IsLight()),
+                Foreground = dim,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(12.0, 0.0, 0.0, 0.0),
+                ToolTip = "day/night UI theme (saved to gui.cfg)"
+            )
+
+        themeToggle.Checked.Add(fun _ -> ctx.SetTheme Theme.Light)
+        themeToggle.Unchecked.Add(fun _ -> ctx.SetTheme Theme.Dark)
+        leftBox.Children.Add themeToggle |> ignore
 
         Grid.SetColumn(leftBox, 0)
         bottom.Children.Add leftBox |> ignore

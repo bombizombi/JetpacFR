@@ -105,6 +105,7 @@ type GameOnlyView
         col.Children.Add revLabel |> ignore
         self.Children.Add col |> ignore
         self.Focusable <- true
+        self.Background <- SolidColorBrush(Color.FromRgb(0x10uy, 0x10uy, 0x16uy))
         self.Background <- Theme.bg
 
         // keyboard on the view itself: F3 hold = reverse, Escape = main menu

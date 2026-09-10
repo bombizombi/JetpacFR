@@ -383,8 +383,6 @@ type MainWindow() as self =
             statusText.Text <- sprintf "%s: saved timeline ignored (%s)" game.Name reason
             false
 
-    let loadTimeline (game: GameManifest) (s: TraceSession) : bool =
-        loadSlotTimeline game s (slotPath game currentSlot)
 
 
     /// One-shot: the launcher's "Slow tape boot" button forces the next
@@ -1386,6 +1384,46 @@ type MainWindow() as self =
                 if e.Taken = 1uy then sprintf "   -> %04X" e.Target
                 elif isBranch e.B0 then "   (not taken)"
                 else ""
+
+            let sm =
+                if (currentSelfModified ())[int e.Pc] then
+                    "   [self-mod]"
+                else
+                    ""
+
+            let lifted =
+                match Jetpac3.Core.LiftedRoutines.registryHook (int e.Pc) with
+                | Some _ -> "   [lift]"
+                | None -> ""
+            // IDA-style merged text: a lifted step can run several instructions
+            // inside one recorded step (only the entry's first-instruction bytes
+            // were fetched into the row), so show the whole folded sequence.
+            let text =
+                match Jetpac3.Core.LiftedRoutines.folded (int e.Pc) with
+                | Some insns -> String.concat "; " insns
+                | None -> insn.Text
+
+            let text = text + branchAnnotation (int e.Pc) e.B0 e.B1 e.B2
+
+            let brush =
+                if isCall e.B0 then cyan
+                elif isRet e.B0 then yellow
+                elif isBranch e.B0 then green
+                else normal
+
+            let cm = if comment <> "" then sprintf "  ; %s" comment else ""
+
+            // a named function start shows its name at the end of the line,
+            // after the comment
+            let nm =
+                named |> Option.map (fun (n, _) -> sprintf "  [%s]" n) |> Option.defaultValue ""
+
+            { Tag = sprintf "%07d  %04X  %-11s %3dt  %s%s%s%s%s%s" idx e.Pc hex (int e.Cycles) text tail sm lifted cm nm
+              Brush = brush
+              Tint = null
+              IsCurrent = isCurrent
+              Addr = int e.Pc
+              InstrIdx = idx }
 
             let sm =
                 if (currentSelfModified ())[int e.Pc] then
@@ -2705,96 +2743,6 @@ type MainWindow() as self =
                     heatPixels[p + 3] <- 255uy
 
         heatBmp.WritePixels(Int32Rect(0, 0, 256, 256), heatPixels, 256 * 4, 0)
-
-    let segmentsOf (t: Trace) : int[] =
-        let n = max 1 (t.Entries.Length / 512)
-        let segs = Array.zeroCreate<int> 512
-        // Bucket by entry index, not Tick: Tick is absolute machine cycles
-        // (~20 per instruction), so tick/n would blow past 511 a few percent
-        // into the trace and pile everything into the last bucket.
-        let mutable i = 0
-
-        for e in t.Entries do
-            segs[min 511 (i / n)] <- segs[min 511 (i / n)] + 1
-            i <- i + 1
-
-        segs
-
-    let refreshStrip () =
-        let segs =
-            match flameTrace with
-            | Some t -> segmentsOf t
-            | None ->
-                match loaded with
-                | Some t -> segmentsOf t
-                | None ->
-                    match session with
-                    | Some s -> s.Recorder.SegmentCounts
-                    | None -> Array.empty
-
-        if segs.Length > 0 then
-            let maxS = max 1 (Array.max segs)
-            let logMax = log10 (float (maxS + 1))
-
-            for sx in 0 .. segs.Length - 1 do
-                let v = log10 (float (segs[sx] + 1)) / logMax
-                let r = byte (60 + int (v * 160.0))
-                let g = byte (120 + int (v * 100.0))
-                let b = byte (60 + int (v * 60.0))
-
-                for sy in 0..23 do
-                    let p = (sy * 512 + sx) * 4
-                    stripPixels[p] <- b
-                    stripPixels[p + 1] <- g
-                    stripPixels[p + 2] <- r
-                    stripPixels[p + 3] <- 255uy
-
-            let n = currentEntryCount ()
-
-            if n > 1 then
-                // Clamp before projecting: cursor can legitimately be stale (a game
-                // switch keeps it while the new session's trace is still tiny), and
-                // an unclamped cx indexes far outside the 512-wide bitmap.
-                let c = max 0 (min cursor (n - 1))
-                let cx = int (int64 c * 511L / int64 (n - 1))
-
-                for sy in 0..23 do
-                    let p = (sy * 512 + cx) * 4
-                    stripPixels[p] <- 255uy
-                    stripPixels[p + 1] <- 255uy
-                    stripPixels[p + 2] <- 255uy
-                    stripPixels[p + 3] <- 255uy
-
-            stripBmp.WritePixels(Int32Rect(0, 0, 512, 24), stripPixels, 512 * 4, 0)
-        // The T-range label needs a built trace, but currentTrace() can
-        // linearize the recorder's whole ring - while the machine runs that
-        // ring refills as fast as it drains, so a per-tick rebuild here cost
-        // hundreds of ms and starved the frame timer. While live, describe
-        // the last built window instead (pauseGame rebuilds on taking over).
-        let stripTrace = if running || replaying then built else currentTrace ()
-
-        match stripTrace with
-        | Some t when t.Entries.Length > 0 ->
-            let firstT = int64 t.Entries[0].Tick
-            let lastE = t.Entries[t.Entries.Length - 1]
-            let lastT = int64 lastE.Tick + int64 lastE.Cycles
-            let span = max 0L (lastT - firstT)
-
-            let frames =
-                if t.FrameTicks.Length > 0 then
-                    sprintf ", %d frames" t.FrameTicks.Length
-                else
-                    ""
-
-            traceRangeLabel.Text <-
-                sprintf
-                    "T %s → %s  (%sT = %.1f ms)  %d instrs%s"
-                    (firstT.ToString "N0")
-                    (lastT.ToString "N0")
-                    (span.ToString "N0")
-                    (float span / 3500.0)
-                    t.Entries.Length
-                    frames
         | _ -> traceRangeLabel.Text <- "T ----"
 
     // ---- graphics view --------------------------------------------------------
@@ -2857,26 +2805,14 @@ type MainWindow() as self =
         refreshStrip ()
         refreshCursorLabel ()
 
-    /// Day/night switch for the whole window: shared brushes, custom canvases,
-    /// data repaint, immediate gui.cfg persist. Both the menu toggle and the
-    /// emulator toolbar toggle route through here.
-    let applyTheme (m: Theme.Mode) =
-        Theme.apply m
-        flameCtrl.RefreshTheme()
-        timeline.RefreshTheme()
-        controlMap.RefreshTheme()
-        refreshAll ()
-        GuiConfig.save ()
-
-    let syncSlider () =
-        let n = currentEntryCount ()
-        syncingSlider <- true
-
-        if n > 1 then
-            slider.Minimum <- 0.0
-            slider.Maximum <- float (n - 1)
-            slider.Value <- float (max 0 (min cursor (n - 1)))
-            slider.IsEnabled <- true
+  let syncSlider () =
+    let n = currentEntryCount ()
+    syncingSlider <- true
+    if n > 1 then
+      slider.Minimum <- 0.0
+      slider.Maximum <- float (n - 1)
+      slider.Value <- float (max 0 (min cursor (n - 1)))
+      slider.IsEnabled <- true
 
     // ---- phase 2: mined routines, call graph, selection --------------------
     let refreshRoutines () =
@@ -3009,45 +2945,135 @@ type MainWindow() as self =
                         | _ -> 100
 
                     if dFrom < 100 && depth[e.Callee] > dFrom + 1 then
-                        depth[e.Callee] <- dFrom + 1
-                        changed <- true
+    let refreshStrip () =
+        let segs =
+            match flameTrace with
+            | Some t -> segmentsOf t
+            | None ->
+                match loaded with
+                | Some t -> segmentsOf t
+                | None ->
+                    match session with
+                    | Some s -> s.Recorder.SegmentCounts
+                    | None -> Array.empty
 
-            let colWidth = 150.0
-            let rowHeight = 44.0
-            let columns = Dictionary<int, ResizeArray<int>>()
+        if segs.Length > 0 then
+            let maxS = max 1 (Array.max segs)
+            let logMax = log10 (float (maxS + 1))
 
-            for r in minedRoutines do
-                let d =
-                    match depth.TryGetValue r.Entry with
-                    | true, v -> min v 9
-                    | _ -> 1
+            for sx in 0 .. segs.Length - 1 do
+                let v = log10 (float (segs[sx] + 1)) / logMax
+                let r = byte (60 + int (v * 160.0))
+                let g = byte (120 + int (v * 100.0))
+                let b = byte (60 + int (v * 60.0))
 
-                match columns.TryGetValue d with
-                | true, list -> list.Add r.Entry
-                | _ ->
-                    let list = ResizeArray<int>()
-                    list.Add r.Entry
-                    columns[d] <- list
+                for sy in 0..23 do
+                    let p = (sy * 512 + sx) * 4
+                    stripPixels[p] <- b
+                    stripPixels[p + 1] <- g
+                    stripPixels[p + 2] <- r
+                    stripPixels[p + 3] <- 255uy
 
-            let pos = Dictionary<int, Point>()
+            let n = currentEntryCount ()
 
-            for kv in columns do
-                kv.Value
-                |> Seq.iteri (fun row entry ->
-                    pos[entry] <- Point(20.0 + float kv.Key * colWidth, 20.0 + float row * rowHeight))
+            if n > 1 then
+                // Clamp before projecting: cursor can legitimately be stale (a game
+                // switch keeps it while the new session's trace is still tiny), and
+                // an unclamped cx indexes far outside the 512-wide bitmap.
+                let c = max 0 (min cursor (n - 1))
+                let cx = int (int64 c * 511L / int64 (n - 1))
 
-            pos[-1] <- Point(20.0, 20.0)
-            // edges under nodes
-            for e in minedEdges do
-                match pos.TryGetValue e.Caller, pos.TryGetValue e.Callee with
-                | (true, p1), (true, p2) ->
+                for sy in 0..23 do
+                    let p = (sy * 512 + cx) * 4
+                    stripPixels[p] <- 255uy
+                    stripPixels[p + 1] <- 255uy
+                    stripPixels[p + 2] <- 255uy
+                    stripPixels[p + 3] <- 255uy
+
+            stripBmp.WritePixels(Int32Rect(0, 0, 512, 24), stripPixels, 512 * 4, 0)
+        // The T-range label needs a built trace, but currentTrace() can
+        // linearize the recorder's whole ring - while the machine runs that
+        // ring refills as fast as it drains, so a per-tick rebuild here cost
+        // hundreds of ms and starved the frame timer. While live, describe
+        // the last built window instead (pauseGame rebuilds on taking over).
+        let stripTrace = if running || replaying then built else currentTrace ()
+
+        match stripTrace with
+        | Some t when t.Entries.Length > 0 ->
+            let firstT = int64 t.Entries[0].Tick
+            let lastE = t.Entries[t.Entries.Length - 1]
+            let lastT = int64 lastE.Tick + int64 lastE.Cycles
+            let span = max 0L (lastT - firstT)
+
+            let frames =
+                if t.FrameTicks.Length > 0 then
+                    sprintf ", %d frames" t.FrameTicks.Length
+                else
+                    ""
+
+            traceRangeLabel.Text <-
+                sprintf
+                    "T %s → %s  (%sT = %.1f ms)  %d instrs%s"
+                    (firstT.ToString "N0")
+                    (lastT.ToString "N0")
+                    (span.ToString "N0")
+                    (float span / 3500.0)
+                    t.Entries.Length
+                    frames
+        | _ -> traceRangeLabel.Text <- "T ----"
+
+    // ---- graphics view --------------------------------------------------------
+    // Sprite finder: draws an 8 KB window of memory starting at gfxBase,
+    // read byte for byte. One byte = 8 horizontal pixels (MSB leftmost):
+    // the first width/8 bytes sit side by side on bitmap row 0, the next
+    // width/8 on row 1, and so on; at the bitmap bottom drawing wraps to
+    // the top of the next row-width column. With the default 8 the bytes
+    // simply march down the bitmap and step 8px right every 256 bytes, so
+    // consecutive bytes form an unbroken vertical run and sprite data
+    // reads as contiguous streaks instead of scatter. Black and white
+    // only: 1-bits white, 0-bits black.
+    let refreshGfx () =
+        let baseAddr = gfxBase &&& 0xFFFF
+        let w = max 8 (min 256 gfxRowWidth)
+        let bytesPerRow = w / 8
+        let blocks = 256 / w
+
+        for p in 0..4 .. gfxPixels.Length - 4 do
+            gfxPixels[p] <- 0uy
+            gfxPixels[p + 1] <- 0uy
+            gfxPixels[p + 2] <- 0uy
+            gfxPixels[p + 3] <- 255uy
+
+        match currentMemory () with
+        | Some mem ->
+            for block in 0 .. blocks - 1 do
+                for row in 0..255 do
+                    for byteInRow in 0 .. bytesPerRow - 1 do
+                        let i = (block * 256 + row) * bytesPerRow + byteInRow
+                        let bits = mem[(baseAddr + i) &&& 0xFFFF]
+                        let px = block * w + byteInRow * 8
+
+                        for col in 0..7 do
+                            if bits &&& (0x80uy >>> col) <> 0uy then
+                                let p = ((row * 256) + (px + col)) * 4
+                                gfxPixels[p] <- 0xFFuy
+                                gfxPixels[p + 1] <- 0xFFuy
+                                gfxPixels[p + 2] <- 0xFFuy
+        | None -> ()
+
+        gfxBmp.WritePixels(Int32Rect(0, 0, 256, 256), gfxPixels, 256 * 4, 0)
+        let visible = blocks * bytesPerRow * 256
+        let hi = (baseAddr + visible - 1) &&& 0xFFFF
+        gfxAddrLabel.Text <- sprintf "%04Xh - %04Xh (%d bytes)" baseAddr hi visible
                     let line =
-                        System.Windows.Shapes.Line(X1 = p1.X + 104.0, Y1 = p1.Y + 14.0, X2 = p2.X, Y2 = p2.Y + 14.0)
+    let refreshCursorLabel () =
+        let n = currentEntryCount ()
 
-                    line.Stroke <- dim
-                    line.StrokeThickness <- 1.0
-                    graphCanvas.Children.Add line |> ignore
-
+        if n = 0 then
+            cursorLabel.Text <- "no trace yet - play the game"
+        else
+            let c = max 0 (min cursor (n - 1))
+            cursorLabel.Text <- sprintf "instr %d / %d   pc=%04X" c (n - 1) (int currentTrace().Value.Entries[c].Pc)
                     let label =
                         TextBlock(Text = string e.Count, Foreground = dim, FontSize = 10.0, FontFamily = mono)
 
@@ -3056,14 +3082,26 @@ type MainWindow() as self =
                     graphCanvas.Children.Add label |> ignore
                 | _ -> ()
 
-            let nodeBox (entry: int) (title: string) (sub: string) (brush: SolidColorBrush) =
-                let border =
-                    Border(
-                        Width = 104.0,
-                        Height = 28.0,
-                        BorderBrush = brush,
-                        BorderThickness = Thickness(2.0),
-                        Background = panel
+    /// Day/night switch for the whole window: shared brushes, custom canvases,
+    /// data repaint, immediate gui.cfg persist. Both the menu toggle and the
+    /// emulator toolbar toggle route through here.
+    let applyTheme (m: Theme.Mode) =
+        Theme.apply m
+        flameCtrl.RefreshTheme()
+        timeline.RefreshTheme()
+        controlMap.RefreshTheme()
+        refreshAll ()
+        GuiConfig.save ()
+
+    let syncSlider () =
+        let n = currentEntryCount ()
+        syncingSlider <- true
+
+        if n > 1 then
+            slider.Minimum <- 0.0
+            slider.Maximum <- float (n - 1)
+            slider.Value <- float (max 0 (min cursor (n - 1)))
+            slider.IsEnabled <- true
                     )
 
                 let stack = StackPanel()
@@ -3195,14 +3233,33 @@ type MainWindow() as self =
             parityLabel.Text <- "no CE program for this game yet"
             None
 
-    /// Switch the engine (Interpreter <-> CE); returns true when the switch
-    /// happened.
-    let switchEngine (toCE: bool) : bool =
-        if toCE then
-            match currentGame with
-            | Some g when hasCE g ->
-                if session.IsSome then
-                    pauseGame ()
+  /// Switch the engine (Interpreter <-> CE); returns true when the switch
+  /// happened.
+  let switchEngine (toCE: bool) : bool =
+    if toCE then
+      match currentGame with
+      | Some g when hasCE g ->
+        if session.IsSome then pauseGame ()
+        match startCE g with
+        | Some ce ->
+          session <- None
+          ceGame <- Some ce
+          engineCE <- true
+          running <- true
+          frameTimer.Start()
+          statusText.Text <- sprintf "%s running on the CE engine (compiled F#)" g.Name
+          true
+        | None -> false
+      | _ -> false
+    else if engineCE then
+      ceGame <- None
+      engineCE <- false
+      pauseGame ()
+      match currentGame with
+      | Some g -> launchGame g; loadControlForGame ()
+      | None -> ()
+      true
+    else true
 
                 match startCE g with
                 | Some ce ->
@@ -3248,25 +3305,17 @@ type MainWindow() as self =
     let stepFwd10 () = seek 10
     let stepFwd100 () = seek 100
 
-    /// Park the session machine exactly on the trace entry under the cursor:
-    /// restore the state after frame - 1 and re-execute the frame prefix with
-    /// recording suppressed - memory, registers and the screen become the
-    /// exact state of that moment (the same mechanism the flame seek uses).
-    /// Best effort: when the frame is outside restorable history (deep live
-    /// frames, a loaded trace with no stored states) the step stays
-    /// display-only and says so.
-    let syncToCursor () =
-        match session, currentTrace () with
-        | Some s, Some t when t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
-            let c = max 0 (min cursor (t.Entries.Length - 1))
-            let frameNo = frameOfEntry t c
-            // First entry of that frame: boundary [frame - 2] ends frame - 1
-            // (0-padded window leads read as the window's first entry).
-            let firstInFrame =
-                if frameNo < 2 || frameNo - 2 >= t.FrameTicks.Length then
-                    0
-                else
-                    let tick' = t.FrameTicks[frameNo - 2]
+  let toggleCinema () =
+    buildTraceNow ()
+    if cinemaPlaying then
+      cinemaPlaying <- false
+      cinemaTimer.Stop()
+      playBtn.Content <- "Play"
+    else
+      if currentEntryCount () > 0 then
+        cinemaPlaying <- true
+        cinemaTimer.Start()
+        playBtn.Content <- "Pause"
 
                     let rec s2 (lo: int) (hi: int) =
                         if lo >= hi then
@@ -3453,6 +3502,271 @@ type MainWindow() as self =
         with ex ->
             statusText.Text <- "save failed: " + ex.Message
 
+  let loadTrace () =
+    let dlg = Microsoft.Win32.OpenFileDialog(Filter = "Jetpac trace (*.jpt)|*.jpt")
+    if dlg.ShowDialog() = Nullable<bool>(true) then
+      try
+        let t = TraceCodec.load dlg.FileName
+        loaded <- Some t
+        cursor <- 0
+    /// Switch the engine (Interpreter <-> CE); returns true when the switch
+    /// happened.
+    let switchEngine (toCE: bool) : bool =
+        if toCE then
+            match currentGame with
+            | Some g when hasCE g ->
+                if session.IsSome then
+                    pauseGame ()
+
+                match startCE g with
+                | Some ce ->
+                    session <- None
+                    ceGame <- Some ce
+                    engineCE <- true
+                    running <- true
+                    frameTimer.Start()
+                    statusText.Text <- sprintf "%s running on the CE engine (compiled F#)" g.Name
+                    true
+                | None -> false
+            | _ -> false
+        else if engineCE then
+            ceGame <- None
+            engineCE <- false
+            pauseGame ()
+
+            match currentGame with
+            | Some g ->
+                launchGame (g, None)
+                loadControlForGame ()
+            | None -> ()
+
+            true
+        else
+            true
+  do
+    self.Title <- "JetpacFR - reversing lab"
+    self.Width <- 1560.0
+    self.Height <- 900.0
+    self.Background <- bg
+
+    gameImage.Source <- gameBitmap
+    gameImage.Stretch <- Stretch.Uniform
+    gameImage.Width <- 320.0
+    gameImage.Height <- 256.0
+    RenderOptions.SetBitmapScalingMode(gameImage, BitmapScalingMode.NearestNeighbor)
+
+        heatImage.Source <- heatBmp
+        heatImage.Width <- 256.0
+        heatImage.Height <- 256.0
+        heatImage.Stretch <- Stretch.None
+
+        stripImage.Source <- stripBmp
+        stripImage.Width <- 512.0
+    /// Park the session machine exactly on the trace entry under the cursor:
+    /// restore the state after frame - 1 and re-execute the frame prefix with
+    /// recording suppressed - memory, registers and the screen become the
+    /// exact state of that moment (the same mechanism the flame seek uses).
+    /// Best effort: when the frame is outside restorable history (deep live
+    /// frames, a loaded trace with no stored states) the step stays
+    /// display-only and says so.
+    let syncToCursor () =
+        match session, currentTrace () with
+        | Some s, Some t when t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
+            let c = max 0 (min cursor (t.Entries.Length - 1))
+            let frameNo = frameOfEntry t c
+            // First entry of that frame: boundary [frame - 2] ends frame - 1
+            // (0-padded window leads read as the window's first entry).
+            let firstInFrame =
+                if frameNo < 2 || frameNo - 2 >= t.FrameTicks.Length then
+                    0
+                else
+                    let tick' = t.FrameTicks[frameNo - 2]
+
+                    let rec s2 (lo: int) (hi: int) =
+                        if lo >= hi then
+                            lo
+                        else
+                            let mid = (lo + hi) / 2
+
+                            if t.Entries[mid].Tick < tick' then
+                                s2 (mid + 1) hi
+                            else
+                                s2 lo mid
+
+                    s2 0 t.Entries.Length
+            // Steps count real instructions: an interrupt marker shares its Step
+            // with the vector instruction.
+            let mutable steps = 0
+
+            for k in firstInFrame..c do
+                if t.Entries[k].Length > 0uy then
+                    steps <- steps + 1
+
+            if steps > 0 then
+                try
+                    s.ParkAtInstruction(frameNo, steps)
+                    presentGame ()
+                    showLiveRegs s |> ignore
+                with ex ->
+                    statusText.Text <- sprintf "no state for frame %d (%s) - step is display-only" frameNo ex.Message
+        | _ -> ()
+
+    /// After any step: point the editors at the live machine. Memory/graph
+    /// view centers on PC - a full jump, so a wheeled-away viewport recenters
+    /// and the cursor row lands in view; the comment pane is memCursor-bound,
+    /// so the 10 Hz pane poll picks it up everywhere within a tick.
+    let followLivePc (reason: string) =
+        match session with
+        | Some s ->
+            labelEditor <- None
+            gotoMemCursor (int (s.Regs.Pc()) &&& 0xFFFF) reason
+            refreshDisasm ()
+        | None -> ()
+
+    /// Debugger-style stepping: move the trace cursor, then park the machine
+    /// on the new entry so registers, memory and the screen reflect the exact
+    /// state of that moment (recording stays suppressed; Run resumes live
+    /// execution from the parked position). Step into = the next executed
+    /// entry. Step over = when the cursor sits on a call, land on its return
+    /// site: the next executed entry at the call's fall-through address (a
+    /// not-taken conditional call therefore just advances one). If the routine
+    /// never returns inside the recorded trace, the cursor parks on the last
+    let stepInto () =
+        match session with
+        | Some s when s.LiveMode ->
+            // No trace: advance the live machine one instruction and show it.
+            pauseGame ()
+            s.StepLiveInstructions(1)
+            presentGame ()
+            showLiveRegs s |> ignore
+        | _ ->
+            pauseGame ()
+            seek 1
+            syncToCursor ()
+
+        followLivePc "step into"
+
+    let stepBack () =
+        pauseGame ()
+        seek -1
+        syncToCursor ()
+        followLivePc "step back"
+
+    let stepOver () =
+        match session with
+        | Some _s when _s.LiveMode -> statusText.Text <- "step over needs a trace - use step into (F11) in live play"
+        | _ ->
+            pauseGame ()
+
+            match currentTrace () with
+            | Some t when t.Entries.Length > 0 ->
+                let c = max 0 (min cursor (t.Entries.Length - 1))
+                let e = t.Entries[c]
+
+                if e.Length > 0uy && isCall e.B0 && c < t.Entries.Length - 1 then
+                    let fallThrough = (int e.Pc + int e.Length) &&& 0xFFFF
+                    let mutable k = c + 1
+
+                    while k < t.Entries.Length && int t.Entries[k].Pc <> fallThrough do
+                        k <- k + 1
+
+                    seek (min (t.Entries.Length - 1) k - c)
+                else
+                    seek 1
+            | _ -> ()
+
+            syncToCursor ()
+            followLivePc "step over"
+
+    /// "Jump to previous execution of this instruction" (code row menu): scan
+    /// the browsed trace backwards from the clicked entry for the same PC, and
+    /// report execution counts in the status line - total, before, and after
+    /// are computed in one forward pass (a 4M-entry sweep is a few
+    /// milliseconds, fine for a menu click). The machine is parked on the
+    /// landed entry, so state is exact like the step buttons.
+    let jumpToPrevExecFromIndex (idx: int) =
+        match currentTrace () with
+        | Some t when t.Entries.Length > 0 && idx >= 0 && idx < t.Entries.Length ->
+            let pc = int t.Entries[idx].Pc
+            let mutable total = 0
+            let mutable before = 0
+
+            for i in 0 .. t.Entries.Length - 1 do
+                if int t.Entries[i].Pc = pc then
+                    total <- total + 1
+
+                    if i < idx then
+                        before <- before + 1
+
+            let after = total - before
+            let mutable k = idx - 1
+
+            while k >= 0 && int t.Entries[k].Pc <> pc do
+                k <- k - 1
+
+            if k >= 0 then
+                pauseGame ()
+                cursor <- k
+                refreshAll ()
+                syncSlider ()
+                syncToCursor ()
+
+                statusText.Text <-
+                    sprintf
+                        "prev exec of %04X: instr #%d (was #%d) - total %d, %d before, %d after"
+                        pc
+                        k
+                        idx
+                        total
+                        before
+                        after
+            else
+                statusText.Text <-
+                    sprintf
+                        "no previous execution of %04X before instr #%d - total %d, %d before, %d after"
+                        pc
+                        idx
+                        total
+                        before
+                        after
+        | _ -> statusText.Text <- "trace changed - reopen the menu"
+
+    let toggleCinema () =
+        buildTraceNow ()
+
+        if cinemaPlaying then
+            cinemaPlaying <- false
+            cinemaTimer.Stop()
+            playBtn.Content <- "Play"
+        else if currentEntryCount () > 0 then
+            cinemaPlaying <- true
+            cinemaTimer.Start()
+            playBtn.Content <- "Pause"
+        itemTemplate.VisualTree <- factory
+        disasmList.ItemTemplate <- itemTemplate
+        let containerStyle = Style(typeof<ListBoxItem>)
+        containerStyle.Setters.Add(Setter(ListBoxItem.BackgroundProperty, Brushes.Transparent))
+        containerStyle.Setters.Add(Setter(ListBoxItem.PaddingProperty, Thickness(2.0, 0.0, 2.0, 0.0)))
+        let trigger = DataTrigger(Binding = Binding("IsCurrent"), Value = box true)
+        trigger.Setters.Add(Setter(ListBoxItem.BackgroundProperty, hiBg))
+        containerStyle.Triggers.Add trigger
+        disasmList.ItemContainerStyle <- containerStyle
+        disasmList.Background <- panel
+        disasmList.BorderThickness <- Thickness(0.0)
+        disasmList.Foreground <- normal
+        disasmList.HorizontalContentAlignment <- HorizontalAlignment.Left
+
+        // mined-routine list template
+        let ritemTemplate = DataTemplate()
+        let rfactory = FrameworkElementFactory(typeof<TextBlock>)
+        rfactory.SetValue(TextBlock.TextProperty, Binding("Tag"))
+        rfactory.SetValue(TextBlock.FontFamilyProperty, mono)
+        rfactory.SetValue(TextBlock.FontSizeProperty, 11.5)
+        rfactory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
+        ritemTemplate.VisualTree <- rfactory
+        routineList.ItemTemplate <- ritemTemplate
+        let rstyle = Style(typeof<ListBoxItem>)
+        rstyle.Setters.Add(Setter(ListBoxItem.BackgroundProperty, Brushes.Transparent))
     let loadTrace () =
         let dlg = Microsoft.Win32.OpenFileDialog(Filter = "Jetpac trace (*.jpt)|*.jpt")
 
@@ -3471,7 +3785,7 @@ type MainWindow() as self =
                 refreshRoutines ()
                 refreshTray ()
                 drawGraph ()
-
+              "HL"
                 statusText.Text <-
                     sprintf
                         "loaded %d instructions from %s; mined %d routines"
@@ -3498,7 +3812,7 @@ type MainWindow() as self =
                     (if s.Recorder.RecordEnabled then "ON" else "OFF")
                     s.KeyLog.Count
         | None -> ()
-
+        let regGrid = Grid()
     /// Install a booted session per the entry choice: autoplay a slot (falls
     /// back to recording into it when the file is missing), arm a fresh
     /// recording, or run live with no trace. Callers repaint + gate after.
@@ -3726,125 +4040,6 @@ type MainWindow() as self =
         gameImage.Focusable <- true
         gameImage.FocusVisualStyle <- null
         gameImage.MouseLeftButtonDown.Add(fun _ -> gameImage.Focus() |> ignore)
-
-        heatImage.Source <- heatBmp
-        heatImage.Width <- 256.0
-        heatImage.Height <- 256.0
-        heatImage.Stretch <- Stretch.None
-
-        stripImage.Source <- stripBmp
-        stripImage.Width <- 512.0
-        stripImage.Height <- 24.0
-        stripImage.Stretch <- Stretch.None
-
-        // disassembly list template
-        let itemTemplate = DataTemplate()
-        let factory = FrameworkElementFactory(typeof<TextBlock>)
-        factory.SetValue(TextBlock.TextProperty, Binding("Tag"))
-        factory.SetValue(TextBlock.FontFamilyProperty, mono)
-        factory.SetValue(TextBlock.FontSizeProperty, 13.0)
-        factory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
-        factory.SetValue(TextBlock.BackgroundProperty, Binding("Tint"))
-        itemTemplate.VisualTree <- factory
-        disasmList.ItemTemplate <- itemTemplate
-        let containerStyle = Style(typeof<ListBoxItem>)
-        containerStyle.Setters.Add(Setter(ListBoxItem.BackgroundProperty, Brushes.Transparent))
-        containerStyle.Setters.Add(Setter(ListBoxItem.PaddingProperty, Thickness(2.0, 0.0, 2.0, 0.0)))
-        let trigger = DataTrigger(Binding = Binding("IsCurrent"), Value = box true)
-        trigger.Setters.Add(Setter(ListBoxItem.BackgroundProperty, hiBg))
-        containerStyle.Triggers.Add trigger
-        disasmList.ItemContainerStyle <- containerStyle
-        disasmList.Background <- panel
-        disasmList.BorderThickness <- Thickness(0.0)
-        disasmList.Foreground <- normal
-        disasmList.HorizontalContentAlignment <- HorizontalAlignment.Left
-
-        // mined-routine list template
-        let ritemTemplate = DataTemplate()
-        let rfactory = FrameworkElementFactory(typeof<TextBlock>)
-        rfactory.SetValue(TextBlock.TextProperty, Binding("Tag"))
-        rfactory.SetValue(TextBlock.FontFamilyProperty, mono)
-        rfactory.SetValue(TextBlock.FontSizeProperty, 11.5)
-        rfactory.SetValue(TextBlock.ForegroundProperty, Binding("Brush"))
-        ritemTemplate.VisualTree <- rfactory
-        routineList.ItemTemplate <- ritemTemplate
-        let rstyle = Style(typeof<ListBoxItem>)
-        rstyle.Setters.Add(Setter(ListBoxItem.BackgroundProperty, Brushes.Transparent))
-        rstyle.Setters.Add(Setter(ListBoxItem.PaddingProperty, Thickness(2.0, 0.0, 2.0, 0.0)))
-        let rtrigger = DataTrigger(Binding = Binding("IsSelected"), Value = box true)
-        rtrigger.Setters.Add(Setter(ListBoxItem.BackgroundProperty, hiBg))
-        rstyle.Triggers.Add rtrigger
-        routineList.ItemContainerStyle <- rstyle
-        routineList.Background <- panel
-        routineList.BorderThickness <- Thickness(0.0)
-        routineList.Foreground <- normal
-
-        routineList.SelectionChanged.Add(fun _ ->
-            if not syncingRoutines then
-                match routineList.SelectedItem with
-                | :? RoutineRow as row -> selectRoutine row.Entry true
-                | _ -> ())
-
-        // register board
-        let regNames =
-            [ "AF"
-              "BC"
-              "DE"
-              "HL"
-              "AF'"
-              "BC'"
-              "DE'"
-              "HL'"
-              "IX"
-              "IY"
-              "SP"
-              "I"
-              "R"
-              "PC" ]
-
-        let regGrid = Grid()
-        regGrid.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(52.0)))
-        regGrid.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(64.0)))
-
-        for (i, name) in List.indexed regNames do
-            regGrid.RowDefinitions.Add(RowDefinition(Height = GridLength(20.0)))
-
-            let nameTb =
-                TextBlock(
-                    Text = name,
-                    Foreground = dim,
-                    FontFamily = mono,
-                    FontSize = 12.0,
-                    VerticalAlignment = VerticalAlignment.Center
-                )
-
-            let valTb =
-                TextBlock(
-                    Text = "----",
-                    Foreground = normal,
-                    FontFamily = mono,
-                    FontSize = 12.0,
-                    VerticalAlignment = VerticalAlignment.Center
-                )
-
-            Grid.SetColumn(nameTb, 0)
-            Grid.SetColumn(valTb, 1)
-            Grid.SetRow(nameTb, i)
-            Grid.SetRow(valTb, i)
-            regGrid.Children.Add(nameTb) |> ignore
-            regGrid.Children.Add(valTb) |> ignore
-            regCells[name] <- valTb
-
-        pcCell <- regCells["PC"]
-
-        // flags row: S Z 5 H 3 V N C
-        let flagLabels = [| "S"; "Z"; "5"; "H"; "3"; "V"; "N"; "C" |]
-
-        let flagsPanel =
-            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 4.0, 0.0, 0.0))
-
-        for i in 0..7 do
-            let label =
                 TextBlock(Text = flagLabels[i] + "=", Foreground = dim, FontFamily = mono, FontSize = 12.0)
 
             flagCells[i].Text <- "0"
@@ -3872,6 +4067,327 @@ type MainWindow() as self =
         left.Children.Add(regGrid) |> ignore
         left.Children.Add(flagsPanel) |> ignore
 
+    // center: timeline selector, mode buttons, disassembly, comment toolbar
+    let center = DockPanel(Margin = Thickness(8.0))
+
+        // 1. top: timeline selector with the button row underneath it
+        let tlColumn = StackPanel()
+        tlColumn.Children.Add timeline |> ignore
+
+        let tlBtns =
+            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(2.0, 4.0, 0.0, 0.0))
+
+        for b in
+            [ brushABtn :> FrameworkElement
+              brushBBtn :> FrameworkElement
+              previewABtn :> FrameworkElement
+              previewBBtn :> FrameworkElement
+              saveCtrlBtn :> FrameworkElement
+              importCtrlBtn :> FrameworkElement
+              exportCtrlBtn :> FrameworkElement
+              newCtrlBtn :> FrameworkElement
+              flameABtn :> FrameworkElement
+              flameBBtn :> FrameworkElement
+              flameFitBtn :> FrameworkElement
+              flameAutoBtn :> FrameworkElement
+              syncViewsBtn :> FrameworkElement ] do
+            b.Margin <- Thickness(2.0)
+            tlBtns.Children.Add b |> ignore
+
+        tlColumn.Children.Add tlBtns |> ignore
+        DockPanel.SetDock(tlColumn, Dock.Top)
+        center.Children.Add tlColumn |> ignore
+
+        // 2. strip + slider
+        let stripRow = StackPanel()
+        stripRow.Children.Add(stripImage) |> ignore
+        stripRow.Children.Add(slider) |> ignore
+        traceRangeLabel.Margin <- Thickness(0.0, 1.0, 0.0, 2.0)
+        stripRow.Children.Add(traceRangeLabel) |> ignore
+        DockPanel.SetDock(stripRow, Dock.Top)
+        center.Children.Add(stripRow) |> ignore
+        cursorLabel.Foreground <- dim
+        cursorLabel.FontFamily <- mono
+        cursorLabel.Margin <- Thickness(0.0, 2.0, 0.0, 2.0)
+        DockPanel.SetDock(cursorLabel, Dock.Top)
+        center.Children.Add(cursorLabel) |> ignore
+
+    // 3. engine radios + disasm mode toggles above the code window
+    let modeRow = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 4.0, 0.0, 4.0))
+    let engLabel = TextBlock(Text = "engine:", Foreground = dim, VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 4.0, 0.0))
+    modeRow.Children.Add engLabel |> ignore
+    for r in [ oracleRadio :> FrameworkElement; ceRadio :> FrameworkElement; diffRadio :> FrameworkElement ] do
+      r.Margin <- Thickness(0.0, 0.0, 10.0, 0.0)
+      r.VerticalAlignment <- VerticalAlignment.Center
+      modeRow.Children.Add r |> ignore
+    let sep1 = Border(Width = 1.0, Height = 18.0, Background = dim, Margin = Thickness(4.0, 0.0, 8.0, 0.0), VerticalAlignment = VerticalAlignment.Center)
+    modeRow.Children.Add sep1 |> ignore
+    let modeLabel = TextBlock(Text = "code view:", Foreground = dim, VerticalAlignment = VerticalAlignment.Center, Margin = Thickness(0.0, 0.0, 4.0, 0.0))
+    modeRow.Children.Add modeLabel |> ignore
+    memModeBtn.VerticalAlignment <- VerticalAlignment.Center
+    execModeBtn.VerticalAlignment <- VerticalAlignment.Center
+    modeRow.Children.Add memModeBtn |> ignore
+    modeRow.Children.Add execModeBtn |> ignore
+    DockPanel.SetDock(modeRow, Dock.Top)
+    center.Children.Add modeRow |> ignore
+
+        Grid.SetColumn(cmtSplitter, 1)
+        codeCmtHost.Children.Add cmtSplitter |> ignore
+        let cmtHost = DockPanel(Margin = Thickness(4.0, 0.0, 0.0, 0.0))
+        cmtHost.MinWidth <- 220.0
+        Grid.SetColumn(cmtHost, 2)
+        codeCmtHost.Children.Add cmtHost |> ignore
+        let cmtBar = StackPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
+
+        let cmtLabel =
+            TextBlock(
+                Text = "comment text (shared):",
+                Foreground = dim,
+                FontSize = 11.0,
+                Margin = Thickness(0.0, 0.0, 6.0, 2.0)
+            )
+
+        cmtBar.Children.Add cmtLabel |> ignore
+        cmtBar.Children.Add commentBox |> ignore
+        let cmtBtnRow = WrapPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
+
+        for b in
+            [ idxCmtBtn :> FrameworkElement
+              lineCmtBtn :> FrameworkElement
+              nameBeforeBtn :> FrameworkElement
+              nameABtn :> FrameworkElement
+              nameBBtn :> FrameworkElement
+              cmtABtn :> FrameworkElement
+              cmtBBtn :> FrameworkElement
+              cmtBNotA :> FrameworkElement
+              cmtANotB :> FrameworkElement
+              framesABtn :> FrameworkElement
+              framesBBtn :> FrameworkElement ] do
+            b.Margin <- Thickness(0.0, 0.0, 6.0, 3.0)
+            cmtBtnRow.Children.Add b |> ignore
+
+        cmtBar.Children.Add cmtBtnRow |> ignore
+        DockPanel.SetDock(cmtBar, Dock.Bottom)
+        center.Children.Add cmtBar |> ignore
+        disasmTarget.Foreground <- cyan
+        disasmTarget.FontFamily <- mono
+        disasmTarget.FontSize <- 12.0
+        disasmTarget.Margin <- Thickness(0.0, 4.0, 0.0, 4.0)
+        DockPanel.SetDock(disasmTarget, Dock.Bottom)
+        center.Children.Add disasmTarget |> ignore
+
+    // 5. the code window (fills the rest)
+    center.Children.Add(disasmList) |> ignore
+
+    // right column: heatmap / functions / call graph
+    let right = TabControl(Margin = Thickness(8.0), Background = panel)
+
+        for b in
+            [ breakBtn :> FrameworkElement
+              stepIntoBtn :> FrameworkElement
+              stepOverBtn :> FrameworkElement
+              traceStepBackBtn :> FrameworkElement ] do
+            b.Margin <- Thickness(2.0)
+            stepRow.Children.Add b |> ignore
+        // jump helpers (handlers wired later - they need focusCodeView)
+        let jumpPcBtn =
+            Button(
+                Content = "Jump To PC",
+                ToolTip =
+                    "execution mode: re-center the view on the current instruction; memory mode: jump to the machine's live PC"
+            )
+
+        let jumpAddrLabel =
+            TextBlock(
+                Text = "Jump To Address:",
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(10.0, 0.0, 4.0, 0.0),
+                Foreground = normal
+            )
+
+        let jumpAddrBox =
+            TextBox(
+                Width = 64.0,
+                FontFamily = mono,
+                Background = panel,
+                Foreground = normal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(0.0, 2.0, 2.0, 2.0),
+                ToolTip = "hex address, e.g. 7309 or 0x7309 - Enter or Go jumps"
+            )
+
+        let jumpGoBtn =
+            Button(
+                Content = "Go",
+                Width = 40.0,
+                ToolTip = "execution mode: first execution of the address in the trace; memory mode: the address itself"
+            )
+
+        jumpPcBtn.Margin <- Thickness(2.0)
+        jumpGoBtn.Margin <- Thickness(2.0, 2.0, 2.0, 2.0)
+        stepRow.Children.Add jumpPcBtn |> ignore
+        stepRow.Children.Add jumpAddrLabel |> ignore
+        stepRow.Children.Add jumpAddrBox |> ignore
+        stepRow.Children.Add jumpGoBtn |> ignore
+
+        let codeHost = Grid()
+        codeHost.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
+        codeHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star)))
+        Grid.SetRow(stepRow, 0)
+        codeHost.Children.Add stepRow |> ignore
+        Grid.SetRow(disasmList, 1)
+        codeHost.Children.Add disasmList |> ignore
+        graphScroll.Content <- codeGraphCanvas
+        graphScroll.Visibility <- Visibility.Collapsed
+        Grid.SetRow(graphScroll, 1)
+        codeHost.Children.Add graphScroll |> ignore
+        let lowerHost = Grid()
+        lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star), MinHeight = 70.0))
+        lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
+        lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.2, GridUnitType.Star)))
+        Grid.SetRow(flameCtrl, 0)
+
+        let flameSplitter =
+            GridSplitter(
+                Height = 4.0,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Background = Theme.hiBg,
+                ResizeBehavior = GridResizeBehavior.PreviousAndNext
+            )
+
+        Grid.SetRow(flameSplitter, 1)
+        // the code pane (left) and the comment pane (right) share the row
+        // below the flame graph via codeCmtHost, so the flame graph spans
+        // BOTH at full width
+        codeHost.MinWidth <- 300.0
+        Grid.SetColumn(codeHost, 0)
+        codeCmtHost.Children.Add codeHost |> ignore
+        Grid.SetRow(codeCmtHost, 2)
+        lowerHost.Children.Add flameCtrl |> ignore
+        lowerHost.Children.Add flameSplitter |> ignore
+        lowerHost.Children.Add codeCmtHost |> ignore
+        center.Children.Add lowerHost |> ignore
+
+        // right column: heatmap / functions / call graph
+        let right = TabControl(Margin = Thickness(8.0), Background = panel)
+
+        let heatTab = TabItem(Header = "Heatmap")
+        let heatPanel = StackPanel()
+
+        let heatHeader =
+            TextBlock(Text = "64K execution heatmap (click to jump)", Foreground = dim, FontSize = 12.0)
+
+        heatPanel.Children.Add heatHeader |> ignore
+        heatPanel.Children.Add heatImage |> ignore
+
+        let heatHint =
+            TextBlock(
+                Text = "black = never executed  magenta = executed then written",
+                Foreground = dim,
+                FontSize = 11.0
+            )
+
+        heatPanel.Children.Add heatHint |> ignore
+        heatTab.Content <- heatPanel
+
+        // graphics view: byte rows (8 KB window) + row width + zoom + address
+        // slider
+        let gfxTab = TabItem(Header = "Graphics")
+        let gfxPanel = DockPanel()
+
+        let gfxTop =
+            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+
+        let gfxHeader =
+            TextBlock(
+                Text = "memory as 8px rows (sprite finder)",
+                Foreground = dim,
+                FontSize = 12.0,
+                VerticalAlignment = VerticalAlignment.Center
+            )
+
+        gfxTop.Children.Add gfxHeader |> ignore
+        // row width: pixels per row; width/8 consecutive bytes are drawn side
+        // by side before stepping down. Type a value 8..256 and press Enter,
+        // or step by 8 with the buttons
+        let gfxWidthLabel =
+            TextBlock(
+                Text = "row width:",
+                Foreground = dim,
+                FontSize = 12.0,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(14.0, 0.0, 4.0, 0.0)
+            )
+
+        gfxTop.Children.Add gfxWidthLabel |> ignore
+        gfxWidthBox.Text <- string gfxRowWidth
+        gfxWidthBox.ToolTip <- "pixels per row (bytes drawn side by side); press Enter to apply"
+        gfxWidthBox.Background <- panel
+        gfxWidthBox.Foreground <- normal
+        gfxTop.Children.Add gfxWidthBox |> ignore
+
+        let applyGfxWidth (v: int) =
+            gfxRowWidth <- max 8 (min 256 v)
+            gfxWidthBox.Text <- string gfxRowWidth
+            refreshGfx ()
+
+        let commitGfxWidth () =
+            match Int32.TryParse(gfxWidthBox.Text) with
+            | true, v -> applyGfxWidth v
+            | _ -> gfxWidthBox.Text <- string gfxRowWidth
+
+        gfxWidthBox.KeyDown.Add(fun e ->
+            if e.Key = Key.Enter then
+                commitGfxWidth ())
+
+        gfxWidthBox.LostFocus.Add(fun _ -> commitGfxWidth ())
+        gfxWidthDown.ToolTip <- "narrower rows (-8 pixels)"
+        gfxWidthDown.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
+        gfxWidthDown.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth - 8))
+        gfxTop.Children.Add gfxWidthDown |> ignore
+        gfxWidthUp.ToolTip <- "wider rows (+8 pixels)"
+        gfxWidthUp.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
+        gfxWidthUp.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth + 8))
+        gfxTop.Children.Add gfxWidthUp |> ignore
+        // zoom: stretch the 256x256 bitmap by an integer factor with nearest
+        // neighbour sampling; the ScrollViewer below takes over once the
+        // enlarged image outgrows the tab
+        for z in [ 1; 2; 3; 4; 8 ] do
+            let isDflt = (z = 2)
+
+            let radio =
+                RadioButton(
+                    Content = sprintf "%dx" z,
+                    GroupName = "gfxZoom",
+                    IsChecked = Nullable<bool>(isDflt),
+                    Foreground = normal,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = Thickness(8.0, 0.0, 0.0, 0.0)
+                )
+
+            radio.Checked.Add(fun _ ->
+                gfxImage.Width <- 256.0 * float z
+                gfxImage.Height <- 256.0 * float z)
+
+            gfxTop.Children.Add radio |> ignore
+
+        DockPanel.SetDock(gfxTop, Dock.Top)
+        gfxPanel.Children.Add gfxTop |> ignore
+        // slider row: 0000h [========] FFFFh (docked bottom-most)
+        let gfxSliderRow = Grid()
+        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
+        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition())
+        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
+        gfxSliderRow.Margin <- Thickness(0.0, 2.0, 0.0, 0.0)
+
+        let gfxLoLabel =
+            TextBlock(
+                Text = "0000h",
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.0,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(0.0, 0.0, 6.0, 0.0)
         // ---- project files + trace autoplay timing (below the registers) -----
         // control.json: created (on disk) and modified (unsaved edits). CE
         // file: the game's compiled-port source (Game.fs, or the materialized
@@ -4076,49 +4592,49 @@ type MainWindow() as self =
 
         // center: timeline selector, mode buttons, disassembly, comment toolbar
         let center = DockPanel(Margin = Thickness(8.0))
+        Grid.SetColumn(gfxLoLabel, 0)
+        gfxSliderRow.Children.Add gfxLoLabel |> ignore
+        gfxSlider.VerticalAlignment <- VerticalAlignment.Center
+        Grid.SetColumn(gfxSlider, 1)
+        gfxSliderRow.Children.Add gfxSlider |> ignore
 
-        // 1. top: timeline selector with the button row underneath it
-        let tlColumn = StackPanel()
-        tlColumn.Children.Add timeline |> ignore
+        let gfxHiLabel =
+            TextBlock(
+                Text = "FFFFh",
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.0,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = Thickness(6.0, 0.0, 0.0, 0.0)
+            )
 
-        let tlBtns =
-            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(2.0, 4.0, 0.0, 0.0))
+        Grid.SetColumn(gfxHiLabel, 2)
+        gfxSliderRow.Children.Add gfxHiLabel |> ignore
+        DockPanel.SetDock(gfxSliderRow, Dock.Bottom)
+        gfxPanel.Children.Add gfxSliderRow |> ignore
+        gfxAddrLabel.Foreground <- dim
+        gfxAddrLabel.FontFamily <- mono
+        gfxAddrLabel.FontSize <- 12.0
+        gfxAddrLabel.Margin <- Thickness(0.0, 6.0, 0.0, 0.0)
+        DockPanel.SetDock(gfxAddrLabel, Dock.Bottom)
+        gfxPanel.Children.Add gfxAddrLabel |> ignore
+        gfxImage.Source <- gfxBmp
+        // 512 = the default 2x zoom radio; the Checked handler above sets this
+        // too, but runs before the image gets its source
+        gfxImage.Width <- 256.0 * 2.0
+        gfxImage.Height <- 256.0 * 2.0
+        gfxImage.Stretch <- Stretch.Uniform
+        RenderOptions.SetBitmapScalingMode(gfxImage, BitmapScalingMode.NearestNeighbor)
 
-        for b in
-            [ brushABtn :> FrameworkElement
-              brushBBtn :> FrameworkElement
-              previewABtn :> FrameworkElement
-              previewBBtn :> FrameworkElement
-              saveCtrlBtn :> FrameworkElement
-              importCtrlBtn :> FrameworkElement
-              exportCtrlBtn :> FrameworkElement
-              newCtrlBtn :> FrameworkElement
-              flameABtn :> FrameworkElement
-              flameBBtn :> FrameworkElement
-              flameFitBtn :> FrameworkElement
-              flameAutoBtn :> FrameworkElement
-              syncViewsBtn :> FrameworkElement ] do
-            b.Margin <- Thickness(2.0)
-            tlBtns.Children.Add b |> ignore
+        let gfxScroll =
+            ScrollViewer(
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            )
 
-        tlColumn.Children.Add tlBtns |> ignore
-        DockPanel.SetDock(tlColumn, Dock.Top)
-        center.Children.Add tlColumn |> ignore
-
-        // 2. strip + slider
-        let stripRow = StackPanel()
-        stripRow.Children.Add(stripImage) |> ignore
-        stripRow.Children.Add(slider) |> ignore
-        traceRangeLabel.Margin <- Thickness(0.0, 1.0, 0.0, 2.0)
-        stripRow.Children.Add(traceRangeLabel) |> ignore
-        DockPanel.SetDock(stripRow, Dock.Top)
-        center.Children.Add(stripRow) |> ignore
-        cursorLabel.Foreground <- dim
-        cursorLabel.FontFamily <- mono
-        cursorLabel.Margin <- Thickness(0.0, 2.0, 0.0, 2.0)
-        DockPanel.SetDock(cursorLabel, Dock.Top)
-        center.Children.Add(cursorLabel) |> ignore
-
+        gfxScroll.Content <- gfxImage
+        gfxPanel.Children.Add gfxScroll |> ignore
+        gfxTab.Content <- gfxPanel
         // 3. engine radios + disasm mode toggles above the code window.
         // Two rows: packing both groups into one horizontal StackPanel made
         // the trailing code-view buttons clip out of view on narrower windows.
@@ -4189,52 +4705,52 @@ type MainWindow() as self =
                 Background = Theme.hiBg,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext
             )
+        funcTop.Children.Add routineCountLabel |> ignore
+        // The tab's content was never assembled (unlike Scan/Contract/Theater,
+        // which all set .Content) - the Mine button and the routine list were
+        // built but never parented, so the tab rendered empty.
+        DockPanel.SetDock(funcTop, Dock.Top)
+        funcPanel.Children.Add funcTop |> ignore
+        routineDetail.Foreground <- dim
+        routineDetail.FontFamily <- mono
+        routineDetail.FontSize <- 11.0
+        routineDetail.TextWrapping <- TextWrapping.Wrap
+        DockPanel.SetDock(routineDetail, Dock.Bottom)
+        funcPanel.Children.Add routineDetail |> ignore
+        funcPanel.Children.Add routineList |> ignore // last child fills the pane
+        funcTab.Content <- funcPanel
 
-        Grid.SetColumn(cmtSplitter, 1)
-        codeCmtHost.Children.Add cmtSplitter |> ignore
-        let cmtHost = DockPanel(Margin = Thickness(4.0, 0.0, 0.0, 0.0))
-        cmtHost.MinWidth <- 220.0
-        Grid.SetColumn(cmtHost, 2)
-        codeCmtHost.Children.Add cmtHost |> ignore
-        let cmtBar = StackPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
+        // Mass comments: a mass-comment batch (Comment A / B / A-only / B-only)
+        // stamps the SAME text onto many addresses, so groups are recovered by
+        // grouping Line comments on their text. Selecting a group and jumping
+        // finds the earliest executed instruction of the region - the moment the
+        // compared ranges first diverge.
+        let massTab = TabItem(Header = "Mass comments")
+        let massPanel = DockPanel(Margin = Thickness(4.0))
+        let massList = ListBox()
+        let massRefreshBtn = Button(Content = "Refresh list", Width = 100.0)
 
-        let cmtLabel =
-            TextBlock(
-                Text = "comment text (shared):",
-                Foreground = dim,
-                FontSize = 11.0,
-                Margin = Thickness(0.0, 0.0, 6.0, 2.0)
+        let massFindBtn =
+            Button(
+                Content = "Find first execution in trace",
+                Width = 200.0,
+                ToolTip =
+                    "jump the trace cursor (and park the machine) on the earliest executed instruction whose address carries this comment group"
             )
 
-        cmtBar.Children.Add cmtLabel |> ignore
-        cmtBar.Children.Add commentBox |> ignore
-        let cmtBtnRow = WrapPanel(Margin = Thickness(0.0, 4.0, 0.0, 0.0))
+        let massHint =
+            TextBlock(
+                Text = "select a group, then find its first execution",
+                Foreground = dim,
+                FontSize = 11.0,
+                VerticalAlignment = VerticalAlignment.Center
+            )
 
-        for b in
-            [ idxCmtBtn :> FrameworkElement
-              lineCmtBtn :> FrameworkElement
-              nameBeforeBtn :> FrameworkElement
-              nameABtn :> FrameworkElement
-              nameBBtn :> FrameworkElement
-              cmtABtn :> FrameworkElement
-              cmtBBtn :> FrameworkElement
-              cmtBNotA :> FrameworkElement
-              cmtANotB :> FrameworkElement
-              framesABtn :> FrameworkElement
-              framesBBtn :> FrameworkElement ] do
-            b.Margin <- Thickness(0.0, 0.0, 6.0, 3.0)
-            cmtBtnRow.Children.Add b |> ignore
+        let mutable massGroupsCache: (string * Set<int>) list = []
 
-        cmtBar.Children.Add cmtBtnRow |> ignore
-        DockPanel.SetDock(cmtBar, Dock.Bottom)
-        center.Children.Add cmtBar |> ignore
-        disasmTarget.Foreground <- cyan
-        disasmTarget.FontFamily <- mono
-        disasmTarget.FontSize <- 12.0
-        disasmTarget.Margin <- Thickness(0.0, 4.0, 0.0, 4.0)
-        DockPanel.SetDock(disasmTarget, Dock.Bottom)
-        center.Children.Add disasmTarget |> ignore
-
+        let refreshMassList () =
+            let groups =
+                match control with
         // Comment edit pane (right of the code pane): every comment attached
         // to the current line, most specific first. Line comments get
         // editable boxes; block (range/name) comments are shown read-only
@@ -4252,7 +4768,7 @@ type MainWindow() as self =
                 FontSize = 11.0,
                 Margin = Thickness(0.0, 0.0, 0.0, 2.0)
             )
-
+                    c.Comments
         let cmtPaneRows = StackPanel()
         // Capped + scrollable: comment rows must never push the shared box
         // and buttons out of the side pane (the cap keeps the pane's own
@@ -4740,238 +5256,6 @@ type MainWindow() as self =
 
         // right column: heatmap / functions / call graph
         let right = TabControl(Margin = Thickness(8.0), Background = panel)
-
-        let heatTab = TabItem(Header = "Heatmap")
-        let heatPanel = StackPanel()
-
-        let heatHeader =
-            TextBlock(Text = "64K execution heatmap (click to jump)", Foreground = dim, FontSize = 12.0)
-
-        heatPanel.Children.Add heatHeader |> ignore
-        heatPanel.Children.Add heatImage |> ignore
-
-        let heatHint =
-            TextBlock(
-                Text = "black = never executed  magenta = executed then written",
-                Foreground = dim,
-                FontSize = 11.0
-            )
-
-        heatPanel.Children.Add heatHint |> ignore
-        heatTab.Content <- heatPanel
-
-        // graphics view: byte rows (8 KB window) + row width + zoom + address
-        // slider
-        let gfxTab = TabItem(Header = "Graphics")
-        let gfxPanel = DockPanel()
-
-        let gfxTop =
-            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
-
-        let gfxHeader =
-            TextBlock(
-                Text = "memory as 8px rows (sprite finder)",
-                Foreground = dim,
-                FontSize = 12.0,
-                VerticalAlignment = VerticalAlignment.Center
-            )
-
-        gfxTop.Children.Add gfxHeader |> ignore
-        // row width: pixels per row; width/8 consecutive bytes are drawn side
-        // by side before stepping down. Type a value 8..256 and press Enter,
-        // or step by 8 with the buttons
-        let gfxWidthLabel =
-            TextBlock(
-                Text = "row width:",
-                Foreground = dim,
-                FontSize = 12.0,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = Thickness(14.0, 0.0, 4.0, 0.0)
-            )
-
-        gfxTop.Children.Add gfxWidthLabel |> ignore
-        gfxWidthBox.Text <- string gfxRowWidth
-        gfxWidthBox.ToolTip <- "pixels per row (bytes drawn side by side); press Enter to apply"
-        gfxWidthBox.Background <- panel
-        gfxWidthBox.Foreground <- normal
-        gfxTop.Children.Add gfxWidthBox |> ignore
-
-        let applyGfxWidth (v: int) =
-            gfxRowWidth <- max 8 (min 256 v)
-            gfxWidthBox.Text <- string gfxRowWidth
-            refreshGfx ()
-
-        let commitGfxWidth () =
-            match Int32.TryParse(gfxWidthBox.Text) with
-            | true, v -> applyGfxWidth v
-            | _ -> gfxWidthBox.Text <- string gfxRowWidth
-
-        gfxWidthBox.KeyDown.Add(fun e ->
-            if e.Key = Key.Enter then
-                commitGfxWidth ())
-
-        gfxWidthBox.LostFocus.Add(fun _ -> commitGfxWidth ())
-        gfxWidthDown.ToolTip <- "narrower rows (-8 pixels)"
-        gfxWidthDown.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
-        gfxWidthDown.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth - 8))
-        gfxTop.Children.Add gfxWidthDown |> ignore
-        gfxWidthUp.ToolTip <- "wider rows (+8 pixels)"
-        gfxWidthUp.Margin <- Thickness(4.0, 0.0, 0.0, 0.0)
-        gfxWidthUp.Click.Add(fun _ -> applyGfxWidth (gfxRowWidth + 8))
-        gfxTop.Children.Add gfxWidthUp |> ignore
-        // zoom: stretch the 256x256 bitmap by an integer factor with nearest
-        // neighbour sampling; the ScrollViewer below takes over once the
-        // enlarged image outgrows the tab
-        for z in [ 1; 2; 3; 4; 8 ] do
-            let isDflt = (z = 2)
-
-            let radio =
-                RadioButton(
-                    Content = sprintf "%dx" z,
-                    GroupName = "gfxZoom",
-                    IsChecked = Nullable<bool>(isDflt),
-                    Foreground = normal,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = Thickness(8.0, 0.0, 0.0, 0.0)
-                )
-
-            radio.Checked.Add(fun _ ->
-                gfxImage.Width <- 256.0 * float z
-                gfxImage.Height <- 256.0 * float z)
-
-            gfxTop.Children.Add radio |> ignore
-
-        DockPanel.SetDock(gfxTop, Dock.Top)
-        gfxPanel.Children.Add gfxTop |> ignore
-        // slider row: 0000h [========] FFFFh (docked bottom-most)
-        let gfxSliderRow = Grid()
-        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
-        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition())
-        gfxSliderRow.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
-        gfxSliderRow.Margin <- Thickness(0.0, 2.0, 0.0, 0.0)
-
-        let gfxLoLabel =
-            TextBlock(
-                Text = "0000h",
-                Foreground = dim,
-                FontFamily = mono,
-                FontSize = 11.0,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = Thickness(0.0, 0.0, 6.0, 0.0)
-            )
-
-        Grid.SetColumn(gfxLoLabel, 0)
-        gfxSliderRow.Children.Add gfxLoLabel |> ignore
-        gfxSlider.VerticalAlignment <- VerticalAlignment.Center
-        Grid.SetColumn(gfxSlider, 1)
-        gfxSliderRow.Children.Add gfxSlider |> ignore
-
-        let gfxHiLabel =
-            TextBlock(
-                Text = "FFFFh",
-                Foreground = dim,
-                FontFamily = mono,
-                FontSize = 11.0,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = Thickness(6.0, 0.0, 0.0, 0.0)
-            )
-
-        Grid.SetColumn(gfxHiLabel, 2)
-        gfxSliderRow.Children.Add gfxHiLabel |> ignore
-        DockPanel.SetDock(gfxSliderRow, Dock.Bottom)
-        gfxPanel.Children.Add gfxSliderRow |> ignore
-        gfxAddrLabel.Foreground <- dim
-        gfxAddrLabel.FontFamily <- mono
-        gfxAddrLabel.FontSize <- 12.0
-        gfxAddrLabel.Margin <- Thickness(0.0, 6.0, 0.0, 0.0)
-        DockPanel.SetDock(gfxAddrLabel, Dock.Bottom)
-        gfxPanel.Children.Add gfxAddrLabel |> ignore
-        gfxImage.Source <- gfxBmp
-        // 512 = the default 2x zoom radio; the Checked handler above sets this
-        // too, but runs before the image gets its source
-        gfxImage.Width <- 256.0 * 2.0
-        gfxImage.Height <- 256.0 * 2.0
-        gfxImage.Stretch <- Stretch.Uniform
-        RenderOptions.SetBitmapScalingMode(gfxImage, BitmapScalingMode.NearestNeighbor)
-
-        let gfxScroll =
-            ScrollViewer(
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            )
-
-        gfxScroll.Content <- gfxImage
-        gfxPanel.Children.Add gfxScroll |> ignore
-        gfxTab.Content <- gfxPanel
-        gfxSlider.Value <- float gfxBase
-
-        gfxSlider.ValueChanged.Add(fun _ ->
-            gfxBase <- int gfxSlider.Value
-            refreshGfx ())
-
-        refreshGfx ()
-
-        let funcTab = TabItem(Header = "Functions")
-        let funcPanel = DockPanel(Margin = Thickness(4.0))
-
-        let funcTop =
-            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
-
-        mineBtn.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
-        funcTop.Children.Add mineBtn |> ignore
-        routineCountLabel.Foreground <- dim
-        routineCountLabel.VerticalAlignment <- VerticalAlignment.Center
-        funcTop.Children.Add routineCountLabel |> ignore
-        // The tab's content was never assembled (unlike Scan/Contract/Theater,
-        // which all set .Content) - the Mine button and the routine list were
-        // built but never parented, so the tab rendered empty.
-        DockPanel.SetDock(funcTop, Dock.Top)
-        funcPanel.Children.Add funcTop |> ignore
-        routineDetail.Foreground <- dim
-        routineDetail.FontFamily <- mono
-        routineDetail.FontSize <- 11.0
-        routineDetail.TextWrapping <- TextWrapping.Wrap
-        DockPanel.SetDock(routineDetail, Dock.Bottom)
-        funcPanel.Children.Add routineDetail |> ignore
-        funcPanel.Children.Add routineList |> ignore // last child fills the pane
-        funcTab.Content <- funcPanel
-
-        // Mass comments: a mass-comment batch (Comment A / B / A-only / B-only)
-        // stamps the SAME text onto many addresses, so groups are recovered by
-        // grouping Line comments on their text. Selecting a group and jumping
-        // finds the earliest executed instruction of the region - the moment the
-        // compared ranges first diverge.
-        let massTab = TabItem(Header = "Mass comments")
-        let massPanel = DockPanel(Margin = Thickness(4.0))
-        let massList = ListBox()
-        let massRefreshBtn = Button(Content = "Refresh list", Width = 100.0)
-
-        let massFindBtn =
-            Button(
-                Content = "Find first execution in trace",
-                Width = 200.0,
-                ToolTip =
-                    "jump the trace cursor (and park the machine) on the earliest executed instruction whose address carries this comment group"
-            )
-
-        let massHint =
-            TextBlock(
-                Text = "select a group, then find its first execution",
-                Foreground = dim,
-                FontSize = 11.0,
-                VerticalAlignment = VerticalAlignment.Center
-            )
-
-        let mutable massGroupsCache: (string * Set<int>) list = []
-
-        let refreshMassList () =
-            let groups =
-                match control with
-                | None -> []
-                | Some c ->
-                    c.Comments
-                    |> List.filter (fun m -> m.Kind = CommentKind.Line && not (String.IsNullOrWhiteSpace m.Text))
-                    |> List.groupBy (fun m -> m.Text.Trim())
                     |> List.map (fun (txt, ms) -> txt, (ms |> List.map (fun m -> m.Addr) |> Set.ofList))
                     |> List.sortByDescending (fun (_, a) -> Set.count a)
 
@@ -5130,13 +5414,31 @@ type MainWindow() as self =
         scanPanel.Children.Add scanList |> ignore
         scanTab.Content <- scanPanel
 
-        let graphTab = TabItem(Header = "Call graph")
+    let graphTab = TabItem(Header = "Call graph")
+    let graphScroll = ScrollViewer(HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+    graphScroll.Content <- graphCanvas
+    graphTab.Content <- graphScroll
 
-        let callGraphScroll =
-            ScrollViewer(
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            )
+    let contractTab = TabItem(Header = "Contract/Prompt")
+    let contractPanel = DockPanel()
+    let contractTop = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+    contractLabel.Foreground <- dim
+    contractLabel.VerticalAlignment <- VerticalAlignment.Center
+    contractLabel.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
+    contractTop.Children.Add contractLabel |> ignore
+    savePromptBtn.Margin <- Thickness(0.0, 0.0, 4.0, 0.0)
+    contractTop.Children.Add savePromptBtn |> ignore
+    contractTop.Children.Add copyPromptBtn |> ignore
+    DockPanel.SetDock(contractTop, Dock.Top)
+    contractPanel.Children.Add contractTop |> ignore
+    contractText.Foreground <- normal
+    contractText.FontFamily <- mono
+    contractText.FontSize <- 11.0
+    contractText.TextWrapping <- TextWrapping.Wrap
+    let contractScroll = ScrollViewer(VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+    contractScroll.Content <- contractText
+    contractPanel.Children.Add contractScroll |> ignore
+    contractTab.Content <- contractPanel
 
         callGraphScroll.Content <- graphCanvas
         graphTab.Content <- callGraphScroll
@@ -5214,6 +5516,236 @@ type MainWindow() as self =
         theaterPanel.Children.Add theaterScroll |> ignore
         theaterTab.Content <- theaterPanel
 
+    right.Items.Add heatTab |> ignore
+    right.Items.Add funcTab |> ignore
+    right.Items.Add graphTab |> ignore
+    right.Items.Add scanTab |> ignore
+    right.Items.Add contractTab |> ignore
+    right.Items.Add theaterTab |> ignore
+    // toolbar
+    let toolbar = StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(8.0))
+    let runBtn = Button(Content = "Run")
+    let pauseBtn = Button(Content = "Pause")
+    let stepFrameBtn = Button(Content = "Step frame")
+    let saveBtn = Button(Content = "Save trace")
+    let loadBtn = Button(Content = "Load trace")
+    runBtn.Click.Add(fun _ ->
+      pauseGame ()
+      match session with
+      | Some s when replaying || s.ReplayFinished -> s.StopReplay(); replaying <- false
+      | _ -> ()
+      running <- true
+      frameTimer.Start())
+    pauseBtn.Click.Add(fun _ ->
+      pauseGame ()
+      if replaying then replaying <- false)
+    stepFrameBtn.Click.Add(fun _ -> pauseGame (); renderFrame ())
+    saveBtn.Click.Add(fun _ -> saveTrace ())
+    loadBtn.Click.Add(fun _ -> loadTrace ())
+    // Rewind: dragging pauses the game and previews the snapshot at the
+    // slider's frame; Go commits the branch (new future starts here);
+    // Replay re-runs the recorded keys from here and stops at the end.
+    rewindSlider.PreviewMouseDown.Add(fun _ ->
+      if session.IsSome then pauseGame ()
+      rewinding <- true
+      saveReplay true)
+    rewindSlider.PreviewMouseUp.Add(fun _ ->
+      rewinding <- false
+      saveReplay true)
+    rewindSlider.ValueChanged.Add(fun args ->
+      match session with
+      | Some s ->
+        let target = int args.NewValue
+        if rewinding && target <= s.History.LastFrame then
+          if running || replaying then pauseGame ()
+          if replaying then
+            s.StopReplay ()
+            replaying <- false // drag aborts the script; preview takes over
+          s.RewindTo(target)
+          presentGame ()
+          updateTimeLabel s.Frame
+      | None -> ())
+    goBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        pauseGame ()
+        s.BranchAt(s.Frame)
+        saveReplay true
+        replaying <- false
+        running <- true
+        frameTimer.Start()
+        statusText.Text <- sprintf "branched at frame %d - new future starts here" s.Frame
+      | None -> ())
+    replayBtn.Click.Add(fun _ ->
+      match session with
+      | Some s ->
+        pauseGame ()
+        replayExtent <- max 1 s.History.LastFrame // timeline before truncation
+        s.StartReplay()
+        replaying <- true
+        running <- true
+        frameTimer.Start()
+        statusText.Text <- sprintf "replaying keys until frame %d" s.ReplayEndFrame
+      | None -> ())
+    recordToggle.Checked.Add(fun _ -> match session with Some s -> s.Recorder.RecordEnabled <- true | None -> ())
+    recordToggle.Unchecked.Add(fun _ -> match session with Some s -> s.Recorder.RecordEnabled <- false | None -> ())
+    recordToggle.ToolTip <- "record every executed instruction into the ring buffer"
+    recordToggle.Foreground <- normal
+    recordToggle.VerticalAlignment <- VerticalAlignment.Center
+
+    let soundToggle = CheckBox(Content = "Mute", IsChecked = Nullable<bool>(true))
+    soundToggle.ToolTip <- "beeper audio is muted by default; uncheck for 10% volume"
+    soundToggle.Foreground <- normal
+    soundToggle.VerticalAlignment <- VerticalAlignment.Center
+    soundToggle.Checked.Add(fun _ -> Audio.SetEnabled false)
+    soundToggle.Unchecked.Add(fun _ -> Audio.SetEnabled true)
+
+        let stepBackBtn =
+            Button(
+                Content = "Step <- instr",
+                ToolTip =
+                    "step one instruction backwards: re-executes the current frame from its start (recording suppressed) and parks the machine right after the previous instruction"
+            )
+
+        let saveBtn = Button(Content = "Save trace")
+
+        let saveTimelineBtn =
+            Button(
+                Content = "Save timeline",
+                ToolTip = "save the per-frame state timeline + keys to the active slot file"
+            )
+
+        let clearTimelineBtn =
+            Button(
+                Content = "Clear timeline",
+                ToolTip =
+                    "delete the active slot: wipes the states and key script in memory and deletes its file from the game folder (the project is untouched)"
+            )
+
+        let loadBtn = Button(Content = "Load trace")
+
+        runBtn.Click.Add(fun _ ->
+            pauseGame ()
+
+            match session with
+            | Some s when replaying || s.ReplayFinished ->
+                s.StopReplay()
+                replaying <- false
+            | _ -> ()
+
+            running <- true
+            frameTimer.Start())
+
+        pauseBtn.Click.Add(fun _ ->
+            pauseGame ()
+
+            if replaying then
+                replaying <- false)
+
+        stepFrameBtn.Click.Add(fun _ ->
+            pauseGame ()
+            renderFrame ())
+
+        stepBackBtn.Click.Add(fun _ ->
+            match session, currentTrace () with
+            | Some s, Some t when cursor > 0 && t.Entries.Length > 0 && t.FrameTicks.Length > 0 ->
+                let target = cursor - 1
+                let e = t.Entries[target]
+                // The session frame containing the target entry. The entry state IS
+                // frame 0 and boundary j is recorded when session frame j+1
+                // completes, so the frame is (boundaries at-or-before the tick) + 1
+                // and its entries sit between boundaries [frame - 2] and [frame - 1].
+                let rec search (lo: int) (hi: int) =
+                    if lo >= hi then
+                        lo
+                    else
+                        let mid = (lo + hi) >>> 1
+
+                        if int64 t.FrameTicks[mid] <= int64 e.Tick then
+        let graphTab = TabItem(Header = "Call graph")
+
+        let callGraphScroll =
+            ScrollViewer(
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            )
+
+        callGraphScroll.Content <- graphCanvas
+        graphTab.Content <- callGraphScroll
+                let frame = search 0 (t.FrameTicks.Length - 1) + 1
+        let contractTab = TabItem(Header = "Contract/Prompt")
+        let contractPanel = DockPanel()
+
+        let contractTop =
+            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+
+        contractLabel.Foreground <- dim
+        contractLabel.VerticalAlignment <- VerticalAlignment.Center
+        contractLabel.Margin <- Thickness(0.0, 0.0, 8.0, 0.0)
+        contractTop.Children.Add contractLabel |> ignore
+        savePromptBtn.Margin <- Thickness(0.0, 0.0, 4.0, 0.0)
+        contractTop.Children.Add savePromptBtn |> ignore
+        contractTop.Children.Add copyPromptBtn |> ignore
+        DockPanel.SetDock(contractTop, Dock.Top)
+        contractPanel.Children.Add contractTop |> ignore
+        contractText.Foreground <- normal
+        contractText.FontFamily <- mono
+        contractText.FontSize <- 11.0
+        contractText.TextWrapping <- TextWrapping.Wrap
+
+        let contractScroll =
+            ScrollViewer(VerticalScrollBarVisibility = ScrollBarVisibility.Auto)
+
+        contractScroll.Content <- contractText
+        contractPanel.Children.Add contractScroll |> ignore
+        contractTab.Content <- contractPanel
+                                        | Some r ->
+                                            let inRegistry =
+                                                match Jetpac3.Core.LiftedRoutines.registryHook e with
+                                                | Some _ -> true
+                                                | None -> false
+
+                                            if not inRegistry then
+                                                sb.AppendLine(sprintf "%04X  NOT LIFTED (not in registry)" e)
+                                                |> ignore
+                                            elif rep.Passed then
+                                                sb.AppendLine(sprintf "%04X  PASSED" e) |> ignore
+                                            else
+                                                match rep.FirstDivergence with
+                                                | Some d when d.Address >= r.SpanLo && d.Address <= r.SpanHi ->
+                                                    sb.AppendLine(
+                                                        sprintf
+                                                            "%04X  FAILED: divergence inside its span at frame %d (%s)"
+                                                            e
+                                                            d.Frame
+                                                            d.Kind
+                                                    )
+                                                    |> ignore
+                                                | Some d ->
+                                                    sb.AppendLine(
+                                                        sprintf
+                                                            "%04X  PASSED (divergence is outside its span: %04X %s)"
+                                                            e
+                                                            d.Address
+                                                            d.Kind
+                                                    )
+                                                    |> ignore
+                                                | None ->
+                                                    sb.AppendLine(sprintf "%04X  FAILED (no divergence details)" e)
+                                                    |> ignore
+
+                                    theaterText.Text <- sb.ToString())
+                        ))
+                    |> ignore)
+
+        let sep =
+            Border(Width = 1.0, Height = 24.0, Background = dim, Margin = Thickness(8.0, 0.0, 8.0, 0.0))
+
+        let b100 = Button(Content = "<<100")
+        let b10 = Button(Content = "<<10")
+        let b1 = Button(Content = "<<1")
+        let f1 = Button(Content = "1>>")
+        let f10 = Button(Content = "10>>")
         right.Items.Add heatTab |> ignore
         right.Items.Add gfxTab |> ignore
         right.Items.Add funcTab |> ignore
@@ -5436,256 +5968,256 @@ type MainWindow() as self =
         soundToggle.VerticalAlignment <- VerticalAlignment.Center
         soundToggle.Checked.Add(fun _ -> Audio.SetEnabled false)
         soundToggle.Unchecked.Add(fun _ -> Audio.SetEnabled true)
+                | Some w, Some c ->
+                    c.Comments
+                    |> List.filter (fun m -> m.Kind = CommentKind.Frames)
+                    |> List.sortBy (fun m -> m.Addr)
+                    |> List.choose (fun m ->
+                        tickRangeOfFrames w m.Addr m.EndExcl
+                        |> Option.map (fun (a, b) -> (a, b, m.Text)))
+                | _ -> []
 
-        mineBtn.Click.Add(fun _ -> mineNow ())
+        /// Build (or reuse) the flame window for frames [f0, f1Exclusive).
+        /// Heavy build runs on a worker; the result lands via the dispatcher.
+        /// A cache hit whose detail tier was trimmed is treated as a miss and
+        /// rebuilt: without entries there is no browsable trace and no exact
+        /// flame-cursor mapping (clicking a code row could not move the cursor
+        /// line onto the timeline). The auto-build coverage check still counts
+        /// trimmed windows as covered, so background rebuilds never loop.
+        let rec buildFlameRange (f0: int) (f1Exclusive: int) (zoom: bool) =
+            match session with
+            | Some s when f1Exclusive - 1 >= f0 ->
+                let hit =
+                    flameCache.TryGet(f0, f1Exclusive - 1)
+                    |> Option.filter (fun w -> w.Entries.IsSome)
 
-        clearTrayBtn.Click.Add(fun _ ->
-            selectedEntries <- Set.empty
-            refreshRoutines ()
-            refreshTray ()
-            drawGraph ())
+                match hit with
+                | Some w ->
+                    // Keep the browsable trace in step with the shown window - also
+                    // keeps the flame cursor mapping exact.
+                    flameTrace <- traceOfWindow w
+                    clampCursor ()
+                    flameCtrl.SetWindow w
 
-        savePromptBtn.Click.Add(fun _ ->
-            match activeRoutine with
-            | Some r ->
-                let dlg =
-                    Microsoft.Win32.SaveFileDialog(
-                        Filter = "Markdown (*.md)|*.md",
-                        FileName = sprintf "fn%04X.md" r.Entry
-                    )
+                    if zoom then
+                        flameCtrl.ZoomToFit()
+                | None when not flameBuilding ->
+                    flameBuilding <- true
+                    flameGeneration <- flameGeneration + 1
+                    let gen = flameGeneration
+                    statusText.Text <- sprintf "building flame graph: frames %d..%d ..." f0 (f1Exclusive - 1)
 
-                if dlg.ShowDialog() = Nullable<bool>(true) then
-                    File.WriteAllText(dlg.FileName, contractText.Text)
-                    statusText.Text <- "prompt saved to " + dlg.FileName
-            | None -> statusText.Text <- "select a routine first")
+                    System.Threading.Tasks.Task.Run(fun () ->
+                        let result =
+                            FlameBuilder.buildFrames s.StateTimeline s.KeyLog f0 (f1Exclusive - 1) ignore (fun () ->
+                                flameGeneration <> gen)
 
-        copyPromptBtn.Click.Add(fun _ ->
-            if contractText.Text.Length > 0 then
-                System.Windows.Clipboard.SetText contractText.Text
-                statusText.Text <- "prompt copied to clipboard")
-
-        stageBtn.Click.Add(fun _ ->
-            match activeRoutine with
-            | Some r ->
-                if pasteBox.Text.Trim().Length > 0 then
-                    let dir = Path.Combine(Directory.GetCurrentDirectory(), "Lifted")
-                    Directory.CreateDirectory dir |> ignore
-                    let path = Path.Combine(dir, sprintf "fn%04X.fs" r.Entry)
-
-                    let header =
-                        sprintf
-                            "// Staged lift for 0x%04X (span 0x%04X-0x%04X)\n// Add this file to Jetpac3.Core in Visual Studio, register the routine in\n// LiftedRoutines.registry, rebuild, then validate from the Theater tab.\n\n"
-                            r.Entry
-                            r.SpanLo
-                            r.SpanHi
-
-                    File.WriteAllText(path, header + pasteBox.Text)
-                    statusText.Text <- "staged to " + path
-                else
-                    statusText.Text <- "paste the model's F# first"
-            | None -> statusText.Text <- "select a routine first")
-
-        validateBtn.Click.Add(fun _ ->
-            match activeRoutine, session with
-            | Some r, Some _ ->
-                let registered =
-                    match Jetpac3.Core.LiftedRoutines.registryHook r.Entry with
-                    | Some _ -> true
-                    | None -> false
-
-                if not registered then
-                    theaterText.Text <-
-                        sprintf
-                            "0x%04X is not covered by the lifted registry yet.\n\nStage the pasted F# (below) to Lifted/, add it to Jetpac3.Core in Visual Studio, rebuild, then validate again."
-                            r.Entry
-                else
-                    let framesN = 300
-                    let script = Jetpac3.Core.Script.defaultSession framesN
-                    let rom = LocalAssets.find "48.rom"
-                    let tzx = LocalAssets.find "Jetpac.tzx"
-                    theaterText.Text <- sprintf "validating 0x%04X over %d frames..." r.Entry framesN
-
-                    let task =
-                        System.Threading.Tasks.Task.Run(fun () ->
-                            Validation.run
-                                rom
-                                tzx
-                                framesN
-                                script
-                                Jetpac3.Core.LiftedRoutines.registryHook
-                                System.Threading.CancellationToken.None)
-
-                    task.ContinueWith(fun (t: System.Threading.Tasks.Task<Validation.Report>) ->
                         self.Dispatcher.Invoke(
-                            System.Action(fun () ->
-                                if t.IsFaulted then
-                                    theaterText.Text <- "validation crashed: " + t.Exception.Message
-                                else
-                                    let rep = t.Result
+                            Action(fun () ->
+                                flameBuilding <- false
 
-                                    if rep.Passed then
-                                        theaterText.Text <-
+                                if flameGeneration = gen then
+                                    match result with
+                                    | Some w ->
+                                        let stored = flameCache.Add w
+                                        // The full-detail window (before the cache trims it)
+                                        // becomes the browsable execution trace.
+                                        flameTrace <- traceOfWindow w
+                                        clampCursor ()
+                                        flameCtrl.SetWindow stored
+
+                                        if zoom then
+                                            flameCtrl.ZoomToFit()
+
+                                        syncFlameRanges ()
+
+                                        statusText.Text <-
                                             sprintf
-                                                "VALIDATION PASSED: %d frames, 0 diffs (lifted 0x%04X == oracle)"
-                                                rep.Frames
-                                                r.Entry
-                                    else
-                                        match rep.FirstDivergence with
-                                        | Some d ->
-                                            theaterText.Text <-
-                                                sprintf
-                                                    "VALIDATION FAILED at frame %d (%s)\n\nport   executed %04X: %s\noracle executed %04X: %s\n\nport   regs: %s\noracle regs: %s"
-                                                    d.Frame
-                                                    d.Kind
-                                                    d.PortPc
-                                                    d.PortExecuted
-                                                    d.OraclePc
-                                                    d.OracleExecuted
-                                                    d.PortRegs
-                                                    d.OracleRegs
-                                        | None -> theaterText.Text <- "VALIDATION FAILED: no divergence details")
+                                                "flame graph: frames %d..%d - %d rectangles; code view now shows the built range"
+                                                f0
+                                                (f1Exclusive - 1)
+                                                stored.Rects.Length
+                                    | None -> statusText.Text <- "flame graph build cancelled")
                         ))
                     |> ignore
-            | None, _ -> theaterText.Text <- "select a mined routine to validate"
-            | _ -> theaterText.Text <- "emulator not ready")
+            | _ -> ()
 
-        queuePromptsBtn.Click.Add(fun _ ->
-            if Set.isEmpty selectedEntries then
-                theaterText.Text <- "fill the lift queue first (click routines in the Functions tab)"
+        flameBuildImpl <- fun (a, b, zoom) -> buildFlameRange a b zoom
+
+        timeline.RangeChanged.Add(fun _ -> syncFlameRanges ())
+
+        // Optional view sync: the brush timeline and the flame graph share one
+        // viewport (position + zoom). The timeline's domain is frames, the
+        // flame's is window-relative ticks; tickRangeOfFrames / frameAtTick
+        // bridge them. `syncingViews` stops the two events from feeding each
+        // other, and `tickRangeOfFrames` returning None (timeline view outside
+        // the built window) leaves the flame graph untouched.
+        let mutable syncingViews = false
+
+        let pushTimelineToFlame () =
+            if
+                syncViewsBtn.IsChecked.HasValue
+                && syncViewsBtn.IsChecked.Value
+                && not syncingViews
+            then
+                match flameCtrl.Window with
+                | Some w ->
+                    let f0, f1 = timeline.Viewport
+                    syncingViews <- true
+
+                    match tickRangeOfFrames w (int f0) (int f1 + 1) with
+                    | Some(a, b) -> flameCtrl.ZoomToRange(a, b)
+                    | None -> ()
+
+                    syncingViews <- false
+                | None -> ()
+
+        let pushFlameToTimeline () =
+            if
+                syncViewsBtn.IsChecked.HasValue
+                && syncViewsBtn.IsChecked.Value
+                && not syncingViews
+            then
+                match flameCtrl.Window with
+                | Some w ->
+                    let o, e = flameCtrl.VisibleRange
+                    let f0 = FlameWindow.frameAtTick w o
+                    let f1 = FlameWindow.frameAtTick w (max o e)
+                    syncingViews <- true
+                    timeline.SetViewport(int64 f0, int64 (max 1 (f1 - f0)))
+                    syncingViews <- false
+                | None -> ()
+
+        timeline.ViewportChanged.Add(fun _ -> pushTimelineToFlame ())
+        flameCtrl.ViewportChanged.Add(fun _ -> pushFlameToTimeline ())
+        // Toggling on adopts the flame graph's current view immediately.
+        syncViewsBtn.Checked.Add(fun _ -> pushFlameToTimeline ())
+        flameFitBtn.Click.Add(fun _ -> flameCtrl.ZoomToFit())
+
+        let flameBrushBuild which =
+            let a, b = rangeOf which
+
+            if b > a then
+                buildFlameRange a b true
             else
-                match session, currentTrace () with
-                | Some s, Some t when t.Entries.Length > 0 ->
-                    let dir = Path.Combine(Directory.GetCurrentDirectory(), "prompts")
-                    Directory.CreateDirectory dir |> ignore
-                    let pcCycles = getPcCycles ()
-                    let saved = ResizeArray<string>()
+                statusText.Text <-
+                    sprintf "brush %s is empty - drag a range on the timeline first" (if which = A then "A" else "B")
 
-                    for entry in selectedEntries |> Set.toList do
-                        match minedRoutines |> List.tryFind (fun r -> r.Entry = entry) with
-                        | Some r ->
-                            let contract = Contract.extract s.Memory t r pcCycles
-                            let prompt = Prompt.generate contract
-                            let path = Path.Combine(dir, sprintf "fn%04X.md" entry)
-                            File.WriteAllText(path, prompt)
-                            saved.Add(sprintf "%04X" entry)
-                        | None -> ()
+        flameABtn.Click.Add(fun _ -> flameBrushBuild A)
+        flameBBtn.Click.Add(fun _ -> flameBrushBuild B)
 
-                    statusText.Text <- sprintf "saved %d prompts to %s" saved.Count dir
+        // click-to-seek: park the machine EXACTLY on the clicked instruction by
+        // re-executing the frame prefix from the recording (ParkAtInstruction),
+        // with the code cursor on the exact entry of the flame trace. Falls
+        // back to a frame-level scrub when the window has no instruction tier.
+        // Frame-level fallback for flame clicks: clamps the frame into the
+        // recording and parks there. Every caller passes the reason the
+        // instruction-level seek could not run, and it lands in the status
+        // bar - flame clicks are never silent.
+        let frameSeek (reason: string) (frame: int) =
+            match session with
+            | None ->
+                statusText.Text <-
+                    sprintf
+                        "flame click: %s - but there is no live session (CE engine active), nothing to seek"
+                        reason
+            | Some s ->
+                let target = max 0 (min frame s.TimelineExtent)
 
-                    theaterText.Text <-
-                        sprintf "saved %d prompts to %s:\n%s" saved.Count dir (String.concat ", " saved)
-                | _ -> theaterText.Text <- "no trace to extract from")
+                let clampNote =
+                    if frame > s.TimelineExtent then " - beyond the recording, clamped" else ""
 
-        validateQueueBtn.Click.Add(fun _ ->
-            if Set.isEmpty selectedEntries then
-                theaterText.Text <- "fill the lift queue first (click routines in the Functions tab)"
-            else
-                let queued = selectedEntries |> Set.toList
-
-                let covered =
-                    queued
-                    |> List.filter (fun e ->
-                        match Jetpac3.Core.LiftedRoutines.registryHook e with
-                        | Some _ -> true
-                        | None -> false)
-
-                if List.isEmpty covered then
-                    theaterText.Text <-
-                        "none of the queued routines are in the lifted registry yet: "
-                        + (queued |> List.map (sprintf "%04X") |> String.concat ", ")
-                        + "\n\nLift them first (prompt -> stage -> wire into Jetpac3.Core -> rebuild)."
+                if target = s.Frame && not running && not replaying then
+                    statusText.Text <-
+                        sprintf "flame click: %s - already parked at frame %d%s" reason target clampNote
                 else
-                    let framesN = 300
-                    let script = Jetpac3.Core.Script.defaultSession framesN
-                    let rom = LocalAssets.find "48.rom"
-                    let tzx = LocalAssets.find "Jetpac.tzx"
+                    statusText.Text <- sprintf "flame click: %s - frame seek to %d%s" reason target clampNote
+                    scrubToFrame (int64 frame)
 
-                    theaterText.Text <-
-                        sprintf
-                            "validating queue (%d of %d queued covered by the registry) over %d frames..."
-                            covered.Length
-                            queued.Length
-                            framesN
+        flameCtrl.SeekRequested.Add(fun (tick, frame) ->
+            match session, flameCtrl.Window, flameTrace with
+            | Some s, Some w, Some ft when frame >= 0 ->
+                let idx = FlameWindow.entryAtTick w tick
 
-                    let task =
-                        System.Threading.Tasks.Task.Run(fun () ->
-                            Validation.run
-                                rom
-                                tzx
-                                framesN
-                                script
-                                Jetpac3.Core.LiftedRoutines.registryHook
-                                System.Threading.CancellationToken.None)
+                if idx < 0 || idx >= ft.Entries.Length then
+                    frameSeek "the clicked tick has no instruction in the flame trace" frame
+                else
+                    let frameNo = frameOfEntry ft idx
+                    // First entry of that frame: boundary [frame - 2] ends frame - 1
+                    // (0-padded window leads read as the window's first entry).
+                    let firstInFrame =
+                        if frameNo < 2 || frameNo - 2 >= ft.FrameTicks.Length then
+                            0
+                        else
+                            let tick' = ft.FrameTicks[frameNo - 2]
 
-                    task.ContinueWith(fun (t: System.Threading.Tasks.Task<Validation.Report>) ->
-                        self.Dispatcher.Invoke(
-                            System.Action(fun () ->
-                                if t.IsFaulted then
-                                    theaterText.Text <- "queue validation crashed: " + t.Exception.Message
+                            let rec s2 (lo: int) (hi: int) =
+                                if lo >= hi then
+                                    lo
                                 else
-                                    let rep = t.Result
-                                    let sb = System.Text.StringBuilder()
-                                    sb.AppendLine(sprintf "QUEUE VALIDATION: %d frames" rep.Frames) |> ignore
+                                    let mid = (lo + hi) / 2
 
-                                    for e in queued do
-                                        match minedRoutines |> List.tryFind (fun r -> r.Entry = e) with
-                                        | None -> sb.AppendLine(sprintf "%04X  skipped (not mined)" e) |> ignore
-                                        | Some r ->
-                                            let inRegistry =
-                                                match Jetpac3.Core.LiftedRoutines.registryHook e with
-                                                | Some _ -> true
-                                                | None -> false
+                                    if ft.Entries[mid].Tick < tick' then
+                                        s2 (mid + 1) hi
+                                    else
+                                        s2 lo mid
 
-                                            if not inRegistry then
-                                                sb.AppendLine(sprintf "%04X  NOT LIFTED (not in registry)" e)
-                                                |> ignore
-                                            elif rep.Passed then
-                                                sb.AppendLine(sprintf "%04X  PASSED" e) |> ignore
-                                            else
-                                                match rep.FirstDivergence with
-                                                | Some d when d.Address >= r.SpanLo && d.Address <= r.SpanHi ->
-                                                    sb.AppendLine(
-                                                        sprintf
-                                                            "%04X  FAILED: divergence inside its span at frame %d (%s)"
-                                                            e
-                                                            d.Frame
-                                                            d.Kind
-                                                    )
-                                                    |> ignore
-                                                | Some d ->
-                                                    sb.AppendLine(
-                                                        sprintf
-                                                            "%04X  PASSED (divergence is outside its span: %04X %s)"
-                                                            e
-                                                            d.Address
-                                                            d.Kind
-                                                    )
-                                                    |> ignore
-                                                | None ->
-                                                    sb.AppendLine(sprintf "%04X  FAILED (no divergence details)" e)
-                                                    |> ignore
+                            s2 0 ft.Entries.Length
+                    // Steps count real instructions: an interrupt marker shares its
+                    // Step with the vector instruction.
+                    let mutable steps = 0
 
-                                    theaterText.Text <- sb.ToString())
-                        ))
-                    |> ignore)
+                    for k in firstInFrame..idx do
+                        if ft.Entries[k].Length > 0uy then
+                            steps <- steps + 1
 
-        let sep =
-            Border(Width = 1.0, Height = 24.0, Background = dim, Margin = Thickness(8.0, 0.0, 8.0, 0.0))
+                    if steps <= 0 || frameNo < 1 || frameNo - 1 > s.TimelineExtent then
+                        let reason =
+                            if frameNo - 1 > s.TimelineExtent then
+                                "the clicked frame is beyond the recording"
+                            else
+                                "the tick precedes any instruction of its frame"
 
-        let b100 = Button(Content = "<<100")
-        let b10 = Button(Content = "<<10")
-        let b1 = Button(Content = "<<1")
-        let f1 = Button(Content = "1>>")
-        let f10 = Button(Content = "10>>")
-        let f100 = Button(Content = "100>>")
-        b100.Click.Add(fun _ -> stepBack100 ())
-        b10.Click.Add(fun _ -> stepBack10 ())
-        b1.Click.Add(fun _ -> stepBack1 ())
-        f1.Click.Add(fun _ -> stepFwd1 ())
-        f10.Click.Add(fun _ -> stepFwd10 ())
-        f100.Click.Add(fun _ -> stepFwd100 ())
-        playBtn.Click.Add(fun _ -> toggleCinema ())
+                        frameSeek reason frame
+                    else
+                        pauseGame ()
 
+                        if replaying then
+                            s.StopReplay()
+                            replaying <- false
+
+                        try
+                            s.ParkAtInstruction(frameNo, steps)
+                            cursor <- idx
+                            presentGame ()
+                            showLiveRegs s |> ignore
+                            refreshAll ()
+                            syncSlider ()
+                            updateTimeLabel s.Frame
+                            timeline.Playhead <- int64 s.Frame
+                            flameCtrl.PlayheadFrame <- s.Frame
+
+                            statusText.Text <-
+                                sprintf
+                                    "flame seek: instr #%d ($%04X) of frame %d"
+                                    idx
+                                    (int ft.Entries[idx].Pc)
+                                    frameNo
+                        with ex ->
+                            // The recording branched away under us: fall back to the
+                            // frame-level seek, which clamps into the timeline's extent.
+                            scrubToFrame (int64 frame)
+                            statusText.Text <- sprintf "flame seek fell back to frame %d (%s)" frame ex.Message
+            | _ when frame >= 0 ->
+                let reason =
+                    match session, flameTrace, flameCtrl.Window with
+                    | None, _, _ -> "no live session (CE engine active)"
+                    | _, None, _ -> "the game is running - instruction data is dropped while playing"
+                    | _, _, None -> "no flame window loaded"
+                    | _ -> "unmapped click"
+
+                frameSeek reason frame
+            | _ -> statusText.Text <- "flame click: this window has no frame mapping - click ignored")
         let speedBox = ComboBox(Width = 64.0)
 
         for s in [ 1; 10; 100; 1000 ] do
@@ -5772,7 +6304,7 @@ type MainWindow() as self =
                     if not alreadyThere then
                         switchChoice text
                 | _ -> ())
-
+                let jump = MenuItem(Header = sprintf "go to $%04X in code view" (int r.Entry))
         /// Live play has no trace: execution view, trace stepping, replay and
         /// seeking have nothing to work on. Memory/graph views, live stepping
         /// (into), scan and comments keep working.
@@ -5998,7 +6530,7 @@ type MainWindow() as self =
             )
 
         backBtn.Click.Add(fun _ -> returnToMenu ())
-
+            statusText.Text <- sprintf "empty control file created over $4000-$FFFF")
         for c in
             [ backBtn :> FrameworkElement
               gameCombo :> FrameworkElement
@@ -6055,46 +6587,46 @@ type MainWindow() as self =
 
         speedBox.VerticalAlignment <- VerticalAlignment.Center
         toolbar.Children.Add speedBox |> ignore
+            | Some g, Some _ when hasCE g ->
+                let framesN = max 60 ((fst (rangeOf A)) - (snd (rangeOf A)) |> abs |> max 300)
+                statusText.Text <- sprintf "differential run (%s vs CE) starting..." g.Name
+                let rom, tzx = g.Rom, (if g.Tzx <> "" then g.Tzx else g.Rom)
 
-        // status bar
-        statusText.Foreground <- normal
-        statusText.Margin <- Thickness(8.0)
-        statusText.TextWrapping <- TextWrapping.Wrap
+                let task =
+                    System.Threading.Tasks.Task.Run(fun () ->
+                        Validation.run
+                            rom
+                            tzx
+                            framesN
+                            (Jetpac3.Core.Script.defaultSession framesN)
+                            Jetpac3.Core.LiftedRoutines.registryHook
+                            System.Threading.CancellationToken.None)
 
-        // lift-queue tray
-        let trayRow =
-            StackPanel(Orientation = Orientation.Horizontal, Margin = Thickness(8.0, 0.0, 8.0, 4.0))
+                task.ContinueWith(fun (t: System.Threading.Tasks.Task<Validation.Report>) ->
+                    self.Dispatcher.Invoke(
+                        System.Action(fun () ->
+                            if t.IsFaulted then
+                                statusText.Text <- "differential failed: " + t.Exception.Message
+                            else
+                                let rep = t.Result
 
-        let trayTitle =
-            TextBlock(
-                Text = "Lift queue:",
-                Foreground = dim,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = Thickness(0.0, 0.0, 4.0, 0.0)
-            )
-
-        trayRow.Children.Add trayTitle |> ignore
-        trayWrap.VerticalAlignment <- VerticalAlignment.Center
-        trayRow.Children.Add trayWrap |> ignore
-        trayCountLabel.Foreground <- dim
-        trayCountLabel.VerticalAlignment <- VerticalAlignment.Center
-        trayCountLabel.Margin <- Thickness(6.0, 0.0, 6.0, 0.0)
-        trayRow.Children.Add trayCountLabel |> ignore
-        clearTrayBtn.VerticalAlignment <- VerticalAlignment.Center
-        trayRow.Children.Add clearTrayBtn |> ignore
-
-        let root = Grid()
-        root.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
-        root.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star)))
-        root.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
-        root.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
-        Grid.SetRow(toolbar, 0)
-        Grid.SetRow(trayRow, 2)
-        Grid.SetRow(statusText, 3)
-        root.Children.Add toolbar |> ignore
-        root.Children.Add trayRow |> ignore
-        root.Children.Add statusText |> ignore
-
+                                if rep.Passed then
+                                    statusText.Text <- sprintf "DIFFERENTIAL OK over %d frames" rep.Frames
+                                else
+                                    match rep.FirstDivergence with
+                                    | Some d ->
+                                        statusText.Text <-
+                                            sprintf
+                                                "DIFFERENTIAL FAILED at frame %d (%s): port=%04X oracle=%04X"
+                                                d.Frame
+                                                d.Kind
+                                                d.PortPc
+                                                d.OraclePc
+                                    | None -> statusText.Text <- "DIFFERENTIAL FAILED (no details)")
+                    ))
+                |> ignore
+            | _ ->
+                statusText.Text <- "differential needs a game with a compiled CE program"
         // far-right full-height control map: spans every row (toolbar, main,
         // lift tray, status). Splitter is a direct Grid child so dragging it
         // actually resizes columns: col1 shrinks main, col2 grows the map.
@@ -6153,106 +6685,106 @@ type MainWindow() as self =
         if launchPhase = "game" then self.ShowGameOnly()
         elif launchPhase = "cheat" then self.ShowCheatEngine()
         else self.Content <- root
+        graphModeBtn.Checked.Add(fun _ ->
+            disasmModeGraph <- true
+            memModeBtn.IsChecked <- Nullable<bool>(false)
+            execModeBtn.IsChecked <- Nullable<bool>(false)
+            applyViewMode ()
+            refreshDisasm ())
 
-        // ---- control GUI wiring ------------------------------------------------
-        // Preview = replay the selection as a movie lasting exactly one second
-        // (50 ticks x 20 ms), leaving the session parked on the last frame.
-        let scrubToFrame (u: int64) =
-            match session with
-            | Some s ->
-                if running || replaying then
-                    pauseGame ()
+        graphAllBtn.Checked.Add(fun _ ->
+            disasmGraphAll <- true
 
-                if replaying then
-                    s.StopReplay()
-                    replaying <- false
+            if disasmModeGraph then
+                refreshDisasm ())
 
-                previewTimer.Stop()
-                // Seek to any recorded frame, future included, and park there.
-                let target = max 0 (min (int u) s.TimelineExtent)
-                s.JumpTo(target)
-                presentGame ()
-                updateTimeLabel s.Frame
-                seekCodeView s target
-            | None -> ()
+        graphAllBtn.Unchecked.Add(fun _ ->
+            disasmGraphAll <- false
 
-        previewRangeImpl <-
-            fun which ->
-                let fStart, fEnd = rangeOf which
-                let label = if which = A then "A" else "B"
+            if disasmModeGraph then
+                refreshDisasm ())
 
-                match session with
-                | Some s when fEnd - 1 <= s.TimelineExtent && fEnd - 1 >= 0 ->
-                    if running || replaying then
-                        pauseGame ()
+        // mass-comment buttons: all read commentBox.Text
+        let text () : string = commentBox.Text
 
-                    if replaying then
-                        replaying <- false // JumpTo stops the movie core-side
+        let addComment (m: ControlComment) =
+            match control with
+            | Some c ->
+                // Line comments append (an address can carry several); keyed kinds
+                // (exec/name/range) still replace their key.
+                control <-
+                    (if m.Kind = Line then
+                         Some(ControlFile.addLine c m.Addr m.Text)
+                     else
+                         Some(ControlFile.upsert c m))
 
-                    previewTimer.Stop()
-                    previewFrom <- max 0 fStart
-                    previewSpan <- max 0 (fEnd - 1 - previewFrom)
-                    previewTicks <- 0
-                    s.JumpTo previewFrom
-                    presentGame ()
-                    updateTimeLabel s.Frame
-                    seekCodeView s previewFrom
-                    statusText.Text <- sprintf "preview %s: frames %d..%d over 1s" label fStart fEnd
-                    previewTimer.Start()
-                | _ ->
+                statusText.Text <- sprintf "comment added (%s)" (ControlFile.kindToString m.Kind)
+                refreshDisasm ()
+                refreshMassIfVisible ()
+                refreshNamesIfVisible ()
+            | None -> statusText.Text <- "no control file - click New ctrl first"
+
+        idxCmtBtn.Click.Add(fun _ ->
+            match currentTrace () with
+            | Some t when t.Entries.Length > 0 ->
+                addComment
+                    { Kind = Exec
+                      Addr = 0
+                      EndExcl = 0
+                      InstrIndex = cursor
+                      Text = text () }
+            | _ -> statusText.Text <- "no trace - cannot index-comment")
+
+        lineCmtBtn.Click.Add(fun _ ->
+            let addr =
+                if disasmModeMemory || disasmModeGraph then
+                    memCursor
+                else
                     match currentTrace () with
-                    | Some t when t.Entries.Length > 0 ->
-                        cursor <- entryAtFrame t (fEnd - 1)
-                        refreshAll ()
-                        syncSlider ()
-                        statusText.Text <- sprintf "preview %s: jumped to instr %d" label cursor
-                    | _ -> statusText.Text <- "nothing to preview yet - play or load a trace"
+                    | Some t when t.Entries.Length > 0 -> int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc
+                    | _ -> memCursor
 
-        previewTimer.Tick.Add(fun _ ->
-            previewTicks <- previewTicks + 1
+            addComment
+                { Kind = Line
+                  Addr = addr
+                  EndExcl = 0
+                  InstrIndex = -1
+                  Text = text () })
+        // right-click a code row: comment / clear / exec comment / copy address.
+        // Preview + a walk up the visual tree, so the row is found no matter
+        // which template part sits under the mouse.
+        let rec findRow (d: obj) : DisasmRow option =
+            match d with
+            | :? FrameworkElement as fe ->
+                match fe.DataContext with
+                | :? DisasmRow as row -> Some row
+                | _ ->
+                    match VisualTreeHelper.GetParent fe with
+                    | null -> None
+                    | parent -> findRow parent
+            | _ -> None
 
-            match session with
-            | Some s ->
-                let frac = min previewTicks 50
-                s.JumpTo(max 0 (min (previewFrom + previewSpan * frac / 50) s.TimelineExtent))
-                presentGame ()
-                updateTimeLabel s.Frame
-                timeline.Playhead <- int64 s.Frame
-                flameCtrl.PlayheadFrame <- s.Frame
+        disasmList.PreviewMouseRightButtonDown.Add(fun e ->
+            match findRow e.OriginalSource with
+            | Some row when row.Addr >= 0 ->
+                e.Handled <- true
+                openRowMenu disasmList row.Addr row.InstrIdx refreshDisasm jumpToPrevExecFromIndex
+            | _ -> ())
 
-                if previewTicks >= 50 then
-                    previewTimer.Stop()
-            | None -> previewTimer.Stop())
+        nameBeforeBtn.Click.Add(fun _ ->
+            match currentTrace (), control with
+            | Some t, Some c when t.Entries.Length > 0 ->
+                let pcHere = int t.Entries[max 0 (min cursor (t.Entries.Length - 1))].Pc
 
-        // dragging anywhere on the selector (track or A/B chips) scrubs the
-        // emulator screen to the frame under the cursor, both directions.
-        timeline.Scrubbed.Add(fun u ->
-            match session with
-            | Some _ -> scrubToFrame u
-            | None ->
-                match currentTrace () with
-                | Some t when t.Entries.Length > 0 && int u < t.Entries.Length ->
-                    cursor <- entryAtFrame t (int u)
-                    refreshAll ()
-                    syncSlider ()
-                | _ -> ())
+                let start =
+                    c.Blocks
+                    |> List.filter (fun b -> b.Start <= pcHere)
+                    |> List.map (fun b -> b.Start)
+                    |> fun xs -> if List.isEmpty xs then 0x4000 else List.max xs
 
-        // brush toggle buttons: selected one fills with its brush color
-        let styleBrushBtn (btn: Button) (color: Color) (on: bool) =
-            btn.Background <- if on then SolidColorBrush color else panel
-            btn.Foreground <- if on then darkFg else dim
-            btn.BorderBrush <- if on then SolidColorBrush color else dim
-            btn.FontWeight <- if on then FontWeights.Bold else FontWeights.Normal
-
-        let setActiveBrush (b: BrushId) =
-            timeline.ActiveBrush <- b
-            styleBrushBtn brushABtn sky (b = A)
-            styleBrushBtn brushBBtn amber (b = B)
-
-        brushABtn.Click.Add(fun _ -> setActiveBrush A)
-        brushBBtn.Click.Add(fun _ -> setActiveBrush B)
-        setActiveBrush timeline.ActiveBrush
-
+                addComment
+                    { Kind = Name
+                      Addr = start
         // ---- control map wiring -------------------------------------------------
         // focus the code view on an address: memory mode re-centers the memory
         // disassembly on it, execution mode jumps to its first execution
@@ -6459,7 +6991,7 @@ type MainWindow() as self =
                             memModeBtn.IsChecked <- Nullable<bool>(true)
                 | _ -> ()
             | _ -> ())
-
+                else
         namesList.Background <- panel
         namesList.BorderThickness <- Thickness(0.0)
         namesRefreshBtn.Click.Add(fun _ -> refreshNamesList ())
@@ -6582,7 +7114,7 @@ type MainWindow() as self =
                 menu.PlacementTarget <- controlMap
                 menu.Placement <- PlacementMode.MousePoint
                 menu.IsOpen <- true)
-
+        cmtABtn.Click.Add(fun _ -> regionComments A Line)
         // ---- flame graph wiring -------------------------------------------------
         // The flame shares the timeline's frame domain: brushes overlay it,
         // scrubbing moves its playhead, a click seeks the machine (and every
@@ -6594,7 +7126,7 @@ type MainWindow() as self =
                 match control with
                 | Some c -> ControlFile.nameFor c addr
                 | None -> sprintf "$%04X" addr
-
+        cmtBBtn.Click.Add(fun _ -> regionComments B Line)
         /// A browsable Trace built from a flame window's instruction tier: raw
         /// uint32 ticks restored from the window's unwrapped ones (a window
         /// spans far under 2^32, so the mask round-trips), and the frame
@@ -6999,7 +7531,7 @@ type MainWindow() as self =
         previewABtn.Click.Add(fun _ -> previewRange A)
         previewBBtn.Click.Add(fun _ -> previewRange B)
         saveCtrlBtn.Click.Add(fun _ -> saveControlNow ())
-
+            | Some t ->
         importCtrlBtn.Click.Add(fun _ ->
             let dlg =
                 Microsoft.Win32.OpenFileDialog(
@@ -7018,7 +7550,7 @@ type MainWindow() as self =
 
                     control <- Some cf
                     controlGameDir <- controlDir ()
-
+                            ControlFile.upsert
                     statusText.Text <-
                         sprintf
                             "imported %d blocks, %d comments from %s"
@@ -7043,7 +7575,7 @@ type MainWindow() as self =
                     File.WriteAllText(dlg.FileName, SkoolCtl.export c)
                     statusText.Text <- sprintf "exported skool ctrl to %s" dlg.FileName
             | None -> statusText.Text <- "no control file loaded")
-
+                    refreshDisasm ()
         newCtrlBtn.Click.Add(fun _ ->
             // Prefer a generated map: the live machine's memory, else the
             // game's cached entry snapshot; the bare skeleton only when no
@@ -7093,62 +7625,62 @@ type MainWindow() as self =
             controlGameDir <- controlDir ()
             syncMapData ()
             refreshControlLists ())
+        cmtANotB.Click.Add(fun _ ->
+            match currentTrace () with
+            | Some t ->
+                let a1, a2 = rangeOf A
+                let b1, b2 = rangeOf B
 
-        // engine radios reuse switchEngine for oracle/CE; differential runs a
-        // short lockstep validation and reports in statusText.
-        oracleRadio.Checked.Add(fun _ ->
-            if ceGame.IsSome then
-                switchEngine false |> ignore)
+                let onlyA, onlyB =
+                    ControlFile.diffPcs (ControlFile.pcsInFrames t a1 a2) (ControlFile.pcsInFrames t b1 b2)
 
-        ceRadio.Checked.Add(fun _ ->
-            if ceGame.IsNone then
-                if not (switchEngine true) then
-                    oracleRadio.IsChecked <- Nullable<bool>(true))
+                match control with
+                | Some c ->
+                    let mutable cc = c
 
-        diffRadio.Checked.Add(fun _ ->
-            match currentGame, session with
-            | Some g, Some _ when hasCE g ->
-                let framesN = max 60 ((fst (rangeOf A)) - (snd (rangeOf A)) |> abs |> max 300)
-                statusText.Text <- sprintf "differential run (%s vs CE) starting..." g.Name
-                let rom, tzx = g.Rom, (if g.Tzx <> "" then g.Tzx else g.Rom)
+                    for pc in onlyA do
+                        cc <-
+                            ControlFile.upsert
+                                cc
+                                { Kind = Line
+                                  Addr = pc
+                                  EndExcl = 0
+                                  InstrIndex = -1
+                                  Text = text () }
 
-                let task =
-                    System.Threading.Tasks.Task.Run(fun () ->
-                        Validation.run
-                            rom
-                            tzx
-                            framesN
-                            (Jetpac3.Core.Script.defaultSession framesN)
-                            Jetpac3.Core.LiftedRoutines.registryHook
-                            System.Threading.CancellationToken.None)
+                    control <- Some { cc with Dirty = true }
+                    statusText.Text <- sprintf "%d A-only comments added" onlyA.Length
+                    refreshDisasm ()
+                    refreshMassIfVisible ()
+                    refreshNamesIfVisible ()
+                | None -> statusText.Text <- "no control file"
+            | None -> ())
 
-                task.ContinueWith(fun (t: System.Threading.Tasks.Task<Validation.Report>) ->
-                    self.Dispatcher.Invoke(
-                        System.Action(fun () ->
-                            if t.IsFaulted then
-                                statusText.Text <- "differential failed: " + t.Exception.Message
-                            else
-                                let rep = t.Result
+        // scan buttons
+        scanStartBtn.Click.Add(fun _ -> startScan ())
+        scanChangedBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n <> o))
+        scanSameBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n = o))
 
-                                if rep.Passed then
-                                    statusText.Text <- sprintf "DIFFERENTIAL OK over %d frames" rep.Frames
-                                else
-                                    match rep.FirstDivergence with
-                                    | Some d ->
-                                        statusText.Text <-
-                                            sprintf
-                                                "DIFFERENTIAL FAILED at frame %d (%s): port=%04X oracle=%04X"
-                                                d.Frame
-                                                d.Kind
-                                                d.PortPc
-                                                d.OraclePc
-                                    | None -> statusText.Text <- "DIFFERENTIAL FAILED (no details)")
-                    ))
-                |> ignore
-            | _ ->
-                statusText.Text <- "differential needs a game with a compiled CE program"
-                oracleRadio.IsChecked <- Nullable<bool>(true))
+        scanExactBtn.Click.Add(fun _ ->
+            let v = scanExactBox.Text.Trim()
 
+            let parsed =
+                if v.StartsWith "$" then
+                    Int32.TryParse(v.Substring(1), Globalization.NumberStyles.HexNumber, null)
+                elif v.StartsWith "0x" then
+                    Int32.TryParse(v.Substring(2), Globalization.NumberStyles.HexNumber, null)
+                else
+                    Int32.TryParse v
+
+            match parsed with
+            | true, value ->
+                // n is the 16-bit word at the address in word mode, the single byte
+                // in byte mode; each mode compares against exactly that width.
+                applyScanFilter (fun _ o n ->
+                    if scanWidth16.IsChecked.GetValueOrDefault() then
+                        n = (value &&& 0xFFFF)
+                    else
+                        n = (value &&& 0xFF))
         // disassembly mode toggles (mutually exclusive)
         memModeBtn.Checked.Add(fun _ ->
             disasmModeMemory <- true
@@ -7416,80 +7948,80 @@ type MainWindow() as self =
                     refreshNamesIfVisible ()
                 | None -> statusText.Text <- "no control file"
             | None -> ())
+                            | None -> currentTrace ()
 
-        // scan buttons
-        scanStartBtn.Click.Add(fun _ -> startScan ())
-        scanChangedBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n <> o))
-        scanSameBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n = o))
+                        match t with
+                        | Some t when t.Entries.Length > 0 ->
+                            let c = max 0 (min cursor (t.Entries.Length - 1))
 
-        scanExactBtn.Click.Add(fun _ ->
-            let v = scanExactBox.Text.Trim()
+                            let pcs =
+                                [ for j in -20 .. 20 do
+                                      let idx = c + j
 
-            let parsed =
-                if v.StartsWith "$" then
-                    Int32.TryParse(v.Substring(1), Globalization.NumberStyles.HexNumber, null)
-                elif v.StartsWith "0x" then
-                    Int32.TryParse(v.Substring(2), Globalization.NumberStyles.HexNumber, null)
-                else
-                    Int32.TryParse v
+                                      if idx >= 0 && idx < t.Entries.Length then
+                                          int t.Entries[idx].Pc ]
 
-            match parsed with
-            | true, value ->
-                // n is the 16-bit word at the address in word mode, the single byte
-                // in byte mode; each mode compares against exactly that width.
-                applyScanFilter (fun _ o n ->
-                    if scanWidth16.IsChecked.GetValueOrDefault() then
-                        n = (value &&& 0xFFFF)
-                    else
-                        n = (value &&& 0xFF))
-            | _ -> statusText.Text <- "enter a number ($hex or decimal)")
+                            if pcs.IsEmpty then
+                                (-1, -1)
+                            else
+                                (List.min pcs, List.max pcs + 1)
+                        | _ -> (-1, -1)
 
-        scanSmallerBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n < o))
-        scanLargerBtn.Click.Add(fun _ -> applyScanFilter (fun _ o n -> n > o))
+                controlMap.DisasmViewport <- (lo, hi)
+            | None -> controlMap.CursorAddress <- -1
+            // pick up control-file edits made outside refreshDisasm's path
+            let stale =
+                match controlMap.ControlData, control with
+                | Some old, Some newC -> not (Object.ReferenceEquals(old, newC))
+                | None, None -> false
+                | _ -> true
 
-        scanWrittenBtn.Click.Add(fun _ ->
-            let writtenSet = writtenSinceBaseline ()
-            scanResults <- scanResults |> List.filter writtenSet.Contains
-            refreshScanList ())
+            if stale then
+                controlMap.ControlData <- control
 
-        scanExecutedBtn.Click.Add(fun _ ->
-            let counts = currentCounts ()
-            scanResults <- scanResults |> List.filter (fun a -> counts[a] > 0)
-            refreshScanList ())
+            controlMap.InstrStarts <- getInstrStarts ()
+            controlMap.MemoryImage <- currentMemory ()
+            controlMap.ExecCounts <- currentCounts ()
+            controlMap.SelfModified <- currentSelfModified ())
 
-        // scan result interactions
-        scanJumpBtn.Click.Add(fun _ ->
-            match scanList.SelectedItem with
-            | :? DisasmRow as row when row.Addr >= 0 ->
-                if disasmModeMemory then
-                    gotoMemCursor row.Addr "scan list jump"
-                    refreshDisasm ()
-                else
-                    match currentTrace (), session with
-                    | Some t, _ when t.FirstIndexAtPc[row.Addr] >= 0 ->
-                        cursor <- t.FirstIndexAtPc[row.Addr]
-                        refreshAll ()
-                        syncSlider ()
-                    | _, Some s ->
-                        // No trace yet: at least show it in memory mode.
-                        disasmModeMemory <- true
-                        gotoMemCursor row.Addr "scan list jump"
-                        memModeBtn.IsChecked <- Nullable<bool>(true)
-                        statusText.Text <- sprintf "no trace yet - showing %04X in memory view" row.Addr
-                    | _ -> ()
-            | _ -> ())
+        // interactions
+        slider.ValueChanged.Add(fun _ ->
+            if not syncingSlider && currentEntryCount () > 0 then
+                cursor <- int slider.Value
+                refreshDisasm ()
+                refreshRegs ()
+                refreshHeatmap ()
+                refreshStrip ()
+                refreshCursorLabel ())
 
-        scanCmtBtn.Click.Add(fun _ ->
-            match scanList.SelectedItem with
-            | :? DisasmRow as row when row.Addr >= 0 ->
-                match control with
-                | Some c ->
-                    control <- Some(ControlFile.addLine c row.Addr commentBox.Text)
-                    statusText.Text <- sprintf "comment added at %04X" row.Addr
-                    refreshDisasm ()
-                | None -> statusText.Text <- "no control file - click New ctrl first"
-            | _ -> statusText.Text <- "select an address in the scan list first")
+        slider.PreviewMouseDown.Add(fun _ -> userDragging <- true)
+        slider.PreviewMouseUp.Add(fun _ -> userDragging <- false)
 
+        // Mouse wheel over the code window travels through the code. The fixed
+        // 41-row windows have no real scroll extent, so each notch moves the
+        // anchor itself (one instruction per line) and setRows keeps the offset
+        // stable, which reads as the code sliding under the cursor. The long
+        // brush-selection list (memory mode) and the graph surface have genuine
+        // overflow and keep their native scrolling.
+        disasmList.PreviewMouseWheel.Add(fun e ->
+            let native = disasmModeGraph || (disasmModeMemory && activeSelection().IsSome)
+
+            if not native then
+                let notches = float e.Delta / 120.0
+                // negated so wheel up = earlier content: lower addresses in memory
+                // mode, earlier instructions in execution mode
+                let lines = -int(float SystemParameters.WheelScrollLines * notches)
+
+                if lines <> 0 then
+                    e.Handled <- true
+
+                    if disasmModeMemory then
+                        match currentMemory () with
+                        | None -> ()
+                        | Some mem ->
+                            // The wheel scrolls the window anchor, not the cursor: the
+                            // highlighted instruction stays on its address and moves with
+                            // the content (out of view if you keep scrolling the same way).
         // keep the timeline extent fresh each UI tick
         uiTimer.Tick.Add(fun _ -> timeline.Length <- timelineExtent ())
         // keep the graphics tile view in step with live memory
@@ -7567,87 +8099,6 @@ type MainWindow() as self =
             controlMap.ExecCounts <- currentCounts ()
             controlMap.SelfModified <- currentSelfModified ()
             dbgLog "control map updated")
-
-        // interactions
-        slider.ValueChanged.Add(fun _ ->
-            if not syncingSlider && currentEntryCount () > 0 then
-                cursor <- int slider.Value
-                refreshDisasm ()
-                refreshRegs ()
-                refreshHeatmap ()
-                refreshStrip ()
-                refreshCursorLabel ())
-
-        slider.PreviewMouseDown.Add(fun _ -> userDragging <- true)
-        slider.PreviewMouseUp.Add(fun _ -> userDragging <- false)
-
-        // Mouse wheel over the code window travels through the code. The fixed
-        // 41-row windows have no real scroll extent, so each notch moves the
-        // anchor itself (one instruction per line) and setRows keeps the offset
-        // stable, which reads as the code sliding under the cursor. The long
-        // brush-selection list (memory mode) and the graph surface have genuine
-        // overflow and keep their native scrolling.
-        disasmList.PreviewMouseWheel.Add(fun e ->
-            let native = disasmModeGraph || (disasmModeMemory && activeSelection().IsSome)
-
-            if not native then
-                let notches = float e.Delta / 120.0
-                // negated so wheel up = earlier content: lower addresses in memory
-                // mode, earlier instructions in execution mode
-                let lines = -int(float SystemParameters.WheelScrollLines * notches)
-
-                if lines <> 0 then
-                    e.Handled <- true
-
-                    if disasmModeMemory then
-                        match currentMemory () with
-                        | None -> ()
-                        | Some mem ->
-                            // The wheel scrolls the window anchor, not the cursor: the
-                            // highlighted instruction stays on its address and moves with
-                            // the content (out of view if you keep scrolling the same way).
-                            let top =
-                                match memViewTop with
-                                | Some t when t >= 0 && t < 0x10000 -> t
-                                | _ -> memCursor
-
-                            if lines > 0 then
-                                let mutable a = top
-
-                                for _ in 1..lines do
-                                    a <- (a + max 1 (Disasm.disasmMemory mem a).Length) &&& 0xFFFF
-
-                                memViewTop <- Some a
-                            else
-                                // Back up to the previous instruction start; starts[0] is
-                                // always set, so the walk terminates at worst at address 0.
-                                match getInstrStarts () with
-                                | None -> memViewTop <- Some((top + lines) &&& 0xFFFF)
-                                | Some starts ->
-                                    let mutable a = top
-
-                                    for _ in 1 .. -lines do
-                                        a <- (a - 1) &&& 0xFFFF
-
-                                        while not starts[a] do
-                                            a <- (a - 1) &&& 0xFFFF
-
-                                    memViewTop <- Some a
-
-                            refreshDisasm ()
-                    else
-                        let n = currentEntryCount ()
-
-                        if n > 0 then
-                            // The wheel scrolls the window, not the cursor: the
-                            // highlighted instruction stays highlighted and moves with the
-                            // content (out of view if you keep scrolling), matching what
-                            // the list's own scrollbar does to the selection.
-                            execViewCenter <- max 0 (min (execViewCenter + lines) (n - 1))
-                            execViewHold <- true
-                            refreshDisasm ())
-
-        heatImage.MouseLeftButtonDown.Add(fun e ->
             match currentTrace () with
             | Some t when t.Entries.Length > 0 ->
                 let pos = e.GetPosition heatImage
@@ -7766,6 +8217,87 @@ type MainWindow() as self =
                         match manualBoot with
                         | Some mb -> List.iter (fun (r, b) -> mb.SetKey(r, b, false)) (keyMap e.Key)
                         | None -> ())
+
+        // timers
+        frameTimer.Tick.Add(fun _ ->
+            if running then
+                renderFrame ())
+
+        cinemaTimer.Tick.Add(fun _ ->
+            if cinemaPlaying then
+                let n = currentEntryCount ()
+
+                if n > 0 then
+                    cursor <- min (n - 1) (cursor + cinemaSpeed)
+                    refreshDisasm ()
+                    refreshRegs ()
+                    refreshHeatmap ()
+                    refreshStrip ()
+                    refreshCursorLabel ()
+                    syncingSlider <- true
+                    slider.Value <- float cursor
+                    syncingSlider <- false
+
+                    if cursor >= n - 1 then
+                        // End of the trace: stop stepping so the timer doesn't keep
+                        // rebuilding the views at the last instruction forever.
+                        cinemaPlaying <- false
+                        cinemaTimer.Stop()
+                        playBtn.Content <- "Play"
+                        statusText.Text <- "cinema reached the end of the trace"
+                else
+                    cinemaPlaying <- false)
+
+        manualTimer.Tick.Add(fun _ ->
+            match manualBoot with
+            | Some mb ->
+                mb.RunFrame()
+                gameBitmap.WritePixels(Int32Rect(0, 0, 320, 256), mb.ScreenBuffer, 320 * 4, 0)
+
+                statusText.Text <-
+                    sprintf
+                        "manual boot: frame %d, tape %s - press 'Set as game entry' when the game is ready"
+                        mb.FrameCount
+                        (if mb.TapePlaying then "playing" else "stopped")
+            | None -> ())
+
+        uiTimer.Tick.Add(fun _ ->
+            match session with
+            | None ->
+                match ceGame with
+                | Some c ->
+                    if not rewinding then
+                        rewindSlider.Maximum <- 0.0
+                        rewindSlider.Value <- 0.0
+
+                    updateTimeLabel c.Frame
+
+                    statusText.Text <-
+                        sprintf "CE engine: frame=%d tick=%.2fM" c.Frame (float c.CycleCount / 1_000_000.0)
+                | None ->
+                    match bootTask with
+                    | Some t when t.IsCompleted ->
+                        try
+                            let loadedSession = t.Result
+                            bootTask <- None
+                            session <- Some loadedSession
+                            flameTrace <- None
+                            flameCache.Clear()
+
+                            let hasTimeline =
+                                match currentGame with
+                                | Some game when game.GameId = bootGameId -> loadTimeline game loadedSession
+                                | _ -> false
+
+                            if hasTimeline then
+                                // Autoplay with the whole recorded timeline seekable from
+                                // frame 0: states are restored, not re-executed.
+                                replayExtent <- max 1 loadedSession.TimelineExtent
+
+                            if menuOpen then
+                                // The picker is on screen: install the session parked -
+                                // no autoplay until the project is reopened.
+                                replaying <- false
 
         // timers
         // frameTimer no longer renders: frame pacing moved to the render-loop
@@ -8175,7 +8707,7 @@ type MainWindow() as self =
         uiTimer.Start()
         manualTimer.Start()
         statsTimer.Start()
-
+        // Launch the manifest-selected default game.
         // Launch the manifest-selected default game.
         launchGame (startupGame, None)
         loadControlForGame ()
@@ -8198,6 +8730,90 @@ type MainWindow() as self =
         refreshAll ()
         syncSlider ()
         setTheme Theme.mode
+
+    /// Open (or focus) the cheat-engine window. It shares the machine: the
+    /// accessors hand out the live session's own screen buffer and memory,
+    /// so pokes hit the running game and the picture follows project
+    /// switches automatically.
+    /// Swap the window to the cheat-engine view (CheatEngineView.fs): the
+    /// Spectrum screen plus the memory scanner, over the shared live
+    /// session. Pokes hit the running game and the picture follows project
+    /// switches automatically. Escape or its main-menu button returns to
+    /// the launcher.
+    member self.ShowCheatEngine() : unit =
+        self.Title <-
+            sprintf
+                "Cheat Engine - %s"
+                (match currentGame with
+                 | Some g -> g.Name
+                 | None -> "no project")
+
+        match cheatView with
+        | Some v ->
+            self.Content <- v
+            v.Focus() |> ignore
+        | None ->
+            let getScreen () =
+                match session with
+                | Some s -> Some s.ScreenBuffer
+                | None -> None
+
+            let getMemory () =
+                match session with
+                | Some s -> Some s.Memory
+                | None -> None
+
+            let v = CheatEngineView(getScreen, getMemory, returnToMenu)
+            cheatView <- Some v
+            self.Content <- v
+            v.Focus() |> ignore
+
+    /// Swap the window to the bare game view (GameOnlyView.fs): only the
+    /// Spectrum screen plus hold-to-reverse playback, no emulator chrome.
+    /// The view talks to the shared session through accessors; Escape or
+    /// its main-menu button returns to the launcher.
+    member self.ShowGameOnly() : unit =
+        self.Title <-
+            sprintf
+                "Just the Game - %s"
+                (match currentGame with
+                 | Some g -> g.Name
+                 | None -> "no project")
+
+        match gameOnlyView with
+        | Some v ->
+            self.Content <- v
+            v.Focus() |> ignore
+        | None ->
+            let getScreen () =
+                match session with
+                | Some s -> Some s.ScreenBuffer
+                | None -> None
+
+            let getFrame () =
+                match session with
+                | Some s -> s.Frame
+                | None -> 0
+
+            let minFrame () = 1
+
+            let seekFrame (f: int) =
+                match session with
+                | Some s ->
+                    if replaying then
+                        s.StopReplay()
+                        replaying <- false
+
+                    s.JumpTo(f)
+                    presentGame ()
+                | None -> ()
+
+            let v =
+                GameOnlyView(getScreen, getFrame, minFrame, seekFrame, pauseGame, returnToMenu)
+
+            gameOnlyView <- Some v
+            self.Content <- v
+            v.Focus() |> ignore
 
     /// Open (or focus) the cheat-engine window. It shares the machine: the
     /// accessors hand out the live session's own screen buffer and memory,

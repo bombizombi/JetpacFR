@@ -107,6 +107,9 @@ type TimelineSelector() as self =
     let typeface =
         Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal)
 
+    let typeface =
+        Typeface(FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal)
+
     let mutable length = 1L
     /// Viewport: first visible unit + pixels per unit. ppUnit <= 0.0 means
     /// "fit the whole length" (recomputed from the actual width on demand).
