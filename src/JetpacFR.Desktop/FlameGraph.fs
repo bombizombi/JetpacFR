@@ -83,6 +83,57 @@ module FlameGraphInternal =
 
 open FlameGraphInternal
 
+/// Transparent cursor layer hosted over a FlameGraph (same grid cell, added
+/// after it): draws only the frame playhead + execution cursor. Hit-test
+/// invisible, so all mouse interaction stays on the graph below; moving the
+/// cursor costs two lines instead of a full graph repaint, every frame.
+type FlameOverlay(getPlayheadTick: unit -> int64 option, getCursorTick: unit -> int64, xOfTick: int64 -> float) as self =
+    inherit FrameworkElement()
+
+    let chromePlay () =
+        if Theme.isLight () then
+            Color.FromRgb(0x0Fuy, 0x17uy, 0x2Auy)
+        else
+            Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
+
+    let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
+    /// Execution-view cursor: dashed amber so it reads apart from the solid
+    /// frame playhead.
+    let cursorBrush = SolidColorBrush(Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy))
+    let cursorPen = Pen(cursorBrush, 1.5)
+    do cursorPen.DashStyle <- DashStyles.Dash
+
+    do
+        self.Focusable <- false
+        self.ClipToBounds <- true
+        self.IsHitTestVisible <- false
+
+    member _.RefreshTheme() =
+        (playPen.Brush :?> SolidColorBrush).Color <- chromePlay ()
+        self.InvalidateVisual()
+
+    override this.OnRender(dc: DrawingContext) =
+        let w = this.ActualWidth
+        let h = this.ActualHeight
+
+        if w > 0.0 && h > 0.0 then
+            match getPlayheadTick () with
+            | Some tick ->
+                let x = xOfTick tick
+
+                if x >= -1.0 && x <= w + 1.0 then
+                    dc.DrawLine(playPen, Point(x, 0.0), Point(x, h))
+            | None -> ()
+
+            let ct = getCursorTick ()
+
+            if ct >= 0L then
+                let x = xOfTick ct
+
+                if x >= -1.0 && x <= w + 1.0 then
+                    dc.DrawLine(cursorPen, Point(x, 0.0), Point(x, h))
+                    dc.DrawRectangle(cursorBrush, null, Rect(x - 1.5, 0.0, 3.0, 5.0))
+
 /// Zoomable flame graph over one execution window: a series of rectangles
 /// spanning the time line, growing downward as the call stack deepens. The
 /// x domain is unwrapped T-state ticks relative to the window start; the
@@ -102,8 +153,9 @@ type FlameGraph() as self =
     let viewportChanged = Event<unit>()
     let rectMenu = Event<FlameRect * int * int>() // (rect, frame, entry index)
 
-    // Per-mode canvas chrome. Hue-based flame boxes + amber cursor + tints are
-    // identical in both modes; only the canvas, lines and lane fills change.
+    // Per-mode canvas chrome. Tints are identical in both modes; only the
+    // canvas, lines and lane fills change. Playhead/cursor pens live on the
+    // overlay (FlameOverlay above) so cursor moves never repaint this graph.
     let chromeBg () =
         if Theme.isLight () then
             Color.FromRgb(0xF8uy, 0xFAuy, 0xFCuy)
@@ -115,12 +167,6 @@ type FlameGraph() as self =
             Color.FromRgb(0xCBuy, 0xD5uy, 0xE1uy)
         else
             Color.FromRgb(0x3Auy, 0x3Fuy, 0x4Cuy)
-
-    let chromePlay () =
-        if Theme.isLight () then
-            Color.FromRgb(0x0Fuy, 0x17uy, 0x2Auy)
-        else
-            Color.FromRgb(0xE8uy, 0xE8uy, 0xE8uy)
 
     let chromeLane () =
         if Theme.isLight () then
@@ -155,12 +201,6 @@ type FlameGraph() as self =
     let framePen =
         Pen(SolidColorBrush(Color.FromArgb(0x55uy, 0x40uy, 0xC4uy, 0xFFuy)), 1.0)
 
-    let playPen = Pen(SolidColorBrush(chromePlay ()), 1.5)
-    /// Execution-view cursor: dashed amber so it reads apart from the solid
-    /// frame playhead.
-    let cursorBrush = SolidColorBrush(Color.FromRgb(0xFBuy, 0xBFuy, 0x24uy))
-    let cursorPen = Pen(cursorBrush, 1.5)
-    do cursorPen.DashStyle <- DashStyles.Dash
     // Shared Theme instance: label text follows the day/night switch untouched.
     let labelFg = Theme.dim
 
@@ -256,6 +296,12 @@ type FlameGraph() as self =
     let mutable dragDepth = 0
     let mutable dragMoved = false
 
+    let overlay =
+        FlameOverlay(
+            (fun () -> self.PlayheadTick),
+            (fun () -> cursorTick),
+            (fun t -> self.XOf t)
+        )
     do
         self.Focusable <- false
         self.ClipToBounds <- true
@@ -277,7 +323,6 @@ type FlameGraph() as self =
         let setPen (p: Pen) (c: Color) = setBrush p.Brush c
         bgBrush.Color <- chromeBg ()
         setPen borderPen (chromeBorder ())
-        setPen playPen (chromePlay ())
         laneBrush.Color <- chromeLane ()
         setPen lanePen (chromeLanePen ())
         setPen laneEdgePen (chromeLaneEdge ())
@@ -285,6 +330,7 @@ type FlameGraph() as self =
         b.Freeze()
         mixedBrush <- b :> Brush
         covMemo.Clear()
+        overlay.RefreshTheme()
         this.InvalidateVisual()
 
     /// Resolves an entry address into a display name (symbols > blocks > $XXXX).
@@ -298,6 +344,22 @@ type FlameGraph() as self =
         and set v = frameRangesFor <- v
 
     member _.Window = window
+    member _.Overlay : FlameOverlay = overlay
+
+    /// Window tick of the frame playhead (None = hidden): shared with the
+    /// cursor overlay so both paint the same x without re-running OnRender.
+    member _.PlayheadTick : int64 option =
+        match window with
+        | Some w when playheadFrame >= 0 && w.FirstFrame >= 0 ->
+            Some(
+                if playheadFrame < w.FirstFrame then
+                    0L
+                elif playheadFrame - w.FirstFrame >= w.FrameTicks.Length then
+                    w.EndTick
+                else
+                    w.FrameTicks[playheadFrame - w.FirstFrame]
+            )
+        | _ -> None
 
     /// Install a window and reset the viewport to show all of it.
     member this.SetWindow(w: FlameWindow) =
@@ -316,6 +378,7 @@ type FlameGraph() as self =
         firstDepth <- 0
         cursorTick <- -1L
         playheadFrame <- -1
+        overlay.InvalidateVisual()
         this.InvalidateVisual()
 
     member this.PlayheadFrame
@@ -323,7 +386,7 @@ type FlameGraph() as self =
         and set v =
             if playheadFrame <> v then
                 playheadFrame <- v
-                this.InvalidateVisual()
+                overlay.InvalidateVisual()
 
     /// Execution-view cursor position in window ticks (-1 = hidden): the exact
     /// instruction the code pane is on. The host computes it; hidden whenever
@@ -333,7 +396,7 @@ type FlameGraph() as self =
         and set v =
             if cursorTick <> v then
                 cursorTick <- v
-                this.InvalidateVisual()
+                overlay.InvalidateVisual()
 
     /// Brush overlays in tick coordinates (None = unset).
     member this.RangeA
@@ -360,7 +423,7 @@ type FlameGraph() as self =
 
     member private this.TickAt(x: float) = origin + int64 (Math.Round(x / ppTick))
 
-    member private this.XOf(tick: int64) = float (tick - origin) * ppTick
+    member this.XOf(tick: int64) = float (tick - origin) * ppTick
 
     member private this.RowOf(depth: int) =
         float (depth - firstDepth) * FlameGraph.RowHeight
@@ -382,6 +445,7 @@ type FlameGraph() as self =
             origin <- 0L
             this.ClampDepth w
             this.InvalidateVisual()
+            overlay.InvalidateVisual()
             viewportChanged.Trigger()
         | None -> ()
 
@@ -394,6 +458,7 @@ type FlameGraph() as self =
             origin <- tickFrom
             this.ClampOrigin w
             this.InvalidateVisual()
+            overlay.InvalidateVisual()
             viewportChanged.Trigger()
         | None -> ()
 
@@ -411,6 +476,7 @@ type FlameGraph() as self =
             origin <- anchor - int64 (Math.Round(anchorX / ppTick))
             this.ClampOrigin w
             this.InvalidateVisual()
+            overlay.InvalidateVisual()
             viewportChanged.Trigger()
         | None -> ()
 
@@ -424,6 +490,7 @@ type FlameGraph() as self =
                 firstDepth <- firstDepth + delta
                 this.ClampDepth w
                 this.InvalidateVisual()
+                overlay.InvalidateVisual()
             else
                 let factor = if e.Delta > 0 then 1.2 else 1.0 / 1.2
                 this.ApplyZoom(factor, e.GetPosition(this).X)
@@ -463,6 +530,7 @@ type FlameGraph() as self =
                     firstDepth <- dragDepth - int (Math.Round(dy / FlameGraph.RowHeight))
                     this.ClampDepth w
                     this.InvalidateVisual()
+                    overlay.InvalidateVisual()
                 | None -> ()
         else
             hoverPt <- Some p
@@ -607,6 +675,19 @@ type FlameGraph() as self =
                     let framePx = float win.EndTick / float win.FrameTicks.Length * ppTick
 
                     if framePx >= 6.0 then
+                        let lo = max 0L origin
+                        let hi = origin + visibleSpan
+
+                        for j in 0 .. win.FrameTicks.Length - 1 do
+                            let bt = win.FrameTicks[j]
+
+                            if bt >= lo && bt <= hi then
+                                let x = this.XOf bt
+                                dc.DrawLine(framePen, Point(x, 0.0), Point(x, h))
+
+                                if framePx >= 40.0 then
+                                    let label = ft (string (win.FirstFrame + j)) 8.0 labelFg false
+                                    dc.DrawText(label, Point(x + 2.0, 1.0))
 
                 // Rectangles. Two regimes: once a frame is narrower than the
                 // fidelity threshold, paint LOD pyramid runs - geometry is bounded
@@ -792,27 +873,6 @@ type FlameGraph() as self =
 
                             if ftText.Width <= x1 - x0 - 8.0 then
                                 dc.DrawText(ftText, Point(x0 + 4.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0)))
-
-                // Playhead: the frame the machine is parked on / executing.
-                if playheadFrame >= 0 && win.FirstFrame >= 0 then
-                    let tick =
-                        if playheadFrame < win.FirstFrame then
-                            0L
-                        elif playheadFrame - win.FirstFrame >= win.FrameTicks.Length then
-                            win.EndTick
-                        else
-                            win.FrameTicks[playheadFrame - win.FirstFrame]
-
-                    let x = this.XOf tick
-                    dc.DrawLine(playPen, Point(x, 0.0), Point(x, h))
-
-                // Execution-view cursor: the exact instruction the code pane is on.
-                if cursorTick >= 0L then
-                    let x = this.XOf cursorTick
-
-                    if x >= -1.0 && x <= w + 1.0 then
-                        dc.DrawLine(cursorPen, Point(x, 0.0), Point(x, h))
-                        dc.DrawRectangle(cursorBrush, null, Rect(x - 1.5, 0.0, 3.0, 5.0))
 
                 // Tooltip for the rectangle under the cursor.
                 match hoverPt, hoverRect with

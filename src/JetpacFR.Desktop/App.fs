@@ -4659,7 +4659,10 @@ type MainWindow() as self =
         lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.0, GridUnitType.Star), MinHeight = 70.0))
         lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength.Auto))
         lowerHost.RowDefinitions.Add(RowDefinition(Height = GridLength(1.2, GridUnitType.Star)))
-        Grid.SetRow(flameCtrl, 0)
+        let flameHost = Grid()
+        flameHost.Children.Add flameCtrl |> ignore
+        flameHost.Children.Add flameCtrl.Overlay |> ignore
+        Grid.SetRow(flameHost, 0)
 
         let flameSplitter =
             GridSplitter(
@@ -4677,7 +4680,7 @@ type MainWindow() as self =
         Grid.SetColumn(codeHost, 0)
         codeCmtHost.Children.Add codeHost |> ignore
         Grid.SetRow(codeCmtHost, 2)
-        lowerHost.Children.Add flameCtrl |> ignore
+        lowerHost.Children.Add flameHost |> ignore
         lowerHost.Children.Add flameSplitter |> ignore
         lowerHost.Children.Add codeCmtHost |> ignore
         center.Children.Add lowerHost |> ignore
@@ -8509,13 +8512,11 @@ type MainWindow() as self =
                     rewindSlider.Value <- float s.Frame
 
                 timeline.Playhead <- int64 s.Frame
-                // Full-window flame OnRender per playhead tick starves the
-                // render-loop stepper that pumps replay frames (same UI
-                // thread). Timeline playhead above is ~10 primitives and keeps
-                // moving; the flame cursor catches up once parked.
-                if not running then
-                    flameCtrl.PlayheadFrame <- s.Frame
+                // Playhead lives on the hit-test-invisible cursor overlay: two
+                // lines per tick, the graph itself never repaints for this.
+                flameCtrl.PlayheadFrame <- s.Frame
                 updateTimeLabel s.Frame
+
 
                 if running then
                     statusText.Text <-
