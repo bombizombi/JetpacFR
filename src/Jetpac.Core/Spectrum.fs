@@ -37,6 +37,10 @@ type Spectrum48() as self =
     let mutable lastDetect: uint64 = 0UL
     let mutable lastBRead = 0
     let mutable readsInARow = 0
+    // Set by TapePlayFrom: boot-driven playback must not be stopped by the
+    // read-pattern heuristic (direct-EAR loaders poll once per frame between
+    // bits, which the heuristic reads as an aborted load).
+    let mutable tapeManual = false
 
     let rec videoTask =
         SchedulerTask(fun _ ->
@@ -122,6 +126,7 @@ type Spectrum48() as self =
     member this.ExecuteInstruction() = self.ExecuteOneTraced()
     member this.DebugZ80 = z80
     member this.DebugTapePlaying = tape.Playing()
+    member this.DebugTapeAtEnd = tape.AtEnd
 
     member this.BeeperTrace: (int64 * bool) list = beeperTrace |> Seq.toList
 
@@ -286,7 +291,9 @@ type Spectrum48() as self =
         lastBRead <- z80.Regs.Get R8.B
 
         if tape.Playing() then
-            if sinceLast > 1000UL || (bDiff <> 1 && bDiff <> 0 && bDiff <> 0xFF) then
+            if tapeManual then
+                () // boot-driven playback: exempt from auto-stop
+            elif sinceLast > 1000UL || (bDiff <> 1 && bDiff <> 0 && bDiff <> 0xFF) then
                 readsInARow <- readsInARow + 1
 
                 if readsInARow >= 2 then
@@ -307,6 +314,22 @@ type Spectrum48() as self =
         if tape.NextTransition() <> 0 then
             tapeLastTime <- z80.CycleCount()
             scheduler.Schedule(tapeTask, uint64 (tape.NextTransition()))
+
+    /// Start playback at block `index`. The flash boot serves the ROM's loads
+    /// without playing pulses, so a game loader that reads the EAR directly
+    /// (a RAM copy of LD-BYTES) must pick up at the first block the trap did
+    /// not serve.
+    member this.TapePlayFrom(index: int) =
+        tapeManual <- true
+        tape.PlayFrom(index)
+
+        if tape.NextTransition() <> 0 then
+            tapeLastTime <- z80.CycleCount()
+            scheduler.Schedule(tapeTask, uint64 (tape.NextTransition()))
+
+    /// Mark the current playback boot-driven: the read-pattern heuristic must
+    /// not auto-stop it (direct-EAR loaders poll once per frame between bits).
+    member this.TapeSetManual() = tapeManual <- true
 
     /// Frame-based boot macro: types LOAD "" (J, SYM SHIFT+P twice for the two
     /// quotes, ENTER) using the documented 48K keyboard layout. The quote on the

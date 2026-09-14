@@ -39,11 +39,18 @@ module EntryCache =
     /// flash load) and slow (emulated tape) boots land in distinct slots - the
     /// resulting states agree except for interrupt-timed sysvars, and a user
     /// forcing the slow boot must not silently receive the fast slot.
+    /// The -v2 suffix bumps every existing snapshot out of the cache when the
+    /// boot semantics changed (tape-exhaust + settle: the entry state shows
+    /// the running game, not its loader).
     let private marker (romPath: string) (tzxPath: string) (fast: bool) =
         let baseText =
-            sprintf "rom=%s\ntzx=%s\n" (sha256 (File.ReadAllBytes romPath)) (sha256 (File.ReadAllBytes tzxPath))
+            sprintf
+                "rom=%s\ntzx=%s\nboot=%s\n"
+                (sha256 (File.ReadAllBytes romPath))
+                (sha256 (File.ReadAllBytes tzxPath))
+                (if fast then "fast-v2-settle" else "slow-v2-settle")
 
-        if fast then baseText + "boot=fast\n" else baseText
+        baseText
 
     /// One cache slot per (ROM, tape) asset PAIR, keyed by the combined
     /// content hash. Keying on the ROM alone made projects sharing a ROM

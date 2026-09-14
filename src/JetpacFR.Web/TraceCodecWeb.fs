@@ -295,4 +295,5 @@ module TraceCodecWeb =
           SelfModCount = selfMod |> Array.filter id |> Array.length
           FirstIndexAtPc = firstAt
           StartTick = startTick
-          EndTick = endTick }
+          EndTick = endTick
+          Regenerations = 0 }

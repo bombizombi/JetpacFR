@@ -3839,6 +3839,27 @@ type MainWindow() as self =
                 Margin = Thickness(0.0, 2.0, 0.0, 0.0)
             )
 
+        // Trace regeneration counter: the recorder stamps each Build() with a
+        // monotonically increasing number (not persisted). Views that redraw
+        // from the trace can skip rebuilding their tree while the number
+        // stands still - the counter makes the redraw need visible.
+        let traceRegenHeader =
+            TextBlock(
+                Text = "trace rebuilds (regenerations)",
+                Foreground = dim,
+                FontSize = 12.0,
+                Margin = Thickness(0.0, 10.0, 0.0, 2.0)
+            )
+
+        let traceRegenLabel =
+            TextBlock(
+                Text = "trace regenerations: -",
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.5,
+                TextWrapping = TextWrapping.Wrap
+            )
+
         // CE file watched for the current game: its path and stamp when the
         // game was loaded; "modified" = the on-disk stamp differs now.
         let mutable ceWatchGameId = ""
@@ -3912,6 +3933,16 @@ type MainWindow() as self =
 
                 ceFileLabel.Foreground <- (if modified then orange else dim)
 
+            // the regeneration counter rides the same UI-tick update: views
+            // watch this number to skip rebuilds of their display trees
+            match currentTrace () with
+            | Some t ->
+                traceRegenLabel.Text <-
+                    sprintf "trace regenerations: %d (window: %d entries)" t.Regenerations t.Entries.Length
+
+                traceRegenLabel.Foreground <- dim
+            | None -> traceRegenLabel.Text <- "trace regenerations: -"
+
         let updateReplayTiming () =
             match session with
             | Some s when s.Replaying || replaying ->
@@ -3983,6 +4014,8 @@ type MainWindow() as self =
         left.Children.Add replayHeader |> ignore
         left.Children.Add replayStartLabel |> ignore
         left.Children.Add replayEndLabel |> ignore
+        left.Children.Add traceRegenHeader |> ignore
+        left.Children.Add traceRegenLabel |> ignore
         updateFileStatusPanel ()
 
         // center: timeline selector, mode buttons, disassembly, comment toolbar
@@ -5125,12 +5158,360 @@ type MainWindow() as self =
         theaterPanel.Children.Add theaterScroll |> ignore
         theaterTab.Content <- theaterPanel
 
+        // Analyze tab: the recursive code mapper (bench codemap's GUI twin).
+        // Runs on a background task over a defensive copy of memory, shows a
+        // readable text report, and saves it into the game folder.
+        let anaTab = TabItem(Header = "Analyze")
+
+        let anaPanel = DockPanel(Margin = Thickness(4.0))
+        let anaTop = WrapPanel(Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+
+        let anaEntryBox = TextBox(Width = 64.0, Background = panel, Foreground = normal)
+
+        anaEntryBox.ToolTip <-
+            "entry address ($F500 / 0xF500 / decimal); empty = control entryPc, else the current PC"
+
+        let anaAllCheck =
+            CheckBox(
+                Content = "map whole image",
+                IsChecked = Nullable<bool>(true),
+                Margin = Thickness(8.0, 0.0, 8.0, 0.0),
+                Foreground = normal
+            )
+
+        anaAllCheck.ToolTip <-
+            "after the entry-reachable map, seed every remaining CALL target in the image so the whole program maps"
+
+        let anaRomCheck =
+            CheckBox(
+                Content = "follow ROM calls",
+                IsChecked = Nullable<bool>(false),
+                Margin = Thickness(0.0, 0.0, 8.0, 0.0),
+                Foreground = normal
+            )
+
+        anaRomCheck.ToolTip <-
+            "walk into the 48K ROM when RAM code CALLs/RSTs there; off keeps the map and the report RAM-only (ROM targets still show as call sites)"
+
+        let anaRunBtn = Button(Content = "Map code", Width = 90.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
+        let anaSaveBtn = Button(Content = "Save report", Width = 100.0, IsEnabled = false)
+
+        let anaProgress =
+            TextBlock(Text = "", Foreground = dim, VerticalAlignment = VerticalAlignment.Center)
+
+        anaTop.Children.Add anaEntryBox |> ignore
+        anaTop.Children.Add anaAllCheck |> ignore
+        anaTop.Children.Add anaRomCheck |> ignore
+        anaTop.Children.Add anaRunBtn |> ignore
+        anaTop.Children.Add anaSaveBtn |> ignore
+        anaTop.Children.Add anaProgress |> ignore
+        DockPanel.SetDock(anaTop, Dock.Top)
+        anaPanel.Children.Add anaTop |> ignore
+
+        let anaText =
+            TextBox(
+                IsReadOnly = true,
+                FontFamily = mono,
+                TextWrapping = TextWrapping.NoWrap,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = panel,
+                Foreground = normal
+            )
+
+        anaPanel.Children.Add anaText |> ignore
+        anaTab.Content <- anaPanel
+
+        let mutable anaRunning = false
+        let mutable anaLines: string list = []
+
+        let anaDefaultEntry () =
+            match control with
+            | Some c when c.EntryPc >= 0x4000 && c.EntryPc < 0x10000 -> c.EntryPc
+            | _ ->
+                match session with
+                | Some s -> (int (s.Regs.Pc())) &&& 0xFFFF
+                | None -> 0x4000
+
+        anaRunBtn.Click.Add(fun _ ->
+            if anaRunning then
+                ()
+            else
+                match session with
+                | None -> anaProgress.Text <- "load a game first"
+                | Some s ->
+                    let entry =
+                        let t = anaEntryBox.Text.Trim()
+
+                        if t.Length > 0 then
+                            GameProject.parseAddr t
+                        else
+                            let d = anaDefaultEntry ()
+                            anaEntryBox.Text <- sprintf "$%04X" d
+                            d
+
+                    if entry < 0 || entry > 0xFFFF then
+                        anaProgress.Text <- "entry out of range"
+                    else
+                        let seedAll = anaAllCheck.IsChecked = Nullable<bool>(true)
+                        let followRom = anaRomCheck.IsChecked = Nullable<bool>(true)
+                        // defensive copy: the walker reads while the machine may run
+                        let mem = Array.copy s.Memory
+                        let names = (match control with Some c -> c.Symbols | None -> [])
+                        anaRunning <- true
+                        anaRunBtn.IsEnabled <- false
+                        anaSaveBtn.IsEnabled <- false
+                        anaProgress.Text <- "mapping..."
+                        let ui = anaProgress.Dispatcher
+
+                        System.Threading.Tasks.Task.Run(fun () ->
+                            try
+                                let result =
+                                    CodeMap.map mem entry seedAll followRom (fun (f, b, byts) ->
+                                        ui.BeginInvoke(
+                                            DispatcherPriority.Background,
+                                            System.Action(fun () ->
+                                                anaProgress.Text <-
+                                                    sprintf "functions: %d, blocks: %d, code bytes: %d" f b byts)
+                                        )
+                                        |> ignore)
+
+                                let lines = CodeMap.renderReport mem result names
+                                let codeTotal = result.IsCode |> Array.filter id |> Array.length
+
+                                ui.BeginInvoke(
+                                    DispatcherPriority.Normal,
+                                    System.Action(fun () ->
+                                        anaLines <- lines
+                                        anaText.Text <- String.concat "\n" lines
+
+                                        anaProgress.Text <-
+                                            sprintf
+                                                "done: %d functions, %d blocks, %d code bytes"
+                                                result.Functions.Length
+                                                result.Blocks.Length
+                                                codeTotal
+
+                                        anaRunBtn.IsEnabled <- true
+                                        anaSaveBtn.IsEnabled <- true
+                                        anaRunning <- false)
+                                )
+                                |> ignore
+                            with ex ->
+                                ui.BeginInvoke(
+                                    DispatcherPriority.Normal,
+                                    System.Action(fun () ->
+                                        anaProgress.Text <- sprintf "analysis failed: %s" ex.Message
+                                        anaRunBtn.IsEnabled <- true
+                                        anaRunning <- false)
+                                )
+                                |> ignore)
+
+                        |> ignore
+
+                    ())
+
+        anaSaveBtn.Click.Add(fun _ ->
+            let dir = controlDir ()
+
+            if dir = "" then
+                anaProgress.Text <- "no game folder - load a game first"
+            else
+                try
+                    let path = Path.Combine(dir, "analysis_report.txt")
+                    File.WriteAllLines(path, anaLines)
+                    anaProgress.Text <- sprintf "report saved: %s" path
+                with ex ->
+                    anaProgress.Text <- sprintf "save failed: %s" ex.Message)
+
+        // CE tab: build + display the game's CE program from the live control
+        // file (labels + function names as label cells). Labels and
+        // disassembly switch independently; both off yields the null CE -
+        // raw bytes only - for runner testing. The parity gate is absolute:
+        // a failed parity shows in the status and Save stays disabled.
+        let ceTab = TabItem(Header = "CE")
+
+        let cePanel = DockPanel(Margin = Thickness(4.0))
+        let ceTop = WrapPanel(Margin = Thickness(0.0, 0.0, 0.0, 4.0))
+
+        let ceLabelsCheck =
+            CheckBox(
+                Content = "labels",
+                IsChecked = Nullable<bool>(true),
+                Margin = Thickness(0.0, 0.0, 8.0, 0.0),
+                Foreground = normal
+            )
+
+        ceLabelsCheck.ToolTip <-
+            "control-file symbols become named label cells; off emits purely numeric jumps"
+
+        let ceDisasmCheck =
+            CheckBox(
+                Content = "disassembly",
+                IsChecked = Nullable<bool>(true),
+                Margin = Thickness(0.0, 0.0, 8.0, 0.0),
+                Foreground = normal
+            )
+
+        ceDisasmCheck.ToolTip <-
+            "decode code blocks to vocab ops; off leaves every byte raw - with labels off this is the null CE"
+
+        let ceGenBtn = Button(Content = "Generate", Width = 100.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
+
+        let ceSaveBtn =
+            Button(
+                Content = "Save CE",
+                Width = 100.0,
+                Margin = Thickness(0.0, 0.0, 8.0, 0.0),
+                IsEnabled = false,
+                ToolTip = "write versions/vNNN_<mode>.fs and materialize games/<id>/CeProgram.fs"
+            )
+
+        let ceProgress =
+            TextBlock(Text = "", Foreground = dim, VerticalAlignment = VerticalAlignment.Center)
+
+        ceTop.Children.Add ceLabelsCheck |> ignore
+        ceTop.Children.Add ceDisasmCheck |> ignore
+        ceTop.Children.Add ceGenBtn |> ignore
+        ceTop.Children.Add ceSaveBtn |> ignore
+        ceTop.Children.Add ceProgress |> ignore
+        DockPanel.SetDock(ceTop, Dock.Top)
+        cePanel.Children.Add ceTop |> ignore
+
+        let ceText =
+            TextBox(
+                IsReadOnly = true,
+                FontFamily = mono,
+                TextWrapping = TextWrapping.NoWrap,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = panel,
+                Foreground = normal
+            )
+
+        cePanel.Children.Add ceText |> ignore
+        ceTab.Content <- cePanel
+
+        let mutable ceBuilding = false
+        let mutable ceBuild: CeBuild.BuildResult option = None
+
+        ceGenBtn.Click.Add(fun _ ->
+            if ceBuilding then
+                ()
+            else
+                match control, controlDir () with
+                | Some c, dir when dir <> "" ->
+                    ceBuilding <- true
+                    ceGenBtn.IsEnabled <- false
+                    ceSaveBtn.IsEnabled <- false
+                    ceProgress.Text <- "building..."
+                    let ui = ceProgress.Dispatcher
+
+                    let opts =
+                        { CeBuild.Labels = ceLabelsCheck.IsChecked = Nullable<bool>(true)
+                          CeBuild.Disassembly = ceDisasmCheck.IsChecked = Nullable<bool>(true) }
+
+                    // the image comes from the control file's own original
+                    // bytes on disk - not the live machine, which may have
+                    // mutated RAM since boot
+                    System.Threading.Tasks.Task.Run(fun () ->
+                        try
+                            let mem = CeBuild.imageOf dir c
+                            let result = CeBuild.build mem c opts
+
+                            ui.BeginInvoke(
+                                DispatcherPriority.Normal,
+                                System.Action(fun () ->
+                                    ceBuild <- Some result
+                                    ceText.Text <- result.Body
+
+                                    ceProgress.Text <-
+                                        if result.ParityOk then
+                                            sprintf
+                                                "PARITY OK: %d ops, %d labels, %.1f%% raw, %d lines"
+                                                result.OpCount
+                                                result.LabelCount
+                                                result.RawPct
+                                                result.Lines
+                                        else
+                                            let rb, eb = result.ParityLengths
+
+                                            sprintf
+                                                "PARITY FAILED at $%04X (%d vs %d bytes) - Save disabled"
+                                                result.ParityDiffAt
+                                                rb
+                                                eb
+
+                                    ceSaveBtn.IsEnabled <- result.ParityOk
+                                    ceBuilding <- false)
+                            )
+                            |> ignore
+                        with ex ->
+                            ui.BeginInvoke(
+                                DispatcherPriority.Normal,
+                                System.Action(fun () ->
+                                    ceProgress.Text <- sprintf "build failed: %s" ex.Message
+                                    ceGenBtn.IsEnabled <- true
+                                    ceBuilding <- false)
+                            )
+                            |> ignore)
+                    |> ignore
+
+                    ceGenBtn.IsEnabled <- false
+                | _ -> ceProgress.Text <- "no control file for this game yet - use New ctrl first")
+
+        ceSaveBtn.Click.Add(fun _ ->
+            match ceBuild, controlDir () with
+            | Some b, dir when dir <> "" && b.ParityOk ->
+                try
+                    let vd = Path.Combine(dir, "versions")
+                    Directory.CreateDirectory vd |> ignore
+
+                    let nextIdx =
+                        if Directory.Exists vd then
+                            (Directory.GetFiles(vd, "v*.fs")
+                             |> Array.choose (fun f ->
+                                 let name = Path.GetFileName f
+
+                                 if
+                                     name.Length >= 4
+                                     && (name.Substring(1, 3) |> Seq.forall System.Char.IsDigit)
+                                 then
+                                     Some(int (name.Substring(1, 3)))
+                                 else
+                                     None)
+                             |> fun a ->
+                                 if a.Length = 0 then
+                                     -1
+                                 else
+                                     Array.max a)
+                            + 1
+                        else
+                            0
+
+                    let labelsOn = ceLabelsCheck.IsChecked = Nullable<bool>(true)
+                    let disasmOn = ceDisasmCheck.IsChecked = Nullable<bool>(true)
+
+                    let tag =
+                        if not disasmOn then "null_ce" elif not labelsOn then "nolabels" else "ce_gui"
+
+                    let text = CeBuild.fileText { CeBuild.Labels = labelsOn; CeBuild.Disassembly = disasmOn } b.Body
+                    let name = sprintf "v%03d_%s.fs" nextIdx tag
+                    File.WriteAllText(Path.Combine(vd, name), text)
+                    File.WriteAllText(Path.Combine(dir, "CeProgram.fs"), text)
+                    ceProgress.Text <- sprintf "saved: %s + CeProgram.fs (control.json untouched)" name
+                with ex ->
+                    ceProgress.Text <- sprintf "save failed: %s" ex.Message
+            | _ -> ())
+
         right.Items.Add heatTab |> ignore
         right.Items.Add gfxTab |> ignore
         right.Items.Add funcTab |> ignore
         right.Items.Add massTab |> ignore
         right.Items.Add graphTab |> ignore
         right.Items.Add scanTab |> ignore
+        right.Items.Add anaTab |> ignore
+        right.Items.Add ceTab |> ignore
         right.Items.Add contractTab |> ignore
         right.Items.Add theaterTab |> ignore
         // The mass-comment list reads the control file on demand: refresh when
@@ -6182,10 +6563,21 @@ type MainWindow() as self =
                     ->
                     cursor <- t.FirstIndexAtPc[addr]
                     memCursor <- addr &&& 0xFFFF
+                    // drop the wheel/click window anchor (like jumpToPc): a
+                    // held anchor re-renders centered on the OLD rows, so the
+                    // jump lands outside the visible window and looks dead
+                    execViewHold <- false
                     refreshAll ()
                     syncSlider ()
                     rebuildCommentPane true
-                | _ -> ()
+                | Some t, _ ->
+                    statusText.Text <-
+                        sprintf
+                            "%s: $%04X is not in the current trace window (%d entries) - rebuild the flame over frames containing it"
+                            reason
+                            addr
+                            t.Entries.Length
+                | _ -> statusText.Text <- sprintf "%s: no trace - play the game first" reason
 
         // Hex address jump (code pane toolbar). Bare numbers are hex here.
         let parseHexAddr (s: string) : int option =
@@ -6544,7 +6936,8 @@ type MainWindow() as self =
                       SelfModCount = 0
                       FirstIndexAtPc = firstAt
                       StartTick = raw 0L
-                      EndTick = raw (w.EndTick - 1L) }
+                      EndTick = raw (w.EndTick - 1L)
+                      Regenerations = 0 }
             | _ -> None
 
         /// [startTick, endTick] covered by frames [f0, f1Exclusive) in window
@@ -7722,8 +8115,11 @@ type MainWindow() as self =
             | None -> ())
 
         /// Entry picker: 2+ recording slots -> modal choice of slot, fresh
-        /// recording, or live play. Dismissal (X) falls back to the newest.
+        /// recording, or live play. Dismissal (X) falls back to the newest
+        /// slot that is still on disk (deletions shrink the fallback pool).
         let showStartPicker (game: GameManifest) (slots: TimelineSlots.SlotInfo list) : SessionStart =
+            let committed = ref false
+            let remaining = ref slots
             let choice = ref (defaultChoice slots)
 
             let win =
@@ -7788,16 +8184,82 @@ type MainWindow() as self =
                 list.SelectedIndex <- 0
 
             let playSelected () =
+                // no selection (e.g. the last row was just deleted): a no-op,
+                // never a commit of the stale pre-fallback choice
+                let mutable picked: string option = None
+
                 match list.SelectedItem with
                 | :? ListBoxItem as it ->
                     match it.Tag with
-                    | :? string as name -> choice := AutoplaySlot name
+                    | :? string as name -> picked <- Some name
                     | _ -> ()
                 | _ -> ()
 
-                win.Close()
+                match picked with
+                | Some name ->
+                    choice := AutoplaySlot name
+                    committed := true
+                    win.Close()
+                | None -> ()
+
+            // Remove the selected recording from disk (after confirmation) and
+            // from the list. The session is not installed yet, so nothing else
+            // holds the file open.
+            let deleteSelected () =
+                match list.SelectedItem with
+                | :? ListBoxItem as it ->
+                    match it.Tag with
+                    | :? string as name ->
+                        match !remaining |> List.tryFind (fun s -> s.Name = name) with
+                        | None -> ()
+                        | Some s ->
+                            let frames =
+                                match s.Frames with
+                                | Some f -> sprintf "%d frames" f
+                                | None -> "unreadable length"
+
+                            let answer =
+                                MessageBox.Show(
+                                    win,
+                                    sprintf
+                                        "Delete recording '%s'?\n\n%s, %.1f MB, modified %s\n\nThe file is removed from disk - this cannot be undone."
+                                        s.Name
+                                        frames
+                                        (float s.Bytes / (1024.0 * 1024.0))
+                                        (s.Modified.ToLocalTime().ToString("yyyy-MM-dd HH:mm")),
+                                    "Delete recording",
+                                    MessageBoxButton.YesNo,
+                                    MessageBoxImage.Warning,
+                                    MessageBoxResult.No
+                                )
+
+                            if answer = MessageBoxResult.Yes then
+                                try
+                                    File.Delete s.Path
+                                    remaining := (!remaining |> List.filter (fun x -> x.Name <> s.Name))
+
+                                    match list.SelectedItem with
+                                    | :? ListBoxItem -> list.Items.Remove it |> ignore
+                                    | _ -> ()
+                                with ex ->
+                                    MessageBox.Show(
+                                        win,
+                                        sprintf "delete failed: %s" ex.Message,
+                                        "Delete recording",
+                                        MessageBoxButton.OK,
+                                        MessageBoxImage.Error
+                                    )
+                                    |> ignore
+                    | _ -> ()
+                | _ -> ()
 
             list.MouseDoubleClick.Add(fun _ -> playSelected ())
+
+            list.KeyDown.Add(fun e ->
+                if e.Key = Key.Delete then
+                    deleteSelected ()
+                    e.Handled <- true)
+
             body.Children.Add list |> ignore
 
             let row =
@@ -7806,26 +8268,44 @@ type MainWindow() as self =
             let playBtn =
                 Button(Content = "Play", Width = 110.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
 
+            let delBtn =
+                Button(
+                    Content = "Delete",
+                    Width = 110.0,
+                    Margin = Thickness(0.0, 0.0, 8.0, 0.0),
+                    ToolTip = "delete the selected recording file (or press Del in the list)"
+                )
+
             let newBtn =
                 Button(Content = "Record new", Width = 110.0, Margin = Thickness(0.0, 0.0, 8.0, 0.0))
 
             let liveBtn = Button(Content = "Live play", Width = 110.0)
             playBtn.Click.Add(fun _ -> playSelected ())
+            delBtn.Click.Add(fun _ -> deleteSelected ())
 
             newBtn.Click.Add(fun _ ->
                 choice := RecordFresh(TimelineSlots.suggestName ())
+                committed := true
                 win.Close())
 
             liveBtn.Click.Add(fun _ ->
                 choice := LiveFresh
+                committed := true
                 win.Close())
 
             row.Children.Add playBtn |> ignore
+            row.Children.Add delBtn |> ignore
             row.Children.Add newBtn |> ignore
             row.Children.Add liveBtn |> ignore
             body.Children.Add row |> ignore
             win.Content <- body
             win.ShowDialog() |> ignore
+
+            // Dismissal (X) after deletions: the precomputed fallback may name
+            // a deleted slot - recompute over whatever is still on disk.
+            if not !committed then
+                choice := defaultChoice !remaining
+
             !choice
 
         let finishInstall () =
@@ -8029,7 +8509,12 @@ type MainWindow() as self =
                     rewindSlider.Value <- float s.Frame
 
                 timeline.Playhead <- int64 s.Frame
-                flameCtrl.PlayheadFrame <- s.Frame
+                // Full-window flame OnRender per playhead tick starves the
+                // render-loop stepper that pumps replay frames (same UI
+                // thread). Timeline playhead above is ~10 primitives and keeps
+                // moving; the flame cursor catches up once parked.
+                if not running then
+                    flameCtrl.PlayheadFrame <- s.Frame
                 updateTimeLabel s.Frame
 
                 if running then
@@ -8044,19 +8529,19 @@ type MainWindow() as self =
                             s.Recorder.SelfModCount
                             (if s.Recorder.RecordEnabled then "ON" else "OFF")
 
-                if not userDragging then
+                if not userDragging && not running then
                     refreshHeatmap ()
                     refreshStrip ()
 
-                    if running then
-                        syncingSlider <- true
-                        let n = s.Recorder.EntryCount
+                if not userDragging && running then
+                    syncingSlider <- true
+                    let n = s.Recorder.EntryCount
 
-                        if n > 1 then
-                            slider.Maximum <- float (n - 1)
-                            slider.IsEnabled <- true
+                    if n > 1 then
+                        slider.Maximum <- float (n - 1)
+                        slider.IsEnabled <- true
 
-                        syncingSlider <- false)
+                    syncingSlider <- false)
         // Recording stats, twice a second: this session's captured frames as
         // time, the timeline's size, and the live bytes/s and bytes/min rates.
         statsTimer.Tick.Add(fun _ ->
@@ -8173,7 +8658,15 @@ type MainWindow() as self =
                 | Some s -> s.Frame
                 | None -> 0
 
-            let minFrame () = 1
+            // Reverse can only reach frames that have recorded state: a
+            // recorded session covers from its start, but live play records
+            // nothing, so there the floor is the current frame - reverse
+            // degrades to the "earliest recorded frame" message instead of
+            // JumpTo throwing on an unrecorded frame.
+            let minFrame () =
+                match session with
+                | Some s when s.LiveMode || s.TimelineExtent <= 1 -> s.Frame
+                | _ -> 1
 
             let seekFrame (f: int) =
                 match session with

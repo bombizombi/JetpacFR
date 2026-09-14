@@ -1,0 +1,6 @@
+{
+  "name": "Uridium",
+  "rom": "../../assets/48.rom",
+  "tzx": "Uridium.tzx",
+  "boot": "auto"
+}

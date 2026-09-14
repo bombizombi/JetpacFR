@@ -1,0 +1,57 @@
+
+
+20260912
+
+
+
+Can you think of how we can design the GUI / launcher for the new static analysis tool that starts from the instruction at the start address and then maps all the blocks and functions in the program?  We need to design a way to show the result of this tool in a readable way.  Perhaps for a start we can create a new tab where a button would start the algorithm as it runs for the first time, and would create a simple text report of what it found?
+
+
+20260913
+
+In emulator, can you create a new tab that will create and display our CE.  for creation, we will use the existing control file for labels and function names, but there should be also an option to turn off both labels and disassembly so that we can create a null CE file, with just raw bytes, so that we can test it.
+
+
+Is there a way to change the running trace, without exiting the emulator?
+
+We need to optimize the trace display tree structure / drawing boxes that used to be recreated on every GUI timer hit.  Can you attach a new mutable field to the trace (that does not need to be saved) that will increase on each regeneration, and display this flag in the pane bellow the register display, where the rest of the trace info is?
+
+When in execution mode in the code pane, doing right click and then "go to XXXX in code view" no longer works. can you tell me why before fixing it?
+
+"flame jump: $6EAF is not in the current trace window (0 entries) - rebuild the flame over frames containing it"  This is what the status line says, can you explain it in detail what each of those things mean (definition of current trace window, what does it mean 0 entries, how do i rebuild the flame over frames,)  
+
+We have a terrible behaviour when replaying the trace of the first app load.  the trace goes smoothly, until the frame graph shows up, and then everything slows down to a crawl.  why?
+
+
+
+/ * answer
+ In JetpacFR.Desktop/App.fs, replay starves the moment flameTrace lands:
+
+ - Boot: loadSlotTimeline:303 builds frames Start+1..Start+801 via buildFlameRange:7027/FlameBuilder.buildFrames
+   (Task.Run, then Dispatcher.Invoke:7032 sets flameTrace <- traceOfWindow w:7042, SetWindow:7044 →
+   ZoomToFit:InvalidateVisual).
+ - Before that flameTrace=None: refreshStrip:2636 uses Recorder.SegmentCounts (O(512)), currentCounts:1209 uses
+   Recorder.PerPcCount (O(64k)). Cheap.
+ - After: refreshStrip:2636: Some t -> segmentsOf t iterates every entry in the 800-frame window (millions of
+   TraceEntry, ~56M T-states) to rebuild 512 buckets — and uiTimer:188/8528 calls refreshHeatmap()+refreshStrip() every
+   100ms, on the UI thread.
+ - Same tick also does flameCtrl.PlayheadFrame <- s.Frame:8512 → InvalidateVisual → full FlameGraph.OnRender, plus
+   statusText Array.fold PerPcCount:8523.
+
+ 10Hz × O(millions) pins the UI thread, so CompositionTarget.Rendering:1175 (the render-loop stepper pumping
+ renderFrame() for replay, max 4 frames/tick then drops backlog:1188) never gets serviced → smooth replay becomes
+ crawl.
+
+ Secondary one-time jank: FlameGraph.fs:645 builds FlameLod.build win synchronously inside first OnRender; sustained
+ crawl is segmentsOf, which the 2680 comment's fix (use built while running/replaying) missed — it fixed the T-range
+ label but left segs on flameTrace.
+*/
+
+
+ Can you change it so that the heatmap (refreshHeatmap) and the strip (refreshStrip) never update while the trace
+ playback is running, or a live play is running?
+Can you change it so that the heatmap (refreshHeatmap) and the strip (refreshStrip) never update while the trace playback is running, or a live play is running?
+
+
+
+

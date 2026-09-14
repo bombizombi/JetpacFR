@@ -1,0 +1,21 @@
+FUNC $F500  loader_init
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped from entry
+  FIRST  : DI
+  IN     : (not yet documented)
+  OUT    : (not yet documented)
+  DESC   : (not yet documented)
+FUNC $F5BD  (undocumented)
+  CALLERS: $F557 $F55E $F5A2
+  SIZE   : 1 bytes mapped from entry
+  FIRST  : CALL 0xF5C1
+  IN     : (not yet documented)
+  OUT    : (not yet documented)
+  DESC   : (not yet documented)
+FUNC $F5C1  (undocumented)
+  CALLERS: $F548 $F56D $F577 $F5BD
+  SIZE   : 5 bytes mapped from entry
+  FIRST  : EXX
+  IN     : (not yet documented)
+  OUT    : (not yet documented)
+  DESC   : (not yet documented)

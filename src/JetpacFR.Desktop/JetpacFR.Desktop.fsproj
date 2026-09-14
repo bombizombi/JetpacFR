@@ -15,6 +15,8 @@
     <Compile Include="CheatEngineView.fs" />
     <Compile Include="GameOnlyView.fs" />
     <Compile Include="LauncherView.fs" />
+    <Compile Include="CodeMap.fs" />
+    <Compile Include="CeBuild.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
 

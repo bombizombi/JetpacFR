@@ -102,8 +102,9 @@ module FastBoot =
           194, 6, 0, false ]
 
     /// One flash-load attempt: Some(spec, entry cycles) when the trap carried
-    /// the boot to the game entry, None when the loader never trapped or asked
-    /// for something the tape cannot serve.
+    /// the boot through the tape and the machine settled into the game, None
+    /// when the loader never trapped or asked for something the tape cannot
+    /// serve.
     let private attempt
         (romPath: string)
         (tzxPath: string)
@@ -119,6 +120,8 @@ module FastBoot =
         let mutable inRam = false
         let mutable frame = 0
 
+        // Phase A: serve the ROM loader's blocks until the first RAM
+        // instruction (the game's BASIC-level entry).
         while frame < 20000 && not failed && not inRam do
             let frameEnd = z80.CycleCount() + FRAME_CYCLES
 
@@ -131,6 +134,56 @@ module FastBoot =
                     failed <- not (serveLoad spec blocks nextBlock)
                 elif z80.Regs.Pc() >= 0x4000 then
                     inRam <- true
+                else
+                    z80.ExecuteOne()
+
+            frame <- frame + 1
+
+            match onFrame with
+            | Some f -> f (spec.ScreenBuffer, frame)
+            | None -> ()
+
+        // Phase B: play the tape out. Blocks the ROM never requested are
+        // read by the game's own loader through the EAR pin - often a RAM
+        // copy of LD-BYTES (Uridium-style load-over-everything) whose
+        // once-per-frame "press play" polls never trigger the Fuse
+        // auto-play heuristic, so playback starts here explicitly at the
+        // first block the trap did not serve. The gate is real
+        // end-of-tape; fully flash-served tapes skip this phase
+        // immediately. Later ROM loads keep being served while blocks
+        // remain - an exhausted tape must reach the real ROM routine.
+        if inRam && not failed && nextBlock.Value < blocks.Length then
+            spec.TapePlayFrom nextBlock.Value
+
+        while
+            not failed
+            && frame < 60000
+            && not (nextBlock.Value >= blocks.Length || spec.DebugTapeAtEnd) do
+            frame <- frame + 1
+            let frameEnd = z80.CycleCount() + FRAME_CYCLES
+
+            while (z80.CycleCount() < frameEnd && not failed) do
+                if z80.Regs.Pc() = LD_BYTES && nextBlock.Value < blocks.Length then
+                    failed <- not (serveLoad spec blocks nextBlock)
+                else
+                    z80.ExecuteOne()
+
+            match onFrame with
+            | Some f -> f (spec.ScreenBuffer, frame)
+            | None -> ()
+
+        // Phase C: settle - the loader chain hands over to the game in the
+        // frames right after the tape ends, and the entry snapshot must
+        // show the game, not its loader.
+        let mutable settled = 0
+
+        while not failed && settled < Boot.settleFrames do
+            settled <- settled + 1
+            let frameEnd = z80.CycleCount() + FRAME_CYCLES
+
+            while (z80.CycleCount() < frameEnd && not failed) do
+                if z80.Regs.Pc() = LD_BYTES && nextBlock.Value < blocks.Length then
+                    failed <- not (serveLoad spec blocks nextBlock)
                 else
                     z80.ExecuteOne()
 

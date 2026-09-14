@@ -216,7 +216,7 @@ module private Pipeline =
             emitComments b.Start
 
             match b.Kind with
-            | Code -> sb.Append(Z80CE.toBody mem b.Start (b.EndExcl - b.Start) symbols) |> ignore
+            | Code -> sb.Append(Z80CE.toBody mem b.Start (b.EndExcl - b.Start) true symbols) |> ignore
             | Data
             | Gap ->
                 let bytes = mem[b.Start .. b.EndExcl - 1]
@@ -382,7 +382,7 @@ let run (argv: string list) : int =
                 (DirectoryInfo(dir).Name.ToLowerInvariant())
                 mem
                 c
-                (Z80CE.toBody mem c.Start (c.EndExcl - c.Start) [])
+                (Z80CE.toBody mem c.Start (c.EndExcl - c.Start) true [])
 
         let vd = Path.Combine(dir, "versions")
         Directory.CreateDirectory vd |> ignore
@@ -458,7 +458,7 @@ let run (argv: string list) : int =
                 else
                     []
 
-            let regenBody = Z80CE.toBody mem c.Start span symbols
+            let regenBody = Z80CE.toBody mem c.Start span true symbols
             let matchesRegen = body.Contains regenBody
             let ops = Z80CE.toOps mem c.Start span
             let asm = Jetpac2.Core.Z80.assemble ops

@@ -1,0 +1,215 @@
+; Uridium recursive code map from entry $F500 (seed-all: false)
+; entry-reachable: 3 functions, 9 blocks, 172 bytes
+; total mapped: 3 functions, 9 block starts, 9 blocks walked, 172 code bytes
+; computed jumps (JP (HL)/(IX)/(IY)) at:
+;   dynamic jump $F5BC
+;
+; function entries:
+; F $F500 loader_init
+; F $F5BD
+; F $F5C1
+;
+; call graph (function <- call sites):
+; $F500 loader_init <- (none: entry/interrupt/dynamic)
+; $F5BD <- $F557 $F55E $F5A2
+; $F5C1 <- $F548 $F56D $F577 $F5BD
+;
+; block jump references (block <- jump sites):
+; B $F586 <- $F589 $F5B5
+; B $F590 <- $F587
+; B $F5D4 <- $F5CD
+; B $F5DB <- $F5C5
+;
+; block starts:
+; B $F500
+; B $F586
+; B $F590
+; B $F59A
+; B $F5A0
+; B $F5BD
+; B $F5C1
+; B $F5D4
+; B $F5DB
+;
+; listing:
+F> $F500 loader_init
+    $F500  F3          DI
+    $F501  01 B5 1C    LD BC,0x1CB5
+    $F504  21 00 40    LD HL,0x4000
+    $F507  36 00       LD (HL),0x00
+    $F509  23          INC HL
+    $F50A  0B          DEC BC
+    $F50B  78          LD A,B
+    $F50C  B1          OR C
+    $F50D  20 F8       JR NZ,0xF507
+    $F50F  3E FE       LD A,0xFE
+    $F511  21 C1 55    LD HL,0x55C1
+    $F514  77          LD (HL),A
+    $F515  24          INC H
+    $F516  77          LD (HL),A
+    $F517  24          INC H
+    $F518  77          LD (HL),A
+    $F519  0F          RRCA
+    $F51A  2C          INC L
+    $F51B  77          LD (HL),A
+    $F51C  25          DEC H
+    $F51D  77          LD (HL),A
+    $F51E  25          DEC H
+    $F51F  77          LD (HL),A
+    $F520  01 FF FF    LD BC,0xFFFF
+    $F523  11 42 42    LD DE,0x4242
+    $F526  D9          EXX
+    $F527  31 FF FC    LD SP,0xFCFF
+    $F52A  11 00 C0    LD DE,0xC000
+    $F52D  DD 21 00 40 LD IX,0x4000
+    $F531  3E FF       LD A,0xFF
+    $F533  37          SCF
+    $F534  14          INC D
+    $F535  08          EX AF,AF'
+    $F536  15          DEC D
+    $F537  3E 08       LD A,0x08
+    $F539  D3 FE       OUT (0xFE),A
+    $F53B  21 00 00    LD HL,0x0000
+    $F53E  E5          PUSH HL
+    $F53F  E5          PUSH HL
+    $F540  DB FE       IN A,(0xFE)
+    $F542  1F          RRA
+    $F543  E6 20       AND 0x20
+    $F545  4F          LD C,A
+    $F546  BF          CP A
+    $F547  C0          RET NZ
+    $F548  CD C1 F5    CALL 0xF5C1
+    $F54B  30 FA       JR NC,0xF547
+    $F54D  21 15 04    LD HL,0x0415
+    $F550  10 FE       DJNZ 0xF550
+    $F552  2B          DEC HL
+    $F553  7C          LD A,H
+    $F554  B5          OR L
+    $F555  20 F9       JR NZ,0xF550
+    $F557  CD BD F5    CALL 0xF5BD
+    $F55A  30 EB       JR NC,0xF547
+    $F55C  06 9C       LD B,0x9C
+    $F55E  CD BD F5    CALL 0xF5BD
+    $F561  30 E4       JR NC,0xF547
+    $F563  3E C6       LD A,0xC6
+    $F565  B8          CP B
+    $F566  30 E0       JR NC,0xF548
+    $F568  24          INC H
+    $F569  20 F1       JR NZ,0xF55C
+    $F56B  06 C9       LD B,0xC9
+    $F56D  CD C1 F5    CALL 0xF5C1
+    $F570  30 D5       JR NC,0xF547
+    $F572  78          LD A,B
+    $F573  FE D4       CP 0xD4
+    $F575  30 F4       JR NC,0xF56B
+    $F577  CD C1 F5    CALL 0xF5C1
+    $F57A  D0          RET NC
+    $F57B  D9          EXX
+    $F57C  01 5A 55    LD BC,0x555A
+    $F57F  D9          EXX
+    $F580  26 00       LD H,0x00
+    $F582  06 B0       LD B,0xB0
+    $F584  18 1A       JR 0xF5A0
+B> $F586
+    $F586  08          EX AF,AF'
+    $F587  20 07       JR NZ,0xF590
+    $F589  30 FB       JR NC,0xF586
+    $F58B  DD 75 00    LD (IX+0x00),IXL
+    $F58E  18 0A       JR 0xF59A
+B> $F590
+    $F590  CB 11       RL C
+    $F592  AD          XOR L
+    $F593  C0          RET NZ
+    $F594  79          LD A,C
+    $F595  1F          RRA
+    $F596  4F          LD C,A
+    $F597  13          INC DE
+    $F598  18 02       JR 0xF59C
+B> $F59A
+    $F59A  DD 23       INC IX
+    $F59C  1B          DEC DE
+    $F59D  08          EX AF,AF'
+    $F59E  06 B2       LD B,0xB2
+B> $F5A0
+    $F5A0  2E 01       LD L,0x01
+    $F5A2  CD BD F5    CALL 0xF5BD
+    $F5A5  D0          RET NC
+    $F5A6  3E CB       LD A,0xCB
+    $F5A8  B8          CP B
+    $F5A9  CB 15       RL L
+    $F5AB  06 B0       LD B,0xB0
+    $F5AD  D2 A2 F5    JP NC,0xF5A2
+    $F5B0  7C          LD A,H
+    $F5B1  AD          XOR L
+    $F5B2  67          LD H,A
+    $F5B3  7A          LD A,D
+    $F5B4  B3          OR E
+    $F5B5  20 CF       JR NZ,0xF586
+    $F5B7  7C          LD A,H
+    $F5B8  B7          OR A
+    $F5B9  C0          RET NZ
+    $F5BA  E1          POP HL
+    $F5BB  E1          POP HL
+    $F5BC  E9          JP (HL)
+F> $F5BD
+    $F5BD  CD C1 F5    CALL 0xF5C1
+    $F5C0  D0          RET NC
+F> $F5C1
+    $F5C1  D9          EXX
+    $F5C2  0B          DEC BC
+    $F5C3  78          LD A,B
+    $F5C4  B1          OR C
+    $F5C5  20 14       JR NZ,0xF5DB
+    $F5C7  01 5A 55    LD BC,0x555A
+    $F5CA  14          INC D
+    $F5CB  CB 5A       BIT 3,D
+    $F5CD  28 05       JR Z,0xF5D4
+    $F5CF  16 42       LD D,0x42
+    $F5D1  1C          INC E
+    $F5D2  18 05       JR 0xF5D9
+B> $F5D4
+    $F5D4  3E 42       LD A,0x42
+    $F5D6  3E 42       LD A,0x42
+    $F5D8  3C          INC A
+    $F5D9  18 0F       JR 0xF5EA
+B> $F5DB
+    $F5DB  00          NOP
+    $F5DC  00          NOP
+    $F5DD  00          NOP
+    $F5DE  00          NOP
+    $F5DF  00          NOP
+    $F5E0  00          NOP
+    $F5E1  00          NOP
+    $F5E2  00          NOP
+    $F5E3  00          NOP
+    $F5E4  00          NOP
+    $F5E5  00          NOP
+    $F5E6  00          NOP
+    $F5E7  00          NOP
+    $F5E8  3E 00       LD A,0x00
+    $F5EA  ED 53 C1 5A LD (0x5AC1),DE
+    $F5EE  D9          EXX
+    $F5EF  3E 0E       LD A,0x0E
+    $F5F1  3D          DEC A
+    $F5F2  20 FD       JR NZ,0xF5F1
+    $F5F4  3E 00       LD A,0x00
+    $F5F6  A7          AND A
+    $F5F7  A7          AND A
+    $F5F8  A7          AND A
+    $F5F9  04          INC B
+    $F5FA  C8          RET Z
+    $F5FB  3E 7F       LD A,0x7F
+    $F5FD  DB FE       IN A,(0xFE)
+    $F5FF  1F          RRA
+    $F600  D0          RET NC
+    $F601  A9          XOR C
+    $F602  E6 20       AND 0x20
+    $F604  28 F3       JR Z,0xF5F9
+    $F606  79          LD A,C
+    $F607  2F          CPL
+    $F608  4F          LD C,A
+    $F609  E6 00       AND 0x00
+    $F60B  F6 08       OR 0x08
+    $F60D  D3 FE       OUT (0xFE),A
+    $F60F  37          SCF
+    $F610  C9          RET

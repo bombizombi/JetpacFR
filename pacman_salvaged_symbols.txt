@@ -1,45 +1,4 @@
-{
-  "image": "original.bin",
-  "start": 16384,
-  "endExcl": 65535,
-  "entryPc": 29026,
-  "blocks": [
-    {
-      "start": 16384,
-      "endExcl": 16643,
-      "name": "block_4000",
-      "kind": "gap"
-    },
-    {
-      "start": 65529,
-      "endExcl": 65535,
-      "name": "block_FFF9",
-      "kind": "data"
-    }
-  ],
-  "comments": [
-    {
-      "kind": "range",
-      "addr": 16655,
-      "endExcl": 16657,
-      "text": "B\u003E"
-    },
-    {
-      "kind": "range",
-      "addr": 65529,
-      "endExcl": 65535,
-      "text": "BBBBB\u003C"
-    }
-  ],
   "symbols": [
-    {
-      "addr": 703,
-      "name": "ROM_SCAN_KEYBOARD"
-    },
-    {
-      "addr": 32489,
-      "name": "unknown_func"
-    },
     {
       "addr": 28376,
       "name": "WriteShiftedSpriteToBuff"

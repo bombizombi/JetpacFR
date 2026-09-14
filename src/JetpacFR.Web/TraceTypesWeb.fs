@@ -75,7 +75,10 @@ type Trace =
       SelfModCount: int
       FirstIndexAtPc: int[]
       StartTick: uint32
-      EndTick: uint32 }
+      EndTick: uint32
+      /// Live-only regeneration counter (mirrors the desktop Trace; not
+      /// persisted - the web codec always produces 0).
+      mutable Regenerations: int }
 
 /// Circular-buffer recorder. Zero allocation per instruction: entries land in
 /// preallocated arrays; only write/port side streams (sparse) use a
@@ -103,6 +106,7 @@ type TraceRecorder(capacity: int, segmentCount: int) =
     let mutable recordEnabled = true
     let mutable startTick = 0u
     let mutable endTick = 0u
+    let mutable buildCount = 0
 
     do
         if capacity < 1 then
@@ -181,6 +185,7 @@ type TraceRecorder(capacity: int, segmentCount: int) =
     /// Linearize the ring into a fresh Trace. O(window) copy; call on pause or
     /// before save, not per cursor move.
     member this.Build() : Trace =
+        buildCount <- buildCount + 1
         let n = count
         let linear = Array.zeroCreate<TraceEntry> n
 
@@ -210,7 +215,8 @@ type TraceRecorder(capacity: int, segmentCount: int) =
           SelfModCount = selfModCount
           FirstIndexAtPc = firstAt
           StartTick = startTick
-          EndTick = endTick }
+          EndTick = endTick
+          Regenerations = buildCount }
 
 module TraceQuery =
 

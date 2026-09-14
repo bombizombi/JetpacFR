@@ -278,6 +278,12 @@ type Tape() =
     member this.Level() = level
     member this.Playing() = state <> Tape.State.Idle
 
+    /// The tape has nothing more to give: playback ran past the last block.
+    /// The Fuse loading heuristic also Idles the player on aborted reads,
+    /// but that path leaves currentBlockIndex alone, so only real
+    /// exhaustion reads true here.
+    member this.AtEnd = state = Tape.State.Idle && currentBlockIndex >= blocks.Length
+
     /// Restore the ear level after a checkpoint load (used by Spectrum48.LoadState).
     member this.SetLevel(v: bool) = level <- v
 
@@ -294,6 +300,16 @@ type Tape() =
             nextTransition <- 1
             numEdges <- block.PilotEdges
         | _ -> ()
+
+    /// Start playback at block `index` (0-based): rewind/fast-forward the
+    /// block cursor, then play. The flash boot consumes the ROM's loads
+    /// without advancing the player, so direct-EAR loaders resume here.
+    member this.PlayFrom(index: int) =
+        if index >= 0 && index <= blocks.Length then
+            currentBlockIndex <- index
+            bitOffset <- 0
+
+            this.Play()
 
     member this.Stop() =
         state <- Tape.State.Idle

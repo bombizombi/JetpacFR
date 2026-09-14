@@ -1,0 +1,213 @@
+; ============================================================================
+; URIDIUM (Hewson Consultants / Graftgold, 1986) - recovered symbols
+; Source: Uridium.tzx (repo root), 48K multiload image at $4000
+; Method: tape load -> snapshot (games/uridium/memory.bin + state.txt)
+;         -> dynamic trace of the first 400 executed frames
+;         -> recursive/linear disassembly of executed + referenced code
+; Names reflect verified behaviour (strings, ports, register setup).
+; ============================================================================
+
+; ---- functions executed at game start (loader chain, dynamic-verified) ----
+
+$5D93   uridium_multiload_stub        ; BASIC continuation: LD HL,(CURCHL); ADD HL,$D9;
+                                      ; copy $014F bytes to $F500; PUSH DE($F500); RET
+$F500   loader_init                   ; DI; clear screen bitmap $4000-$5AB4 (BC=$1CB5 zeros)
+$F50F   loader_paint_attributes       ; write attr byte $FE down $55C1.. (title colour bands)
+$F520   loader_set_alt_fill_regs      ; EXX bank: BC=$FFFF, DE=$4242 (fill byte 0x42, glyph data)
+$F527   loader_setup_load_regs        ; SP=$FCFF; DE=$C000 (bytes remaining); IX=$4000 (load dest)
+$F540   tape_sample_ear_into_c        ; IN A,($FE); RRA; AND $20; LD C,A; CP A - prime EAR state
+$F547   loader_reentry_ret_nz         ; RET NZ - loader loop re-entry (first pass falls through)
+$F5FB   tape_wait_ear_edge            ; LD A,$7F; IN A,($FE); RRA; RET NC; XOR C; AND $20 - bit
+                                      ; sampler: waits for an EAR edge within B timeout
+$F54B   tape_edge_sync_loop           ; JR NC,$F547 sync loop of the tape bit reader
+$F5E8   loader_delay_and_store        ; delay loops + LD ($5AC1),DE - stash loader position
+
+; ---- functions in the first-load image (statically verified) ----
+
+$A8A9   interrupt_init_im2            ; IM 2 ($ED $5E), vector byte -> $FDFD, IY=$4DED,
+                                      ; fills $FF01.. vector slots, CALL $9C36 (title text)
+$88B4   init_game_vars                ; XOR A; clear $DB1F/$DA5F/$D87B/$DB1A/$DC39; arm $D939=$FF;
+                                      ; CALL $7B2C; pick table $DB78/$DBD8 by ($D99E)==1; IX=($DB1B)
+$8FA7   object_list_unlink_iy         ; swap 2-byte links between (HL) and IY table at $D756+DE;
+                                      ; update list head $9391 - linked-list removal for objects
+$9C36   copy_counted_text             ; copy counted string (HL)->(DE) with DJNZ; used to stage
+                                      ; title/credits text before display
+$8F34   store_hl_a_earlyout           ; LD (HL),A; RET Z; CP $7C; RET Z - guarded byte writer,
+                                      ; 17 call sites (most-used helper in the first load)
+
+; ---- multiload filename table (drives the "press play" stages) ----
+
+$5CFE   multiload_name_ucode          ; "Ucode"
+$5D13   multiload_name_screen         ; "screen"
+$5D60   multiload_name_part2          ; "part2"
+$5D86   multiload_name_lastpart       ; "lastpart"
+
+; ---- title screen credits block ----
+
+$9C74   credits_present_text          ; " Present ..."
+$9C81   credits_graftgold             ; " Graftgold Ltd 198.."
+$9C99   credits_hewson                ; " Hewson 198.."
+$9CA9   credits_design_by             ; "Original design and concept by"
+$9CCB   credits_braybrook             ; "Andrew Braybrook"
+$9CDF   credits_programmed_by         ; "Programmed by"
+$9CF0   credits_robinson              ; "Dominic Robinson"
+
+; ---- in-game messages ----
+
+$9D04   msg_hall_of_fame              ; "Hall of Fame"
+$9D2C   msg_land_now                  ; "LAND NOW"
+$9D48   msg_three_mantas              ; " 3 Mantas"
+$9D55   msg_paused                    ; " Paused"
+$9D63   msg_game_over                 ; "Game Over"
+$9D7E   msg_enter_initials            ; "You have amassed a great score... enter your initial"
+$9DBB   msg_dreadnought               ; "Dreadnought"
+$9DCF   msg_defences_penetrated       ; "Defences Penetrated"
+$9DE2   msg_destruct_sequence         ; "Destruct Sequence Initiated"
+$9E05   msg_wave_bonus                ; "Wave destruction bonus"
+$9E29   msg_dreadnought_bonus         ; "Dreadnought destruction bonus"
+$9E52   msg_options                   ; "Options"
+$9E62   msg_prepare                   ; "Prepare"
+$9E7C   msg_select_joystick           ; "Joystick"
+$9E88   msg_select_keyboard           ; "Keyboard"
+
+; ---- wave/element name tables (two level sets) and sprite data ----
+
+$DD05   wavetable1_element_names      ; Zinc, Lead, Copper, Silver, Iron, Gold, Platinum,
+                                      ; Tungsten, Iridon, Kallisto, Tri-Alloy, Quadmium,
+                                      ; Ergonite, Galactium, Uridium
+$E500   wavetable2_element_names      ; Silicon, Gallium, Copper, Strontium, Iron, Germanium,
+                                      ; Platinum, Tungsten, Iridon, Kallisto, Tri-Alloy,
+                                      ; Quadmium, Ergonite, Galactium, Uridium
+$FF59   score_font_glyphs             ; 8x8 digit/letter bitmaps used by the score panel
+
+; ============================================================================
+; PASS 2 - deeper sweep of the first-load image (validated CALL targets,
+; linear decode of the $87xx-$B200 and $9Dxx-$F2xx code clusters)
+; Object pool: 7+ entries x 16 bytes at $FF70 (IX/IY structs).
+; Object flags in +02: bit0=alive, bit1=active, bit3=first-in-formation.
+; ============================================================================
+
+$9435   spawn_wave_objects            ; walk wave-def entries at IY, create 6 objects
+                                      ; in the $FF70 pool, scan sprite tables at $67B0
+                                      ; with CPIR for $FF frame terminators, set wave
+                                      ; state $D93A/$DC39
+$9379   object_move_y_clamp_6f        ; compare X-distances ($1F4=500), add signed vel
+                                      ; (+0F) to Y (IX+6), clamp to $6F (screen bottom row)
+$92BF   apply_wave_scroll_to_object   ; HL -= ($FFF0) wave-scroll vector; write back into
+                                      ; object pos (+0C/+0D)
+$91BB   dispatch_object_updates       ; IY=$DCFA counter; 7 objects x $10 at $FF70;
+                                      ; BIT 1,(IX+2) active -> JP via table $81B3[type*2]
+$9163   score_add_bonus_to_counters   ; classify A into ranges (4/7), 24-bit add (+8,+B,+B,+B)
+                                      ; across 3-byte counters at HL, offsets $162/$163
+$96D8   enemy_move_chase_player       ; timers (IX+A)/(IX+8) expiry -> CALL $884E; steer X
+                                      ; toward player ($FF56), move Y clamped $6F; JP $81E0
+$994B   check_objects_near_player     ; iterate IY objects; active+flag tests; type 3 ->
+                                      ; CALL $8A7D; type 1 -> Y-distance < $18 from player check
+$98EF   spawn_object_from_object      ; copy type (IX+6) and pos (IX+4/5) into IY object with
+                                      ; $FFF8/$10 launch offset; INC wave counter ($D93A)
+$9A24   init_formation_from_data      ; 6 objects x 3 data bytes at HL -> (IX+A) anim,
+                                      ; (IX+9)+$0C, (IX+6)+C; attrs staged at $5B8F
+$9A7C   check_hitbox_28x29            ; collision: X within $52..$6E of ($D75C), Y within
+                                      ; $1D of (IY+6)+$0E -> JP $8992 (hit handler)
+$8FE3   allocator_swap_node_fd52      ; LDI x3 copy; walk chain at $FD52; swap node value
+                                      ; with ($FD50) - in-game list allocator free/realloc
+$8BB4   title_init_panels             ; set up panel objects IX=$8C4A/$8C58 (sizes 6/5) at
+                                      ; attribute addresses $582B/$584B; CALL $8F34 (0,1)
+$8B2C   clamp_store_max_dc3b          ; store A at ($DC3B) only when greater than current
+$8C24   compute_wave_timing_params    ; derive wave cadence: D/4+E -> $DC9D/$DC9E/$DC98,
+                                      ; $30+D+2E -> $DC99, B*4+D/2 (min 8) -> $DC9A/$DC9B
+$8EAC   move_object_x_clamped         ; X += signed dir ($D81F, |.|<$0B); keep object pos
+                                      ; (IX+4/5) within $FFA0..$0B87; NEG for sign
+$8F67   build_object_list_d756        ; build entries from table $D756 (B groups x 8, via
+                                      ; CALL $9385), then relink list head at $9391 (IY=$D756)
+$9EAC   draw_sprite_4x2               ; char-row screen address calc (RLCA x3), 4x2-cell
+                                      ; sprite blit with ($D8D9)/($D8DB) pos, source $D8DD
+$8A7D   object_update_sequencer       ; per-frame: CALL $8124/$7A4F/$8856/$9379/$795E/$8AB0;
+                                      ; count $DB1E, dec $DC9B, test wave state $D93A/$DB1A
+$8856   sprite_plot_bytes             ; sprite blit inner loop: LD H,(HL)/LD C,H/LD D,(HL)
+                                      ; pixel bytes -> LD (BC),A with BC = screen bitmap addr
+$9385   object_move_y_guarded         ; if within $1F4 of player: A=(IX+$0F) signed vel +
+                                      ; (IX+6), clamp to $6F, store - shared move helper
+$8F16   check_table_byte_d75a         ; HL=($D75A)+DE+$0A; RRCA x3 on (HL); RET Z on $77 match
+$884E   sprite_plot_on_expire         ; sprite blit entry used when an object timer expires
+                                      ; (CALL from enemy_move expiry path)
+$89E9   copy_block_ldir               ; LDIR; RET - byte-block copy helper
+$8AD0   wave_pattern_setup            ; reload IX=($DB1B); if idle: patch $8D79 from ($D99E)+$B0,
+                                      ; CALL $8FA7, poke $8F34 $11/$12, draw $4B bytes of $7BE7,
+                                      ; CALL $91FC
+$7BE7   timed_wait_draw_loop          ; parameterised (B=$32/$4B) wait-and-draw loop over the
+                                      ; $41/$00/$16 glyph bytes - title panel animation
+$8B4F   compute_attr_index_iy2        ; index = ((IY+2)&$0C)<<2 + ((IY+2)&$0E)<<3; CP $90 -
+                                      ; attribute colour index calculation
+$8CF7   clear_wave_objects            ; fill (HL).. with A, ADD HL,DE, DJNZ - zero the object
+                                      ; array, clear wave state ($DC39)=0
+$8D01   move_object_x_check_limits    ; direction ($D81F)>=4 gate; pos vs $FF54 and $0B76
+                                      ; limits; CALL $7DDD - X movement bounds check
+$97D0   init_object_attrs_5b98        ; scan 7 objects for inactive; load ($DC9A)->($DC9B),
+                                      ; (IX+7)=3, attrs at $5B98, link object
+$9ADD   select_variant_and_rebuild    ; ($D99D) = 1 or 2 from (C & $05); CALL $8FA7 rebuild;
+                                      ; CALL $7BA5; A=$1C
+$9B49   title_screen_init_seq         ; LDIR copy, CALL $8BC4 twice, IY=$8B69 -> CALL $8AD0
+                                      ; wave setup, CALL $938E - first-load title bring-up
+$A00D   scan_title_panels_8           ; 8 entries x $32 bytes from $58D7 attrs; base $9044;
+                                      ; CALL $8F16 per entry - title panel table scan
+$954C   store_object_ptr_d93c         ; IX+3/4 -> ($D93C): remember current object pointer
+
+; ============================================================================
+; PASS 3 - remaining span starts, jump tables, sound, input and system code
+; ============================================================================
+
+$9BCB   title_selection_blip          ; EI/HALT/DI wait for interrupt, then border
+                                      ; OUT ($FE),A + $3E-frame delay - selection click
+$9FE3   panels_reinit_next_screen     ; CALL $8FA7; panel objs $8C4A/$8C58 re-aimed at
+                                      ; attrs $580B/$582B; $8F34 pokes 0/1/$0A
+$A000   title_panel_scan_init         ; ($D8DD)=0; self-link IX=$D8DF; then panel scan
+                                      ; (pass-2 $A00D is inside this function)
+$A0B7   title_init_variant_b          ; LDIR; CALL $8BC4; IY=$9121; CALL $8AD0/$938E;
+                                      ; branch on ($D7BF) - alternate title bring-up
+$A175   apply_level_speed_table       ; pick speed table $D9F8/$D9FC by level ($D99E);
+                                      ; ADC into $91CF+ per-panel speed cells
+$A1FC   scroll_title_panels           ; HL=$9078; 8x CALL $92AA - scroll title panels
+                                      ; by the level speed vector (pass-2 $A200 inside)
+$A2E1   title_anim_step_with_sound    ; panel scan ($8F16), list build ($8F67 at $DC3C),
+                                      ; then DI + timed loop ending in XOR $F8 sound prep
+$A379   object_behaviour_jumptable    ; JP trampolines: $9567/$957D/$95AE/$95B7/$98EF/
+                                      ; $9CFD/$9A24/$9AB5/$954C/$9D3C - object behaviour
+                                      ; dispatch targets
+$A3EA   switch_to_object_stack        ; ADD IY,SP; pop registers; LD SP,IY - swap to the
+                                      ; object's own stack frame (dispatcher helper)
+$A4AE   find_free_3byte_entry         ; walk 3-byte entries until $80 end-flag set
+$A4F7   calc_sprite_addr_from_y       ; position delta vs (HL); row lookup via $62xx
+                                      ; screen-row table (RLCA x3 -> bitmap third)
+$A5AB   copy_block_ldir_ret           ; LDIR; RET - second block-copy helper
+$A5AE   set_variant1_after_walk       ; CALL $9899 (table walk); ($D99D)=1; RET
+$A5B7   proximity_check_wrapper       ; CALL $994B then $997E - near-player test wrapper
+$A5BE   save_sp_setup_wave            ; LD ($96D5),SP - park the dispatcher stack before
+                                      ; wave setup; D=$F8; E=($D75E)
+$A702   spawn_next_wave_object        ; A=($DAB9)+1 -> E; D=$7E; JP $971D (object spawn)
+$A796   wave_state_advance            ; state machine on ($DC3B)=$FF marker; pick table
+                                      ; $9853 or advance via $DC3A compare
+$A827   engine_tone_out               ; A=($9811) XOR $F8; OUT ($FE),A - square-wave
+                                      ; engine/sfx toggle inside C-iteration timing loop
+$A92A   push_object_defaults          ; SP=HL; push IX/BC/DE/HL pattern x$0C - preload
+                                      ; object initial values onto the object stack
+$A97E   allocator_init_chain_fd52     ; ($D87D)=0; heads $FD50/$FD52=$FD54; 11 nodes,
+                                      ; each +$0E - initialise the in-game list allocator
+$A9A1   init_formation_pool_ff10      ; ($D7B8/$D7BA/$D7BC) anchors; IY=$D750 defs; IX=$FF10
+                                      ; pool; 16x CALL $9A24 formation init
+$AABB   read_input_port_fe            ; IN A,($FE); CPL; RRA - read keyboard/EAR row state
+                                      ; (menu input cluster $AABB-$AAF2)
+$B860   wait_for_space_keypress       ; row $FB (B/N/M/Symbol/Space): wait press, then
+                                      ; wait release (debounce); C=$96 timing
+$B130   title_scroll_dispatch         ; A=($DAB8) decides scroll variant -> JP $A1FC path
+$B209   update_object_attrs_loop      ; IY walk: (IY+5) vs (HL); poke ($D99A)->(IY+4) -
+                                      ; per-object attribute refresh
+$BCE0   reinit_sysvars_and_stack      ; DI; clear $AB sysvars from $5C0B; SP=$FCFF;
+                                      ; HL=$FD50 - post-load handover to the game
+$AC4A   reposition_object_offscreen   ; RES 0,(IX+2); re-aim object at wave scroll
+                                      ; ($D75C); used to recycle off-screen objects
+$AD15   handle_menu_keys              ; BIT 7,C -> CALL $9C15; DE=$B860, BC=$0303,
+                                      ; CALL $9B90 - route menu key handling
+$AD87   xor_blit_masked               ; A=(HL) AND B XOR C -> (DE): masked sprite XOR-blit
+$91FC   advance_sprite_frame          ; walk sprite-def chain at (HL) to $FF terminator,
+                                      ; count down delay (IX+$0B), step frame ptr (IX+9/A)

@@ -69,7 +69,12 @@ type Trace =
       SelfModCount: int
       FirstIndexAtPc: int[]
       StartTick: uint32
-      EndTick: uint32 }
+      EndTick: uint32
+      /// How many times the recorder has regenerated (rebuilt) this window.
+      /// Live-only change detector for GUI views that redraw from the trace -
+      /// a view can skip rebuilding its tree while this number stands still.
+      /// Never persisted: save/load paths reset it to 0.
+      mutable Regenerations: int }
 
 /// Circular-buffer recorder. Zero allocation per instruction: entries land in
 /// preallocated arrays; only write/port side streams (sparse) use a
@@ -97,12 +102,16 @@ type TraceRecorder(capacity: int, segmentCount: int) =
     let mutable recordEnabled = true
     let mutable startTick = 0u
     let mutable endTick = 0u
+    // bumped on every Build(): stamped into the trace's Regenerations so
+    // GUI views can detect a regenerated window without comparing arrays
+    let mutable buildCount = 0
 
     do
         if capacity < 1 then
             invalidArg (nameof capacity) "capacity must be positive"
 
     member this.EntryCount = count
+    member this.BuildCount = buildCount
     member this.Capacity = capacity
     member this.PerPcCount = perPc
     member this.SegmentCounts = segments
@@ -193,6 +202,7 @@ type TraceRecorder(capacity: int, segmentCount: int) =
     /// Linearize the ring into a fresh Trace. O(window) copy; call on pause or
     /// before save, not per cursor move.
     member this.Build() : Trace =
+        buildCount <- buildCount + 1
         let n = count
         let linear = Array.zeroCreate<TraceEntry> n
 
@@ -222,7 +232,8 @@ type TraceRecorder(capacity: int, segmentCount: int) =
           SelfModCount = selfModCount
           FirstIndexAtPc = firstAt
           StartTick = startTick
-          EndTick = endTick }
+          EndTick = endTick
+          Regenerations = buildCount }
 
 module TraceQuery =
 
@@ -348,4 +359,5 @@ module TraceCodec =
           SelfModCount = selfMod |> Array.filter id |> Array.length
           FirstIndexAtPc = firstAt
           StartTick = startTick
-          EndTick = endTick }
+          EndTick = endTick
+          Regenerations = 0 }

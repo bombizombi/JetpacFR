@@ -197,12 +197,16 @@ module Z80CE =
     /// raw blocks for the rest. The composable form used by the project
     /// generator to mix code segments with marked data blocks.
     ///
+    /// `useLabels` false keeps the body purely numeric: no label cells, no
+    /// `Z80.at` placements, every jump in numeric form - the null-CE shape
+    /// the CE tab offers for runner testing.
+    ///
     /// `symbols` names function entry points (from control.json): each address
     /// inside the span becomes a named label site (`Z80.at screenClear`) and
     /// jump targets there reuse the name; other targets stay `lblN`. All label
     /// cells are declared by emitted `let` bindings at the top of the body, so
     /// the body compiles standalone inside the CE.
-    let toBody (image: byte[]) (start: int) (count: int) (symbols: (int * string) list) : string =
+    let toBody (image: byte[]) (start: int) (count: int) (useLabels: bool) (symbols: (int * string) list) : string =
         let limit = min (start + count) image.Length
         // Pass 1: instruction boundaries + in-range jump targets.
         let sites = ResizeArray<int * Z80Decode.Row * Z80Op>()
@@ -231,7 +235,8 @@ module Z80CE =
 
         collect start
         // Label assignment: symbol names win, auto names fill the rest, every
-        // name unique across the body.
+        // name unique across the body. With useLabels false the set stays
+        // empty and the emitter falls through to the numeric forms.
         let used = System.Collections.Generic.HashSet<string>()
         let labels = System.Collections.Generic.Dictionary<int, string>()
 
@@ -239,19 +244,25 @@ module Z80CE =
             symbols |> List.tryFind (fun (a, _) -> a = t) |> Option.map snd
 
         let labelSites =
-            targets
-            |> Seq.toList
-            |> List.append (symbols |> List.map fst |> List.filter (fun a -> a >= start && a < limit))
-            |> List.distinct
-            |> List.sort
+            if useLabels then
+                targets
+                |> Seq.toList
+                |> List.append (symbols |> List.map fst |> List.filter (fun a -> a >= start && a < limit))
+                |> List.distinct
+                |> List.sort
+            else
+                []
 
         for t in labelSites do
             let name =
                 match symbolOf t with
                 | Some raw -> sanitizeLabel used t raw
                 | None ->
-                    sprintf "lbl%d" (labels.Count)
-                    |> (fun n -> if used.Add n then n else n + "_" + t.ToString("X4"))
+                    // Address-keyed: one generated body concatenates several
+                    // toBody calls over disjoint spans, so a per-call counter
+                    // would collide (duplicate `let lbl0 = Z80.label ()`).
+                    sprintf "lbl_%04X" t
+                    |> (fun n -> if used.Add n then n else n + "_dup")
 
             labels[t] <- name
 
@@ -305,6 +316,6 @@ module Z80CE =
     let toSource (image: byte[]) (start: int) (count: int) (symbols: (int * string) list) : string =
         let sb = System.Text.StringBuilder()
         sb.AppendLine "z80 {" |> ignore
-        sb.Append(toBody image start count symbols) |> ignore
+        sb.Append(toBody image start count true symbols) |> ignore
         sb.AppendLine "  }" |> ignore
         sb.ToString()

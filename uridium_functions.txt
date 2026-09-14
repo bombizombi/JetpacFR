@@ -1,0 +1,5159 @@
+=== $7302  999 instrs, ends RET at $7488 ===
+$7302  28 C1       JR Z,0x72C5
+$7304  01 18 28    LD BC,0x2818
+$7307  B2          OR D
+$7308  02          LD (BC),A
+$7309  19          ADD HL,DE
+$730A  28 A3       JR Z,0x72AF
+$730C  03          INC BC
+$730D  1A          LD A,(DE)
+$730E  28 08       JR Z,0x7318
+$7310  04          INC B
+$7311  1B          DEC DE
+$7312  28 95       JR Z,0x72A9
+$7314  05          DEC B
+$7315  18 28       JR 0x733F
+$7317  B2          OR D
+$7318  06 17       LD B,0x17
+$731A  28 C1       JR Z,0x72DD
+$731C  07          RLCA
+$731D  18 28       JR 0x7347
+$731F  B2          OR D
+$7320  08          EX AF,AF'
+$7321  1C          INC E
+$7322  28 84       JR Z,0x72A8
+$7324  09          ADD HL,BC
+$7325  1D          DEC E
+$7326  28 05       JR Z,0x732D
+$7328  0A          LD A,(BC)
+$7329  1E 28       LD E,0x28
+$732B  A3          AND E
+$732C  0B          DEC BC
+$732D  18 28       JR 0x7357
+$732F  B2          OR D
+$7330  0C          INC C
+$7331  03          INC BC
+$7332  29          ADD HL,HL
+$7333  00          NOP
+$7334  0D          DEC C
+$7335  04          INC B
+$7336  2A 00 0E    LD HL,(0x0E00)
+$7339  05          DEC B
+$733A  2C          INC L
+$733B  00          NOP
+$733C  0F          RRCA
+$733D  06 2E       LD B,0x2E
+$733F  00          NOP
+$7340  10 07       DJNZ 0x7349
+$7342  2F          CPL
+$7343  00          NOP
+$7344  86          ADD A,(HL)
+$7345  97          SUB A
+$7346  50          LD D,B
+$7347  00          NOP
+$7348  87          ADD A,A
+$7349  08          EX AF,AF'
+$734A  2F          CPL
+$734B  00          NOP
+$734C  88          ADC A,B
+$734D  09          ADD HL,BC
+$734E  2E 00       LD L,0x00
+$7350  89          ADC A,C
+$7351  0A          LD A,(BC)
+$7352  2C          INC L
+$7353  00          NOP
+$7354  8A          ADC A,D
+$7355  0B          DEC BC
+$7356  2A 00 8B    LD HL,(0x8B00)
+$7359  0C          INC C
+$735A  29          ADD HL,HL
+$735B  00          NOP
+$735C  00          NOP
+$735D  00          NOP
+$735E  06 00       LD B,0x00
+$7360  00          NOP
+$7361  01 04 00    LD BC,0x0004
+$7364  00          NOP
+$7365  02          LD (BC),A
+$7366  02          LD (BC),A
+$7367  00          NOP
+$7368  01 01 01    LD BC,0x0101
+$736B  01 01 00    LD BC,0x0001
+$736E  30 08       JR NC,0x7378
+$7370  44          LD B,H
+$7371  1C          INC E
+$7372  58          LD E,B
+$7373  00          NOP
+$7374  05          DEC B
+$7375  00          NOP
+$7376  09          ADD HL,BC
+$7377  50          LD D,B
+$7378  02          LD (BC),A
+$7379  02          LD (BC),A
+$737A  02          LD (BC),A
+$737B  00          NOP
+$737C  00          NOP
+$737D  00          NOP
+$737E  30 30       JR NC,0x73B0
+$7380  30 00       JR NC,0x7382
+$7382  00          NOP
+$7383  00          NOP
+$7384  09          ADD HL,BC
+$7385  80          ADD A,B
+$7386  0E 48       LD C,0x48
+$7388  0B          DEC BC
+$7389  0B          DEC BC
+$738A  0B          DEC BC
+$738B  00          NOP
+$738C  00          NOP
+$738D  00          NOP
+$738E  58          LD E,B
+$738F  58          LD E,B
+$7390  58          LD E,B
+$7391  00          NOP
+$7392  00          NOP
+$7393  00          NOP
+$7394  06 FF       LD B,0xFF
+$7396  08          EX AF,AF'
+$7397  30 03       JR NC,0x739C
+$7399  01 05 00    LD BC,0x0005
+$739C  00          NOP
+$739D  00          NOP
+$739E  1C          INC E
+$739F  30 44       JR NC,0x73E5
+$73A1  00          NOP
+$73A2  00          NOP
+$73A3  00          NOP
+$73A4  00          NOP
+$73A5  00          NOP
+$73A6  03          INC BC
+$73A7  00          NOP
+$73A8  01 04 06    LD BC,0x0604
+$73AB  03          INC BC
+$73AC  05          DEC B
+$73AD  00          NOP
+$73AE  30 30       JR NC,0x73E0
+$73B0  30 30       JR NC,0x73E2
+$73B2  30 00       JR NC,0x73B4
+$73B4  06 80       LD B,0x80
+$73B6  01 60 05    LD BC,0x0560
+$73B9  06 01       LD B,0x01
+$73BB  04          INC B
+$73BC  03          INC BC
+$73BD  00          NOP
+$73BE  08          EX AF,AF'
+$73BF  1C          INC E
+$73C0  30 44       JR NC,0x7406
+$73C2  58          LD E,B
+$73C3  00          NOP
+$73C4  05          DEC B
+$73C5  80          ADD A,B
+$73C6  04          INC B
+$73C7  50          LD D,B
+$73C8  01 01 01    LD BC,0x0101
+$73CB  01 01 00    LD BC,0x0001
+$73CE  08          EX AF,AF'
+$73CF  44          LD B,H
+$73D0  30 58       JR NC,0x742A
+$73D2  1C          INC E
+$73D3  00          NOP
+$73D4  05          DEC B
+$73D5  80          ADD A,B
+$73D6  00          NOP
+$73D7  50          LD D,B
+$73D8  01 04 06    LD BC,0x0604
+$73DB  03          INC BC
+$73DC  05          DEC B
+$73DD  00          NOP
+$73DE  30 30       JR NC,0x7410
+$73E0  30 30       JR NC,0x7412
+$73E2  30 00       JR NC,0x73E4
+$73E4  06 80       LD B,0x80
+$73E6  0D          DEC C
+$73E7  60          LD H,B
+$73E8  0C          INC C
+$73E9  08          EX AF,AF'
+$73EA  0A          LD A,(BC)
+$73EB  07          RLCA
+$73EC  09          ADD HL,BC
+$73ED  00          NOP
+$73EE  30 30       JR NC,0x7420
+$73F0  30 30       JR NC,0x7422
+$73F2  30 00       JR NC,0x73F4
+$73F4  08          EX AF,AF'
+$73F5  00          NOP
+$73F6  05          DEC B
+$73F7  80          ADD A,B
+$73F8  0D          DEC C
+$73F9  0D          DEC C
+$73FA  0D          DEC C
+$73FB  00          NOP
+$73FC  00          NOP
+$73FD  00          NOP
+$73FE  08          EX AF,AF'
+$73FF  1C          INC E
+$7400  30 00       JR NC,0x7402
+$7402  00          NOP
+$7403  00          NOP
+$7404  06 00       LD B,0x00
+$7406  08          EX AF,AF'
+$7407  30 01       JR NC,0x740A
+$7409  0F          RRCA
+$740A  11 0E 10    LD DE,0x100E
+$740D  00          NOP
+$740E  30 30       JR NC,0x7440
+$7410  30 30       JR NC,0x7442
+$7412  30 00       JR NC,0x7414
+$7414  08          EX AF,AF'
+$7415  80          ADD A,B
+$7416  03          INC BC
+$7417  80          ADD A,B
+$7418  10 11       DJNZ 0x742B
+$741A  01 0F 0E    LD BC,0x0E0F
+$741D  00          NOP
+$741E  08          EX AF,AF'
+$741F  1C          INC E
+$7420  30 44       JR NC,0x7466
+$7422  58          LD E,B
+$7423  00          NOP
+$7424  07          RLCA
+$7425  80          ADD A,B
+$7426  0B          DEC BC
+$7427  70          LD (HL),B
+$7428  05          DEC B
+$7429  06 01       LD B,0x01
+$742B  04          INC B
+$742C  03          INC BC
+$742D  00          NOP
+$742E  08          EX AF,AF'
+$742F  1C          INC E
+$7430  30 44       JR NC,0x7476
+$7432  58          LD E,B
+$7433  00          NOP
+$7434  08          EX AF,AF'
+$7435  80          ADD A,B
+$7436  0C          INC C
+$7437  80          ADD A,B
+$7438  0F          RRCA
+$7439  11 00 00    LD DE,0x0000
+$743C  00          NOP
+$743D  00          NOP
+$743E  44          LD B,H
+$743F  1C          INC E
+$7440  00          NOP
+$7441  00          NOP
+$7442  00          NOP
+$7443  00          NOP
+$7444  08          EX AF,AF'
+$7445  FF          RST 0x38
+$7446  0A          LD A,(BC)
+$7447  20 13       JR NZ,0x745C
+$7449  00          NOP
+$744A  00          NOP
+$744B  00          NOP
+$744C  00          NOP
+$744D  00          NOP
+$744E  08          EX AF,AF'
+$744F  00          NOP
+$7450  00          NOP
+$7451  00          NOP
+$7452  00          NOP
+$7453  00          NOP
+$7454  00          NOP
+$7455  FF          RST 0x38
+$7456  07          RLCA
+$7457  00          NOP
+$7458  12          LD (DE),A
+$7459  12          LD (DE),A
+$745A  00          NOP
+$745B  00          NOP
+$745C  00          NOP
+$745D  00          NOP
+$745E  44          LD B,H
+$745F  58          LD E,B
+$7460  00          NOP
+$7461  00          NOP
+$7462  00          NOP
+$7463  00          NOP
+$7464  07          RLCA
+$7465  80          ADD A,B
+$7466  08          EX AF,AF'
+$7467  1C          INC E
+$7468  13          INC DE
+$7469  13          INC DE
+$746A  00          NOP
+$746B  00          NOP
+$746C  00          NOP
+$746D  00          NOP
+$746E  1C          INC E
+$746F  44          LD B,H
+$7470  00          NOP
+$7471  00          NOP
+$7472  00          NOP
+$7473  00          NOP
+$7474  09          ADD HL,BC
+$7475  FF          RST 0x38
+$7476  06 24       LD B,0x24
+$7478  11 11 01    LD DE,0x0111
+$747B  0F          RRCA
+$747C  0F          RRCA
+$747D  00          NOP
+$747E  08          EX AF,AF'
+$747F  1C          INC E
+$7480  30 44       JR NC,0x74C6
+$7482  58          LD E,B
+$7483  00          NOP
+$7484  0C          INC C
+$7485  80          ADD A,B
+$7486  0A          LD A,(BC)
+$7487  C0          RET NZ
+=== $7776  999 instrs, ends RET at $79E6 ===
+$7776  1C          INC E
+$7777  08          EX AF,AF'
+$7778  1E 2F       LD E,0x2F
+$777A  2C          INC L
+$777B  28 20       JR Z,0x779D
+$777D  34          INC (HL)
+$777E  16 2D       LD D,0x2D
+$7780  1F          RRA
+$7781  37          SCF
+$7782  FF          RST 0x38
+$7783  35          DEC (HL)
+$7784  18 33       JR 0x77B9
+$7786  09          ADD HL,BC
+$7787  0B          DEC BC
+$7788  2A 00 0E    LD HL,(0x0E00)
+$778B  31 16 2C    LD SP,0x2C16
+$778E  29          ADD HL,HL
+$778F  37          SCF
+$7790  35          DEC (HL)
+$7791  FF          RST 0x38
+$7792  36 2E       LD (HL),0x2E
+$7794  0D          DEC C
+$7795  16 1B       LD D,0x1B
+$7797  1A          LD A,(DE)
+$7798  1D          DEC E
+$7799  04          INC B
+$779A  20 28       JR NZ,0x77C4
+$779C  30 27       JR NC,0x77C5
+$779E  03          INC BC
+$779F  36 FF       LD (HL),0xFF
+$77A1  38 19       JR C,0x77BC
+$77A3  34          INC (HL)
+$77A4  31 20 06    LD SP,0x0620
+$77A7  18 32       JR 0x77DB
+$77A9  30 16       JR NC,0x77C1
+$77AB  16 1F       LD D,0x1F
+$77AD  0C          INC C
+$77AE  35          DEC (HL)
+$77AF  38 FF       JR C,0x77B0
+$77B1  82          ADD A,D
+$77B2  08          EX AF,AF'
+$77B3  00          NOP
+$77B4  FF          RST 0x38
+$77B5  82          ADD A,D
+$77B6  08          EX AF,AF'
+$77B7  80          ADD A,B
+$77B8  10 84       DJNZ 0x773E
+$77BA  08          EX AF,AF'
+$77BB  80          ADD A,B
+$77BC  10 88       DJNZ 0x7746
+$77BE  10 80       DJNZ 0x7740
+$77C0  10 84       DJNZ 0x7746
+$77C2  08          EX AF,AF'
+$77C3  82          ADD A,D
+$77C4  08          EX AF,AF'
+$77C5  00          NOP
+$77C6  FF          RST 0x38
+$77C7  82          ADD A,D
+$77C8  08          EX AF,AF'
+$77C9  80          ADD A,B
+$77CA  10 88       DJNZ 0x7754
+$77CC  06 80       LD B,0x80
+$77CE  08          EX AF,AF'
+$77CF  84          ADD A,H
+$77D0  06 00       LD B,0x00
+$77D2  FF          RST 0x38
+$77D3  82          ADD A,D
+$77D4  08          EX AF,AF'
+$77D5  80          ADD A,B
+$77D6  10 88       DJNZ 0x7760
+$77D8  06 80       LD B,0x80
+$77DA  0C          INC C
+$77DB  84          ADD A,H
+$77DC  06 00       LD B,0x00
+$77DE  FF          RST 0x38
+$77DF  82          ADD A,D
+$77E0  08          EX AF,AF'
+$77E1  80          ADD A,B
+$77E2  10 84       DJNZ 0x7768
+$77E4  06 80       LD B,0x80
+$77E6  08          EX AF,AF'
+$77E7  88          ADC A,B
+$77E8  06 00       LD B,0x00
+$77EA  FF          RST 0x38
+$77EB  82          ADD A,D
+$77EC  08          EX AF,AF'
+$77ED  80          ADD A,B
+$77EE  10 84       DJNZ 0x7774
+$77F0  06 80       LD B,0x80
+$77F2  0C          INC C
+$77F3  88          ADC A,B
+$77F4  06 00       LD B,0x00
+$77F6  FF          RST 0x38
+$77F7  82          ADD A,D
+$77F8  08          EX AF,AF'
+$77F9  80          ADD A,B
+$77FA  10 20       DJNZ 0x781C
+$77FC  89          ADC A,C
+$77FD  06 80       LD B,0x80
+$77FF  06 20       LD B,0x20
+$7801  82          ADD A,D
+$7802  08          EX AF,AF'
+$7803  00          NOP
+$7804  FF          RST 0x38
+$7805  82          ADD A,D
+$7806  08          EX AF,AF'
+$7807  80          ADD A,B
+$7808  10 20       DJNZ 0x782A
+$780A  89          ADC A,C
+$780B  08          EX AF,AF'
+$780C  80          ADD A,B
+$780D  06 20       LD B,0x20
+$780F  82          ADD A,D
+$7810  08          EX AF,AF'
+$7811  00          NOP
+$7812  FF          RST 0x38
+$7813  82          ADD A,D
+$7814  08          EX AF,AF'
+$7815  80          ADD A,B
+$7816  10 20       DJNZ 0x7838
+$7818  85          ADD A,L
+$7819  06 80       LD B,0x80
+$781B  06 20       LD B,0x20
+$781D  82          ADD A,D
+$781E  08          EX AF,AF'
+$781F  00          NOP
+$7820  FF          RST 0x38
+$7821  82          ADD A,D
+$7822  08          EX AF,AF'
+$7823  80          ADD A,B
+$7824  10 20       DJNZ 0x7846
+$7826  85          ADD A,L
+$7827  08          EX AF,AF'
+$7828  80          ADD A,B
+$7829  06 20       LD B,0x20
+$782B  82          ADD A,D
+$782C  08          EX AF,AF'
+$782D  00          NOP
+$782E  FF          RST 0x38
+$782F  82          ADD A,D
+$7830  08          EX AF,AF'
+$7831  80          ADD A,B
+$7832  28 89       JR Z,0x77BD
+$7834  0A          LD A,(BC)
+$7835  85          ADD A,L
+$7836  0A          LD A,(BC)
+$7837  86          ADD A,(HL)
+$7838  0A          LD A,(BC)
+$7839  8A          ADC A,D
+$783A  0A          LD A,(BC)
+$783B  80          ADD A,B
+$783C  28 89       JR Z,0x77C7
+$783E  0A          LD A,(BC)
+$783F  85          ADD A,L
+$7840  0A          LD A,(BC)
+$7841  86          ADD A,(HL)
+$7842  0A          LD A,(BC)
+$7843  8A          ADC A,D
+$7844  0A          LD A,(BC)
+$7845  00          NOP
+$7846  FF          RST 0x38
+$7847  82          ADD A,D
+$7848  08          EX AF,AF'
+$7849  80          ADD A,B
+$784A  10 20       DJNZ 0x786C
+$784C  81          ADD A,C
+$784D  07          RLCA
+$784E  80          ADD A,B
+$784F  08          EX AF,AF'
+$7850  20 82       JR NZ,0x77D4
+$7852  08          EX AF,AF'
+$7853  00          NOP
+$7854  FF          RST 0x38
+$7855  82          ADD A,D
+$7856  08          EX AF,AF'
+$7857  80          ADD A,B
+$7858  28 85       JR Z,0x77DF
+$785A  0A          LD A,(BC)
+$785B  89          ADC A,C
+$785C  0A          LD A,(BC)
+$785D  8A          ADC A,D
+$785E  0A          LD A,(BC)
+$785F  86          ADD A,(HL)
+$7860  0A          LD A,(BC)
+$7861  80          ADD A,B
+$7862  28 85       JR Z,0x77E9
+$7864  0A          LD A,(BC)
+$7865  89          ADC A,C
+$7866  0A          LD A,(BC)
+$7867  8A          ADC A,D
+$7868  0A          LD A,(BC)
+$7869  86          ADD A,(HL)
+$786A  0A          LD A,(BC)
+$786B  00          NOP
+$786C  FF          RST 0x38
+$786D  82          ADD A,D
+$786E  08          EX AF,AF'
+$786F  80          ADD A,B
+$7870  10 88       DJNZ 0x77FA
+$7872  06 80       LD B,0x80
+$7874  08          EX AF,AF'
+$7875  84          ADD A,H
+$7876  06 80       LD B,0x80
+$7878  40          LD B,B
+$7879  84          ADD A,H
+$787A  06 80       LD B,0x80
+$787C  03          INC BC
+$787D  88          ADC A,B
+$787E  06 00       LD B,0x00
+$7880  FF          RST 0x38
+$7881  82          ADD A,D
+$7882  08          EX AF,AF'
+$7883  80          ADD A,B
+$7884  10 88       DJNZ 0x780E
+$7886  06 80       LD B,0x80
+$7888  0C          INC C
+$7889  84          ADD A,H
+$788A  06 80       LD B,0x80
+$788C  40          LD B,B
+$788D  84          ADD A,H
+$788E  06 80       LD B,0x80
+$7890  06 88       LD B,0x88
+$7892  06 00       LD B,0x00
+$7894  FF          RST 0x38
+$7895  82          ADD A,D
+$7896  08          EX AF,AF'
+$7897  80          ADD A,B
+$7898  10 84       DJNZ 0x781E
+$789A  06 80       LD B,0x80
+$789C  08          EX AF,AF'
+$789D  88          ADC A,B
+$789E  06 80       LD B,0x80
+$78A0  40          LD B,B
+$78A1  88          ADC A,B
+$78A2  06 80       LD B,0x80
+$78A4  03          INC BC
+$78A5  84          ADD A,H
+$78A6  06 00       LD B,0x00
+$78A8  FF          RST 0x38
+$78A9  82          ADD A,D
+$78AA  08          EX AF,AF'
+$78AB  80          ADD A,B
+$78AC  10 84       DJNZ 0x7832
+$78AE  06 80       LD B,0x80
+$78B0  0C          INC C
+$78B1  88          ADC A,B
+$78B2  06 80       LD B,0x80
+$78B4  40          LD B,B
+$78B5  88          ADC A,B
+$78B6  06 80       LD B,0x80
+$78B8  06 84       LD B,0x84
+$78BA  06 00       LD B,0x00
+$78BC  FF          RST 0x38
+$78BD  82          ADD A,D
+$78BE  08          EX AF,AF'
+$78BF  80          ADD A,B
+$78C0  28 89       JR Z,0x784B
+$78C2  0A          LD A,(BC)
+$78C3  85          ADD A,L
+$78C4  0A          LD A,(BC)
+$78C5  86          ADD A,(HL)
+$78C6  0A          LD A,(BC)
+$78C7  8A          ADC A,D
+$78C8  0A          LD A,(BC)
+$78C9  80          ADD A,B
+$78CA  14          INC D
+$78CB  88          ADC A,B
+$78CC  06 80       LD B,0x80
+$78CE  0C          INC C
+$78CF  84          ADD A,H
+$78D0  06 80       LD B,0x80
+$78D2  14          INC D
+$78D3  85          ADD A,L
+$78D4  0A          LD A,(BC)
+$78D5  89          ADC A,C
+$78D6  0A          LD A,(BC)
+$78D7  8A          ADC A,D
+$78D8  0A          LD A,(BC)
+$78D9  86          ADD A,(HL)
+$78DA  0A          LD A,(BC)
+$78DB  00          NOP
+$78DC  FF          RST 0x38
+$78DD  82          ADD A,D
+$78DE  06 40       LD B,0x40
+$78E0  FF          RST 0x38
+$78E1  82          ADD A,D
+$78E2  06 C0       LD B,0xC0
+$78E4  28 81       JR Z,0x7867
+$78E6  06 20       LD B,0x20
+$78E8  80          ADD A,B
+$78E9  28 10       JR Z,0x78FB
+$78EB  80          ADD A,B
+$78EC  14          INC D
+$78ED  82          ADD A,D
+$78EE  06 40       LD B,0x40
+$78F0  FF          RST 0x38
+$78F1  82          ADD A,D
+$78F2  08          EX AF,AF'
+$78F3  80          ADD A,B
+$78F4  14          INC D
+$78F5  81          ADD A,C
+$78F6  08          EX AF,AF'
+$78F7  20 80       JR NZ,0x7879
+$78F9  3C          INC A
+$78FA  10 82       DJNZ 0x787E
+$78FC  08          EX AF,AF'
+$78FD  80          ADD A,B
+$78FE  28 82       JR Z,0x7882
+$7900  06 00       LD B,0x00
+$7902  FF          RST 0x38
+$7903  82          ADD A,D
+$7904  08          EX AF,AF'
+$7905  80          ADD A,B
+$7906  28 85       JR Z,0x788D
+$7908  0A          LD A,(BC)
+$7909  89          ADC A,C
+$790A  0A          LD A,(BC)
+$790B  8A          ADC A,D
+$790C  0A          LD A,(BC)
+$790D  86          ADD A,(HL)
+$790E  0A          LD A,(BC)
+$790F  80          ADD A,B
+$7910  14          INC D
+$7911  84          ADD A,H
+$7912  06 80       LD B,0x80
+$7914  0C          INC C
+$7915  88          ADC A,B
+$7916  06 80       LD B,0x80
+$7918  14          INC D
+$7919  89          ADC A,C
+$791A  0A          LD A,(BC)
+$791B  85          ADD A,L
+$791C  0A          LD A,(BC)
+$791D  86          ADD A,(HL)
+$791E  0A          LD A,(BC)
+$791F  8A          ADC A,D
+$7920  0A          LD A,(BC)
+$7921  00          NOP
+$7922  FF          RST 0x38
+$7923  82          ADD A,D
+$7924  08          EX AF,AF'
+$7925  80          ADD A,B
+$7926  50          LD D,B
+$7927  82          ADD A,D
+$7928  04          INC B
+$7929  00          NOP
+$792A  FF          RST 0x38
+$792B  82          ADD A,D
+$792C  08          EX AF,AF'
+$792D  80          ADD A,B
+$792E  14          INC D
+$792F  88          ADC A,B
+$7930  08          EX AF,AF'
+$7931  80          ADD A,B
+$7932  08          EX AF,AF'
+$7933  84          ADD A,H
+$7934  80          ADD A,B
+$7935  24          INC H
+$7936  86          ADD A,(HL)
+$7937  04          INC B
+$7938  84          ADD A,H
+$7939  08          EX AF,AF'
+$793A  80          ADD A,B
+$793B  10 88       DJNZ 0x78C5
+$793D  0C          INC C
+$793E  00          NOP
+$793F  FF          RST 0x38
+$7940  82          ADD A,D
+$7941  08          EX AF,AF'
+$7942  80          ADD A,B
+$7943  14          INC D
+$7944  88          ADC A,B
+$7945  0A          LD A,(BC)
+$7946  80          ADD A,B
+$7947  0A          LD A,(BC)
+$7948  84          ADD A,H
+$7949  0A          LD A,(BC)
+$794A  80          ADD A,B
+$794B  1E 86       LD E,0x86
+$794D  04          INC B
+$794E  84          ADD A,H
+$794F  06 80       LD B,0x80
+$7951  0A          LD A,(BC)
+$7952  88          ADC A,B
+$7953  0A          LD A,(BC)
+$7954  00          NOP
+$7955  FF          RST 0x38
+$7956  82          ADD A,D
+$7957  08          EX AF,AF'
+$7958  80          ADD A,B
+$7959  14          INC D
+$795A  84          ADD A,H
+$795B  08          EX AF,AF'
+$795C  80          ADD A,B
+$795D  08          EX AF,AF'
+$795E  88          ADC A,B
+$795F  08          EX AF,AF'
+$7960  80          ADD A,B
+$7961  24          INC H
+$7962  8A          ADC A,D
+$7963  04          INC B
+$7964  88          ADC A,B
+$7965  08          EX AF,AF'
+$7966  80          ADD A,B
+$7967  10 84       DJNZ 0x78ED
+$7969  0C          INC C
+$796A  00          NOP
+$796B  FF          RST 0x38
+$796C  82          ADD A,D
+$796D  08          EX AF,AF'
+$796E  80          ADD A,B
+$796F  14          INC D
+$7970  84          ADD A,H
+$7971  0A          LD A,(BC)
+$7972  80          ADD A,B
+$7973  0A          LD A,(BC)
+$7974  88          ADC A,B
+$7975  0A          LD A,(BC)
+$7976  80          ADD A,B
+$7977  1E 8A       LD E,0x8A
+$7979  04          INC B
+$797A  88          ADC A,B
+$797B  06 80       LD B,0x80
+$797D  0A          LD A,(BC)
+$797E  84          ADD A,H
+$797F  0A          LD A,(BC)
+$7980  00          NOP
+$7981  FF          RST 0x38
+$7982  82          ADD A,D
+$7983  08          EX AF,AF'
+$7984  80          ADD A,B
+$7985  10 88       DJNZ 0x790F
+$7987  08          EX AF,AF'
+$7988  80          ADD A,B
+$7989  10 84       DJNZ 0x790F
+$798B  10 80       DJNZ 0x790D
+$798D  10 88       DJNZ 0x7917
+$798F  08          EX AF,AF'
+$7990  82          ADD A,D
+$7991  00          NOP
+$7992  FF          RST 0x38
+$7993  82          ADD A,D
+$7994  08          EX AF,AF'
+$7995  80          ADD A,B
+$7996  1E 85       LD E,0x85
+$7998  08          EX AF,AF'
+$7999  80          ADD A,B
+$799A  08          EX AF,AF'
+$799B  89          ADC A,C
+$799C  08          EX AF,AF'
+$799D  00          NOP
+$799E  FF          RST 0x38
+$799F  82          ADD A,D
+$79A0  08          EX AF,AF'
+$79A1  80          ADD A,B
+$79A2  24          INC H
+$79A3  85          ADD A,L
+$79A4  08          EX AF,AF'
+$79A5  80          ADD A,B
+$79A6  02          LD (BC),A
+$79A7  89          ADC A,C
+$79A8  08          EX AF,AF'
+$79A9  00          NOP
+$79AA  FF          RST 0x38
+$79AB  82          ADD A,D
+$79AC  08          EX AF,AF'
+$79AD  80          ADD A,B
+$79AE  26 81       LD H,0x81
+$79B0  10 00       DJNZ 0x79B2
+$79B2  FF          RST 0x38
+$79B3  82          ADD A,D
+$79B4  08          EX AF,AF'
+$79B5  80          ADD A,B
+$79B6  1E 89       LD E,0x89
+$79B8  08          EX AF,AF'
+$79B9  80          ADD A,B
+$79BA  08          EX AF,AF'
+$79BB  85          ADD A,L
+$79BC  08          EX AF,AF'
+$79BD  00          NOP
+$79BE  FF          RST 0x38
+$79BF  82          ADD A,D
+$79C0  08          EX AF,AF'
+$79C1  80          ADD A,B
+$79C2  24          INC H
+$79C3  89          ADC A,C
+$79C4  08          EX AF,AF'
+$79C5  80          ADD A,B
+$79C6  02          LD (BC),A
+$79C7  85          ADD A,L
+$79C8  08          EX AF,AF'
+$79C9  00          NOP
+$79CA  FF          RST 0x38
+$79CB  80          ADD A,B
+$79CC  06 82       LD B,0x82
+$79CE  08          EX AF,AF'
+$79CF  00          NOP
+$79D0  FF          RST 0x38
+$79D1  80          ADD A,B
+$79D2  0C          INC C
+$79D3  82          ADD A,D
+$79D4  08          EX AF,AF'
+$79D5  00          NOP
+$79D6  FF          RST 0x38
+$79D7  80          ADD A,B
+$79D8  12          LD (DE),A
+$79D9  82          ADD A,D
+$79DA  08          EX AF,AF'
+$79DB  00          NOP
+$79DC  FF          RST 0x38
+$79DD  82          ADD A,D
+$79DE  08          EX AF,AF'
+$79DF  80          ADD A,B
+$79E0  50          LD D,B
+$79E1  40          LD B,B
+$79E2  FF          RST 0x38
+$79E3  82          ADD A,D
+$79E4  08          EX AF,AF'
+$79E5  C0          RET NZ
+=== $78B4  999 instrs, ends RET at $79E6 ===
+$78B4  40          LD B,B
+$78B5  88          ADC A,B
+$78B6  06 80       LD B,0x80
+$78B8  06 84       LD B,0x84
+$78BA  06 00       LD B,0x00
+$78BC  FF          RST 0x38
+$78BD  82          ADD A,D
+$78BE  08          EX AF,AF'
+$78BF  80          ADD A,B
+$78C0  28 89       JR Z,0x784B
+$78C2  0A          LD A,(BC)
+$78C3  85          ADD A,L
+$78C4  0A          LD A,(BC)
+$78C5  86          ADD A,(HL)
+$78C6  0A          LD A,(BC)
+$78C7  8A          ADC A,D
+$78C8  0A          LD A,(BC)
+$78C9  80          ADD A,B
+$78CA  14          INC D
+$78CB  88          ADC A,B
+$78CC  06 80       LD B,0x80
+$78CE  0C          INC C
+$78CF  84          ADD A,H
+$78D0  06 80       LD B,0x80
+$78D2  14          INC D
+$78D3  85          ADD A,L
+$78D4  0A          LD A,(BC)
+$78D5  89          ADC A,C
+$78D6  0A          LD A,(BC)
+$78D7  8A          ADC A,D
+$78D8  0A          LD A,(BC)
+$78D9  86          ADD A,(HL)
+$78DA  0A          LD A,(BC)
+$78DB  00          NOP
+$78DC  FF          RST 0x38
+$78DD  82          ADD A,D
+$78DE  06 40       LD B,0x40
+$78E0  FF          RST 0x38
+$78E1  82          ADD A,D
+$78E2  06 C0       LD B,0xC0
+$78E4  28 81       JR Z,0x7867
+$78E6  06 20       LD B,0x20
+$78E8  80          ADD A,B
+$78E9  28 10       JR Z,0x78FB
+$78EB  80          ADD A,B
+$78EC  14          INC D
+$78ED  82          ADD A,D
+$78EE  06 40       LD B,0x40
+$78F0  FF          RST 0x38
+$78F1  82          ADD A,D
+$78F2  08          EX AF,AF'
+$78F3  80          ADD A,B
+$78F4  14          INC D
+$78F5  81          ADD A,C
+$78F6  08          EX AF,AF'
+$78F7  20 80       JR NZ,0x7879
+$78F9  3C          INC A
+$78FA  10 82       DJNZ 0x787E
+$78FC  08          EX AF,AF'
+$78FD  80          ADD A,B
+$78FE  28 82       JR Z,0x7882
+$7900  06 00       LD B,0x00
+$7902  FF          RST 0x38
+$7903  82          ADD A,D
+$7904  08          EX AF,AF'
+$7905  80          ADD A,B
+$7906  28 85       JR Z,0x788D
+$7908  0A          LD A,(BC)
+$7909  89          ADC A,C
+$790A  0A          LD A,(BC)
+$790B  8A          ADC A,D
+$790C  0A          LD A,(BC)
+$790D  86          ADD A,(HL)
+$790E  0A          LD A,(BC)
+$790F  80          ADD A,B
+$7910  14          INC D
+$7911  84          ADD A,H
+$7912  06 80       LD B,0x80
+$7914  0C          INC C
+$7915  88          ADC A,B
+$7916  06 80       LD B,0x80
+$7918  14          INC D
+$7919  89          ADC A,C
+$791A  0A          LD A,(BC)
+$791B  85          ADD A,L
+$791C  0A          LD A,(BC)
+$791D  86          ADD A,(HL)
+$791E  0A          LD A,(BC)
+$791F  8A          ADC A,D
+$7920  0A          LD A,(BC)
+$7921  00          NOP
+$7922  FF          RST 0x38
+$7923  82          ADD A,D
+$7924  08          EX AF,AF'
+$7925  80          ADD A,B
+$7926  50          LD D,B
+$7927  82          ADD A,D
+$7928  04          INC B
+$7929  00          NOP
+$792A  FF          RST 0x38
+$792B  82          ADD A,D
+$792C  08          EX AF,AF'
+$792D  80          ADD A,B
+$792E  14          INC D
+$792F  88          ADC A,B
+$7930  08          EX AF,AF'
+$7931  80          ADD A,B
+$7932  08          EX AF,AF'
+$7933  84          ADD A,H
+$7934  80          ADD A,B
+$7935  24          INC H
+$7936  86          ADD A,(HL)
+$7937  04          INC B
+$7938  84          ADD A,H
+$7939  08          EX AF,AF'
+$793A  80          ADD A,B
+$793B  10 88       DJNZ 0x78C5
+$793D  0C          INC C
+$793E  00          NOP
+$793F  FF          RST 0x38
+$7940  82          ADD A,D
+$7941  08          EX AF,AF'
+$7942  80          ADD A,B
+$7943  14          INC D
+$7944  88          ADC A,B
+$7945  0A          LD A,(BC)
+$7946  80          ADD A,B
+$7947  0A          LD A,(BC)
+$7948  84          ADD A,H
+$7949  0A          LD A,(BC)
+$794A  80          ADD A,B
+$794B  1E 86       LD E,0x86
+$794D  04          INC B
+$794E  84          ADD A,H
+$794F  06 80       LD B,0x80
+$7951  0A          LD A,(BC)
+$7952  88          ADC A,B
+$7953  0A          LD A,(BC)
+$7954  00          NOP
+$7955  FF          RST 0x38
+$7956  82          ADD A,D
+$7957  08          EX AF,AF'
+$7958  80          ADD A,B
+$7959  14          INC D
+$795A  84          ADD A,H
+$795B  08          EX AF,AF'
+$795C  80          ADD A,B
+$795D  08          EX AF,AF'
+$795E  88          ADC A,B
+$795F  08          EX AF,AF'
+$7960  80          ADD A,B
+$7961  24          INC H
+$7962  8A          ADC A,D
+$7963  04          INC B
+$7964  88          ADC A,B
+$7965  08          EX AF,AF'
+$7966  80          ADD A,B
+$7967  10 84       DJNZ 0x78ED
+$7969  0C          INC C
+$796A  00          NOP
+$796B  FF          RST 0x38
+$796C  82          ADD A,D
+$796D  08          EX AF,AF'
+$796E  80          ADD A,B
+$796F  14          INC D
+$7970  84          ADD A,H
+$7971  0A          LD A,(BC)
+$7972  80          ADD A,B
+$7973  0A          LD A,(BC)
+$7974  88          ADC A,B
+$7975  0A          LD A,(BC)
+$7976  80          ADD A,B
+$7977  1E 8A       LD E,0x8A
+$7979  04          INC B
+$797A  88          ADC A,B
+$797B  06 80       LD B,0x80
+$797D  0A          LD A,(BC)
+$797E  84          ADD A,H
+$797F  0A          LD A,(BC)
+$7980  00          NOP
+$7981  FF          RST 0x38
+$7982  82          ADD A,D
+$7983  08          EX AF,AF'
+$7984  80          ADD A,B
+$7985  10 88       DJNZ 0x790F
+$7987  08          EX AF,AF'
+$7988  80          ADD A,B
+$7989  10 84       DJNZ 0x790F
+$798B  10 80       DJNZ 0x790D
+$798D  10 88       DJNZ 0x7917
+$798F  08          EX AF,AF'
+$7990  82          ADD A,D
+$7991  00          NOP
+$7992  FF          RST 0x38
+$7993  82          ADD A,D
+$7994  08          EX AF,AF'
+$7995  80          ADD A,B
+$7996  1E 85       LD E,0x85
+$7998  08          EX AF,AF'
+$7999  80          ADD A,B
+$799A  08          EX AF,AF'
+$799B  89          ADC A,C
+$799C  08          EX AF,AF'
+$799D  00          NOP
+$799E  FF          RST 0x38
+$799F  82          ADD A,D
+$79A0  08          EX AF,AF'
+$79A1  80          ADD A,B
+$79A2  24          INC H
+$79A3  85          ADD A,L
+$79A4  08          EX AF,AF'
+$79A5  80          ADD A,B
+$79A6  02          LD (BC),A
+$79A7  89          ADC A,C
+$79A8  08          EX AF,AF'
+$79A9  00          NOP
+$79AA  FF          RST 0x38
+$79AB  82          ADD A,D
+$79AC  08          EX AF,AF'
+$79AD  80          ADD A,B
+$79AE  26 81       LD H,0x81
+$79B0  10 00       DJNZ 0x79B2
+$79B2  FF          RST 0x38
+$79B3  82          ADD A,D
+$79B4  08          EX AF,AF'
+$79B5  80          ADD A,B
+$79B6  1E 89       LD E,0x89
+$79B8  08          EX AF,AF'
+$79B9  80          ADD A,B
+$79BA  08          EX AF,AF'
+$79BB  85          ADD A,L
+$79BC  08          EX AF,AF'
+$79BD  00          NOP
+$79BE  FF          RST 0x38
+$79BF  82          ADD A,D
+$79C0  08          EX AF,AF'
+$79C1  80          ADD A,B
+$79C2  24          INC H
+$79C3  89          ADC A,C
+$79C4  08          EX AF,AF'
+$79C5  80          ADD A,B
+$79C6  02          LD (BC),A
+$79C7  85          ADD A,L
+$79C8  08          EX AF,AF'
+$79C9  00          NOP
+$79CA  FF          RST 0x38
+$79CB  80          ADD A,B
+$79CC  06 82       LD B,0x82
+$79CE  08          EX AF,AF'
+$79CF  00          NOP
+$79D0  FF          RST 0x38
+$79D1  80          ADD A,B
+$79D2  0C          INC C
+$79D3  82          ADD A,D
+$79D4  08          EX AF,AF'
+$79D5  00          NOP
+$79D6  FF          RST 0x38
+$79D7  80          ADD A,B
+$79D8  12          LD (DE),A
+$79D9  82          ADD A,D
+$79DA  08          EX AF,AF'
+$79DB  00          NOP
+$79DC  FF          RST 0x38
+$79DD  82          ADD A,D
+$79DE  08          EX AF,AF'
+$79DF  80          ADD A,B
+$79E0  50          LD D,B
+$79E1  40          LD B,B
+$79E2  FF          RST 0x38
+$79E3  82          ADD A,D
+$79E4  08          EX AF,AF'
+$79E5  C0          RET NZ
+=== $795E  999 instrs, ends RET at $79E6 ===
+$795E  88          ADC A,B
+$795F  08          EX AF,AF'
+$7960  80          ADD A,B
+$7961  24          INC H
+$7962  8A          ADC A,D
+$7963  04          INC B
+$7964  88          ADC A,B
+$7965  08          EX AF,AF'
+$7966  80          ADD A,B
+$7967  10 84       DJNZ 0x78ED
+$7969  0C          INC C
+$796A  00          NOP
+$796B  FF          RST 0x38
+$796C  82          ADD A,D
+$796D  08          EX AF,AF'
+$796E  80          ADD A,B
+$796F  14          INC D
+$7970  84          ADD A,H
+$7971  0A          LD A,(BC)
+$7972  80          ADD A,B
+$7973  0A          LD A,(BC)
+$7974  88          ADC A,B
+$7975  0A          LD A,(BC)
+$7976  80          ADD A,B
+$7977  1E 8A       LD E,0x8A
+$7979  04          INC B
+$797A  88          ADC A,B
+$797B  06 80       LD B,0x80
+$797D  0A          LD A,(BC)
+$797E  84          ADD A,H
+$797F  0A          LD A,(BC)
+$7980  00          NOP
+$7981  FF          RST 0x38
+$7982  82          ADD A,D
+$7983  08          EX AF,AF'
+$7984  80          ADD A,B
+$7985  10 88       DJNZ 0x790F
+$7987  08          EX AF,AF'
+$7988  80          ADD A,B
+$7989  10 84       DJNZ 0x790F
+$798B  10 80       DJNZ 0x790D
+$798D  10 88       DJNZ 0x7917
+$798F  08          EX AF,AF'
+$7990  82          ADD A,D
+$7991  00          NOP
+$7992  FF          RST 0x38
+$7993  82          ADD A,D
+$7994  08          EX AF,AF'
+$7995  80          ADD A,B
+$7996  1E 85       LD E,0x85
+$7998  08          EX AF,AF'
+$7999  80          ADD A,B
+$799A  08          EX AF,AF'
+$799B  89          ADC A,C
+$799C  08          EX AF,AF'
+$799D  00          NOP
+$799E  FF          RST 0x38
+$799F  82          ADD A,D
+$79A0  08          EX AF,AF'
+$79A1  80          ADD A,B
+$79A2  24          INC H
+$79A3  85          ADD A,L
+$79A4  08          EX AF,AF'
+$79A5  80          ADD A,B
+$79A6  02          LD (BC),A
+$79A7  89          ADC A,C
+$79A8  08          EX AF,AF'
+$79A9  00          NOP
+$79AA  FF          RST 0x38
+$79AB  82          ADD A,D
+$79AC  08          EX AF,AF'
+$79AD  80          ADD A,B
+$79AE  26 81       LD H,0x81
+$79B0  10 00       DJNZ 0x79B2
+$79B2  FF          RST 0x38
+$79B3  82          ADD A,D
+$79B4  08          EX AF,AF'
+$79B5  80          ADD A,B
+$79B6  1E 89       LD E,0x89
+$79B8  08          EX AF,AF'
+$79B9  80          ADD A,B
+$79BA  08          EX AF,AF'
+$79BB  85          ADD A,L
+$79BC  08          EX AF,AF'
+$79BD  00          NOP
+$79BE  FF          RST 0x38
+$79BF  82          ADD A,D
+$79C0  08          EX AF,AF'
+$79C1  80          ADD A,B
+$79C2  24          INC H
+$79C3  89          ADC A,C
+$79C4  08          EX AF,AF'
+$79C5  80          ADD A,B
+$79C6  02          LD (BC),A
+$79C7  85          ADD A,L
+$79C8  08          EX AF,AF'
+$79C9  00          NOP
+$79CA  FF          RST 0x38
+$79CB  80          ADD A,B
+$79CC  06 82       LD B,0x82
+$79CE  08          EX AF,AF'
+$79CF  00          NOP
+$79D0  FF          RST 0x38
+$79D1  80          ADD A,B
+$79D2  0C          INC C
+$79D3  82          ADD A,D
+$79D4  08          EX AF,AF'
+$79D5  00          NOP
+$79D6  FF          RST 0x38
+$79D7  80          ADD A,B
+$79D8  12          LD (DE),A
+$79D9  82          ADD A,D
+$79DA  08          EX AF,AF'
+$79DB  00          NOP
+$79DC  FF          RST 0x38
+$79DD  82          ADD A,D
+$79DE  08          EX AF,AF'
+$79DF  80          ADD A,B
+$79E0  50          LD D,B
+$79E1  40          LD B,B
+$79E2  FF          RST 0x38
+$79E3  82          ADD A,D
+$79E4  08          EX AF,AF'
+$79E5  C0          RET NZ
+=== $79A6  999 instrs, ends RET at $79E6 ===
+$79A6  02          LD (BC),A
+$79A7  89          ADC A,C
+$79A8  08          EX AF,AF'
+$79A9  00          NOP
+$79AA  FF          RST 0x38
+$79AB  82          ADD A,D
+$79AC  08          EX AF,AF'
+$79AD  80          ADD A,B
+$79AE  26 81       LD H,0x81
+$79B0  10 00       DJNZ 0x79B2
+$79B2  FF          RST 0x38
+$79B3  82          ADD A,D
+$79B4  08          EX AF,AF'
+$79B5  80          ADD A,B
+$79B6  1E 89       LD E,0x89
+$79B8  08          EX AF,AF'
+$79B9  80          ADD A,B
+$79BA  08          EX AF,AF'
+$79BB  85          ADD A,L
+$79BC  08          EX AF,AF'
+$79BD  00          NOP
+$79BE  FF          RST 0x38
+$79BF  82          ADD A,D
+$79C0  08          EX AF,AF'
+$79C1  80          ADD A,B
+$79C2  24          INC H
+$79C3  89          ADC A,C
+$79C4  08          EX AF,AF'
+$79C5  80          ADD A,B
+$79C6  02          LD (BC),A
+$79C7  85          ADD A,L
+$79C8  08          EX AF,AF'
+$79C9  00          NOP
+$79CA  FF          RST 0x38
+$79CB  80          ADD A,B
+$79CC  06 82       LD B,0x82
+$79CE  08          EX AF,AF'
+$79CF  00          NOP
+$79D0  FF          RST 0x38
+$79D1  80          ADD A,B
+$79D2  0C          INC C
+$79D3  82          ADD A,D
+$79D4  08          EX AF,AF'
+$79D5  00          NOP
+$79D6  FF          RST 0x38
+$79D7  80          ADD A,B
+$79D8  12          LD (DE),A
+$79D9  82          ADD A,D
+$79DA  08          EX AF,AF'
+$79DB  00          NOP
+$79DC  FF          RST 0x38
+$79DD  82          ADD A,D
+$79DE  08          EX AF,AF'
+$79DF  80          ADD A,B
+$79E0  50          LD D,B
+$79E1  40          LD B,B
+$79E2  FF          RST 0x38
+$79E3  82          ADD A,D
+$79E4  08          EX AF,AF'
+$79E5  C0          RET NZ
+=== $79EC  999 instrs, ends RET at $79F8 ===
+$79EC  14          INC D
+$79ED  10 81       DJNZ 0x7970
+$79EF  08          EX AF,AF'
+$79F0  20 82       JR NZ,0x7974
+$79F2  0A          LD A,(BC)
+$79F3  00          NOP
+$79F4  FF          RST 0x38
+$79F5  82          ADD A,D
+$79F6  08          EX AF,AF'
+$79F7  C0          RET NZ
+=== $7A16  999 instrs, ends RET at $7B01 ===
+$7A16  2D          DEC L
+$7A17  96          SUB (HL)
+$7A18  1C          INC E
+$7A19  6A          LD L,D
+$7A1A  8C          ADC A,H
+$7A1B  6E          LD L,(HL)
+$7A1C  62          LD H,D
+$7A1D  01 02 21    LD BC,0x2102
+$7A20  62          LD H,D
+$7A21  01 08 2E    LD BC,0x2E08
+$7A24  00          NOP
+$7A25  00          NOP
+$7A26  04          INC B
+$7A27  A1          AND C
+$7A28  62          LD H,D
+$7A29  01 03 21    LD BC,0x2103
+$7A2C  62          LD H,D
+$7A2D  01 09 2E    LD BC,0x2E09
+$7A30  F1          POP AF
+$7A31  F4 05 21    CALL P,0x2105
+$7A34  00          NOP
+$7A35  00          NOP
+$7A36  29          ADD HL,HL
+$7A37  C1          POP BC
+$7A38  62          LD H,D
+$7A39  01 06 21    LD BC,0x2106
+$7A3C  62          LD H,D
+$7A3D  01 01 2E    LD BC,0x2E01
+$7A40  00          NOP
+$7A41  00          NOP
+$7A42  07          RLCA
+$7A43  A1          AND C
+$7A44  01 00 00    LD BC,0x0000
+$7A47  41          LD B,C
+$7A48  01 00 02    LD BC,0x0200
+$7A4B  46          LD B,(HL)
+$7A4C  00          NOP
+$7A4D  00          NOP
+$7A4E  01 C1 01    LD BC,0x01C1
+$7A51  00          NOP
+$7A52  02          LD (BC),A
+$7A53  C2 FA 11    JP NZ,0x11FA
+$7A56  04          INC B
+$7A57  01 00 00    LD BC,0x0000
+$7A5A  05          DEC B
+$7A5B  81          ADD A,C
+$7A5C  FA 11 06    JP M,0x0611
+$7A5F  01 00 00    LD BC,0x0000
+$7A62  07          RLCA
+$7A63  81          ADD A,C
+$7A64  26 04       LD H,0x04
+$7A66  04          INC B
+$7A67  01 00 00    LD BC,0x0000
+$7A6A  05          DEC B
+$7A6B  81          ADD A,C
+$7A6C  26 04       LD H,0x04
+$7A6E  06 01       LD B,0x01
+$7A70  00          NOP
+$7A71  00          NOP
+$7A72  07          RLCA
+$7A73  81          ADD A,C
+$7A74  01 00 00    LD BC,0x0000
+$7A77  41          LD B,C
+$7A78  01 00 02    LD BC,0x0200
+$7A7B  4E          LD C,(HL)
+$7A7C  00          NOP
+$7A7D  00          NOP
+$7A7E  01 C1 01    LD BC,0x01C1
+$7A81  00          NOP
+$7A82  00          NOP
+$7A83  41          LD B,C
+$7A84  02          LD (BC),A
+$7A85  00          NOP
+$7A86  04          INC B
+$7A87  4F          LD C,A
+$7A88  00          NOP
+$7A89  00          NOP
+$7A8A  01 C1 20    LD BC,0x20C1
+$7A8D  00          NOP
+$7A8E  0A          LD A,(BC)
+$7A8F  41          LD B,C
+$7A90  FF          RST 0x38
+$7A91  FF          RST 0x38
+$7A92  0A          LD A,(BC)
+$7A93  41          LD B,C
+$7A94  00          NOP
+$7A95  00          NOP
+$7A96  04          INC B
+$7A97  C1          POP BC
+$7A98  26 04       LD H,0x04
+$7A9A  06 01       LD B,0x01
+$7A9C  62          LD H,D
+$7A9D  01 14 02    LD BC,0x0214
+$7AA0  00          NOP
+$7AA1  00          NOP
+$7AA2  07          RLCA
+$7AA3  81          ADD A,C
+$7AA4  26 04       LD H,0x04
+$7AA6  04          INC B
+$7AA7  01 62 01    LD BC,0x0162
+$7AAA  15          DEC D
+$7AAB  02          LD (BC),A
+$7AAC  00          NOP
+$7AAD  00          NOP
+$7AAE  05          DEC B
+$7AAF  81          ADD A,C
+$7AB0  00          NOP
+$7AB1  00          NOP
+$7AB2  12          LD (DE),A
+$7AB3  81          ADD A,C
+$7AB4  00          NOP
+$7AB5  00          NOP
+$7AB6  13          INC DE
+$7AB7  81          ADD A,C
+$7AB8  26 04       LD H,0x04
+$7ABA  1C          INC E
+$7ABB  41          LD B,C
+$7ABC  62          LD H,D
+$7ABD  01 18 4A    LD BC,0x4A18
+$7AC0  00          NOP
+$7AC1  00          NOP
+$7AC2  1A          LD A,(DE)
+$7AC3  C1          POP BC
+$7AC4  26 04       LD H,0x04
+$7AC6  19          ADD HL,DE
+$7AC7  41          LD B,C
+$7AC8  62          LD H,D
+$7AC9  01 18 4A    LD BC,0x4A18
+$7ACC  00          NOP
+$7ACD  00          NOP
+$7ACE  1B          DEC DE
+$7ACF  C1          POP BC
+$7AD0  26 04       LD H,0x04
+$7AD2  1C          INC E
+$7AD3  41          LD B,C
+$7AD4  62          LD H,D
+$7AD5  01 18 46    LD BC,0x4618
+$7AD8  00          NOP
+$7AD9  00          NOP
+$7ADA  1A          LD A,(DE)
+$7ADB  C1          POP BC
+$7ADC  26 04       LD H,0x04
+$7ADE  19          ADD HL,DE
+$7ADF  41          LD B,C
+$7AE0  62          LD H,D
+$7AE1  01 18 46    LD BC,0x4618
+$7AE4  00          NOP
+$7AE5  00          NOP
+$7AE6  1B          DEC DE
+$7AE7  C1          POP BC
+$7AE8  26 04       LD H,0x04
+$7AEA  06 01       LD B,0x01
+$7AEC  62          LD H,D
+$7AED  01 14 04    LD BC,0x0414
+$7AF0  00          NOP
+$7AF1  00          NOP
+$7AF2  07          RLCA
+$7AF3  81          ADD A,C
+$7AF4  26 04       LD H,0x04
+$7AF6  04          INC B
+$7AF7  01 62 01    LD BC,0x0162
+$7AFA  15          DEC D
+$7AFB  04          INC B
+$7AFC  00          NOP
+$7AFD  00          NOP
+$7AFE  05          DEC B
+$7AFF  81          ADD A,C
+$7B00  C8          RET Z
+=== $7A32  999 instrs, ends RET at $7B01 ===
+$7A32  05          DEC B
+$7A33  21 00 00    LD HL,0x0000
+$7A36  29          ADD HL,HL
+$7A37  C1          POP BC
+$7A38  62          LD H,D
+$7A39  01 06 21    LD BC,0x2106
+$7A3C  62          LD H,D
+$7A3D  01 01 2E    LD BC,0x2E01
+$7A40  00          NOP
+$7A41  00          NOP
+$7A42  07          RLCA
+$7A43  A1          AND C
+$7A44  01 00 00    LD BC,0x0000
+$7A47  41          LD B,C
+$7A48  01 00 02    LD BC,0x0200
+$7A4B  46          LD B,(HL)
+$7A4C  00          NOP
+$7A4D  00          NOP
+$7A4E  01 C1 01    LD BC,0x01C1
+$7A51  00          NOP
+$7A52  02          LD (BC),A
+$7A53  C2 FA 11    JP NZ,0x11FA
+$7A56  04          INC B
+$7A57  01 00 00    LD BC,0x0000
+$7A5A  05          DEC B
+$7A5B  81          ADD A,C
+$7A5C  FA 11 06    JP M,0x0611
+$7A5F  01 00 00    LD BC,0x0000
+$7A62  07          RLCA
+$7A63  81          ADD A,C
+$7A64  26 04       LD H,0x04
+$7A66  04          INC B
+$7A67  01 00 00    LD BC,0x0000
+$7A6A  05          DEC B
+$7A6B  81          ADD A,C
+$7A6C  26 04       LD H,0x04
+$7A6E  06 01       LD B,0x01
+$7A70  00          NOP
+$7A71  00          NOP
+$7A72  07          RLCA
+$7A73  81          ADD A,C
+$7A74  01 00 00    LD BC,0x0000
+$7A77  41          LD B,C
+$7A78  01 00 02    LD BC,0x0200
+$7A7B  4E          LD C,(HL)
+$7A7C  00          NOP
+$7A7D  00          NOP
+$7A7E  01 C1 01    LD BC,0x01C1
+$7A81  00          NOP
+$7A82  00          NOP
+$7A83  41          LD B,C
+$7A84  02          LD (BC),A
+$7A85  00          NOP
+$7A86  04          INC B
+$7A87  4F          LD C,A
+$7A88  00          NOP
+$7A89  00          NOP
+$7A8A  01 C1 20    LD BC,0x20C1
+$7A8D  00          NOP
+$7A8E  0A          LD A,(BC)
+$7A8F  41          LD B,C
+$7A90  FF          RST 0x38
+$7A91  FF          RST 0x38
+$7A92  0A          LD A,(BC)
+$7A93  41          LD B,C
+$7A94  00          NOP
+$7A95  00          NOP
+$7A96  04          INC B
+$7A97  C1          POP BC
+$7A98  26 04       LD H,0x04
+$7A9A  06 01       LD B,0x01
+$7A9C  62          LD H,D
+$7A9D  01 14 02    LD BC,0x0214
+$7AA0  00          NOP
+$7AA1  00          NOP
+$7AA2  07          RLCA
+$7AA3  81          ADD A,C
+$7AA4  26 04       LD H,0x04
+$7AA6  04          INC B
+$7AA7  01 62 01    LD BC,0x0162
+$7AAA  15          DEC D
+$7AAB  02          LD (BC),A
+$7AAC  00          NOP
+$7AAD  00          NOP
+$7AAE  05          DEC B
+$7AAF  81          ADD A,C
+$7AB0  00          NOP
+$7AB1  00          NOP
+$7AB2  12          LD (DE),A
+$7AB3  81          ADD A,C
+$7AB4  00          NOP
+$7AB5  00          NOP
+$7AB6  13          INC DE
+$7AB7  81          ADD A,C
+$7AB8  26 04       LD H,0x04
+$7ABA  1C          INC E
+$7ABB  41          LD B,C
+$7ABC  62          LD H,D
+$7ABD  01 18 4A    LD BC,0x4A18
+$7AC0  00          NOP
+$7AC1  00          NOP
+$7AC2  1A          LD A,(DE)
+$7AC3  C1          POP BC
+$7AC4  26 04       LD H,0x04
+$7AC6  19          ADD HL,DE
+$7AC7  41          LD B,C
+$7AC8  62          LD H,D
+$7AC9  01 18 4A    LD BC,0x4A18
+$7ACC  00          NOP
+$7ACD  00          NOP
+$7ACE  1B          DEC DE
+$7ACF  C1          POP BC
+$7AD0  26 04       LD H,0x04
+$7AD2  1C          INC E
+$7AD3  41          LD B,C
+$7AD4  62          LD H,D
+$7AD5  01 18 46    LD BC,0x4618
+$7AD8  00          NOP
+$7AD9  00          NOP
+$7ADA  1A          LD A,(DE)
+$7ADB  C1          POP BC
+$7ADC  26 04       LD H,0x04
+$7ADE  19          ADD HL,DE
+$7ADF  41          LD B,C
+$7AE0  62          LD H,D
+$7AE1  01 18 46    LD BC,0x4618
+$7AE4  00          NOP
+$7AE5  00          NOP
+$7AE6  1B          DEC DE
+$7AE7  C1          POP BC
+$7AE8  26 04       LD H,0x04
+$7AEA  06 01       LD B,0x01
+$7AEC  62          LD H,D
+$7AED  01 14 04    LD BC,0x0414
+$7AF0  00          NOP
+$7AF1  00          NOP
+$7AF2  07          RLCA
+$7AF3  81          ADD A,C
+$7AF4  26 04       LD H,0x04
+$7AF6  04          INC B
+$7AF7  01 62 01    LD BC,0x0162
+$7AFA  15          DEC D
+$7AFB  04          INC B
+$7AFC  00          NOP
+$7AFD  00          NOP
+$7AFE  05          DEC B
+$7AFF  81          ADD A,C
+$7B00  C8          RET Z
+=== $7A4F  999 instrs, ends RET at $7B01 ===
+$7A4F  C1          POP BC
+$7A50  01 00 02    LD BC,0x0200
+$7A53  C2 FA 11    JP NZ,0x11FA
+$7A56  04          INC B
+$7A57  01 00 00    LD BC,0x0000
+$7A5A  05          DEC B
+$7A5B  81          ADD A,C
+$7A5C  FA 11 06    JP M,0x0611
+$7A5F  01 00 00    LD BC,0x0000
+$7A62  07          RLCA
+$7A63  81          ADD A,C
+$7A64  26 04       LD H,0x04
+$7A66  04          INC B
+$7A67  01 00 00    LD BC,0x0000
+$7A6A  05          DEC B
+$7A6B  81          ADD A,C
+$7A6C  26 04       LD H,0x04
+$7A6E  06 01       LD B,0x01
+$7A70  00          NOP
+$7A71  00          NOP
+$7A72  07          RLCA
+$7A73  81          ADD A,C
+$7A74  01 00 00    LD BC,0x0000
+$7A77  41          LD B,C
+$7A78  01 00 02    LD BC,0x0200
+$7A7B  4E          LD C,(HL)
+$7A7C  00          NOP
+$7A7D  00          NOP
+$7A7E  01 C1 01    LD BC,0x01C1
+$7A81  00          NOP
+$7A82  00          NOP
+$7A83  41          LD B,C
+$7A84  02          LD (BC),A
+$7A85  00          NOP
+$7A86  04          INC B
+$7A87  4F          LD C,A
+$7A88  00          NOP
+$7A89  00          NOP
+$7A8A  01 C1 20    LD BC,0x20C1
+$7A8D  00          NOP
+$7A8E  0A          LD A,(BC)
+$7A8F  41          LD B,C
+$7A90  FF          RST 0x38
+$7A91  FF          RST 0x38
+$7A92  0A          LD A,(BC)
+$7A93  41          LD B,C
+$7A94  00          NOP
+$7A95  00          NOP
+$7A96  04          INC B
+$7A97  C1          POP BC
+$7A98  26 04       LD H,0x04
+$7A9A  06 01       LD B,0x01
+$7A9C  62          LD H,D
+$7A9D  01 14 02    LD BC,0x0214
+$7AA0  00          NOP
+$7AA1  00          NOP
+$7AA2  07          RLCA
+$7AA3  81          ADD A,C
+$7AA4  26 04       LD H,0x04
+$7AA6  04          INC B
+$7AA7  01 62 01    LD BC,0x0162
+$7AAA  15          DEC D
+$7AAB  02          LD (BC),A
+$7AAC  00          NOP
+$7AAD  00          NOP
+$7AAE  05          DEC B
+$7AAF  81          ADD A,C
+$7AB0  00          NOP
+$7AB1  00          NOP
+$7AB2  12          LD (DE),A
+$7AB3  81          ADD A,C
+$7AB4  00          NOP
+$7AB5  00          NOP
+$7AB6  13          INC DE
+$7AB7  81          ADD A,C
+$7AB8  26 04       LD H,0x04
+$7ABA  1C          INC E
+$7ABB  41          LD B,C
+$7ABC  62          LD H,D
+$7ABD  01 18 4A    LD BC,0x4A18
+$7AC0  00          NOP
+$7AC1  00          NOP
+$7AC2  1A          LD A,(DE)
+$7AC3  C1          POP BC
+$7AC4  26 04       LD H,0x04
+$7AC6  19          ADD HL,DE
+$7AC7  41          LD B,C
+$7AC8  62          LD H,D
+$7AC9  01 18 4A    LD BC,0x4A18
+$7ACC  00          NOP
+$7ACD  00          NOP
+$7ACE  1B          DEC DE
+$7ACF  C1          POP BC
+$7AD0  26 04       LD H,0x04
+$7AD2  1C          INC E
+$7AD3  41          LD B,C
+$7AD4  62          LD H,D
+$7AD5  01 18 46    LD BC,0x4618
+$7AD8  00          NOP
+$7AD9  00          NOP
+$7ADA  1A          LD A,(DE)
+$7ADB  C1          POP BC
+$7ADC  26 04       LD H,0x04
+$7ADE  19          ADD HL,DE
+$7ADF  41          LD B,C
+$7AE0  62          LD H,D
+$7AE1  01 18 46    LD BC,0x4618
+$7AE4  00          NOP
+$7AE5  00          NOP
+$7AE6  1B          DEC DE
+$7AE7  C1          POP BC
+$7AE8  26 04       LD H,0x04
+$7AEA  06 01       LD B,0x01
+$7AEC  62          LD H,D
+$7AED  01 14 04    LD BC,0x0414
+$7AF0  00          NOP
+$7AF1  00          NOP
+$7AF2  07          RLCA
+$7AF3  81          ADD A,C
+$7AF4  26 04       LD H,0x04
+$7AF6  04          INC B
+$7AF7  01 62 01    LD BC,0x0162
+$7AFA  15          DEC D
+$7AFB  04          INC B
+$7AFC  00          NOP
+$7AFD  00          NOP
+$7AFE  05          DEC B
+$7AFF  81          ADD A,C
+$7B00  C8          RET Z
+=== $87AB  999 instrs, ends RET at $895E ===
+$87AB  02          LD (BC),A
+$87AC  80          ADD A,B
+$87AD  02          LD (BC),A
+$87AE  88          ADC A,B
+$87AF  02          LD (BC),A
+$87B0  99          SBC A,C
+$87B1  04          INC B
+$87B2  CD 10 66    CALL 0x6610
+$87B5  04          INC B
+$87B6  73          LD (HL),E
+$87B7  02          LD (BC),A
+$87B8  66          LD H,(HL)
+$87B9  02          LD (BC),A
+$87BA  4C          LD C,H
+$87BB  02          LD (BC),A
+$87BC  56          LD D,(HL)
+$87BD  02          LD (BC),A
+$87BE  5B          LD E,E
+$87BF  02          LD (BC),A
+$87C0  56          LD D,(HL)
+$87C1  02          LD (BC),A
+$87C2  66          LD H,(HL)
+$87C3  04          INC B
+$87C4  73          LD (HL),E
+$87C5  02          LD (BC),A
+$87C6  66          LD H,(HL)
+$87C7  02          LD (BC),A
+$87C8  4C          LD C,H
+$87C9  04          INC B
+$87CA  56          LD D,(HL)
+$87CB  02          LD (BC),A
+$87CC  5B          LD E,E
+$87CD  02          LD (BC),A
+$87CE  CD 06 88    CALL 0x8806
+$87D1  02          LD (BC),A
+$87D2  66          LD H,(HL)
+$87D3  04          INC B
+$87D4  88          ADC A,B
+$87D5  04          INC B
+$87D6  CD 06 88    CALL 0x8806
+$87D9  02          LD (BC),A
+$87DA  66          LD H,(HL)
+$87DB  04          INC B
+$87DC  88          ADC A,B
+$87DD  04          INC B
+$87DE  00          NOP
+$87DF  06 AC       LD B,0xAC
+$87E1  04          INC B
+$87E2  00          NOP
+$87E3  02          LD (BC),A
+$87E4  AC          XOR H
+$87E5  02          LD (BC),A
+$87E6  80          ADD A,B
+$87E7  02          LD (BC),A
+$87E8  00          NOP
+$87E9  06 AC       LD B,0xAC
+$87EB  04          INC B
+$87EC  00          NOP
+$87ED  02          LD (BC),A
+$87EE  AC          XOR H
+$87EF  02          LD (BC),A
+$87F0  80          ADD A,B
+$87F1  02          LD (BC),A
+$87F2  80          ADD A,B
+$87F3  04          INC B
+$87F4  88          ADC A,B
+$87F5  02          LD (BC),A
+$87F6  00          NOP
+$87F7  02          LD (BC),A
+$87F8  99          SBC A,C
+$87F9  02          LD (BC),A
+$87FA  00          NOP
+$87FB  02          LD (BC),A
+$87FC  88          ADC A,B
+$87FD  02          LD (BC),A
+$87FE  AC          XOR H
+$87FF  02          LD (BC),A
+$8800  66          LD H,(HL)
+$8801  02          LD (BC),A
+$8802  CD 02 73    CALL 0x7302
+$8805  02          LD (BC),A
+$8806  CD 02 80    CALL 0x8002
+$8809  02          LD (BC),A
+$880A  88          ADC A,B
+$880B  02          LD (BC),A
+$880C  99          SBC A,C
+$880D  04          INC B
+$880E  CD 10 66    CALL 0x6610
+$8811  02          LD (BC),A
+$8812  CD 02 73    CALL 0x7302
+$8815  02          LD (BC),A
+$8816  CD 02 80    CALL 0x8002
+$8819  02          LD (BC),A
+$881A  88          ADC A,B
+$881B  02          LD (BC),A
+$881C  99          SBC A,C
+$881D  04          INC B
+$881E  CD 10 66    CALL 0x6610
+$8821  04          INC B
+$8822  73          LD (HL),E
+$8823  02          LD (BC),A
+$8824  66          LD H,(HL)
+$8825  02          LD (BC),A
+$8826  4C          LD C,H
+$8827  02          LD (BC),A
+$8828  56          LD D,(HL)
+$8829  02          LD (BC),A
+$882A  5B          LD E,E
+$882B  02          LD (BC),A
+$882C  56          LD D,(HL)
+$882D  02          LD (BC),A
+$882E  66          LD H,(HL)
+$882F  04          INC B
+$8830  73          LD (HL),E
+$8831  02          LD (BC),A
+$8832  66          LD H,(HL)
+$8833  02          LD (BC),A
+$8834  4C          LD C,H
+$8835  04          INC B
+$8836  56          LD D,(HL)
+$8837  02          LD (BC),A
+$8838  5B          LD E,E
+$8839  02          LD (BC),A
+$883A  CD 06 88    CALL 0x8806
+$883D  02          LD (BC),A
+$883E  66          LD H,(HL)
+$883F  04          INC B
+$8840  88          ADC A,B
+$8841  04          INC B
+$8842  CD 06 88    CALL 0x8806
+$8845  02          LD (BC),A
+$8846  66          LD H,(HL)
+$8847  04          INC B
+$8848  88          ADC A,B
+$8849  04          INC B
+$884A  66          LD H,(HL)
+$884B  04          INC B
+$884C  73          LD (HL),E
+$884D  02          LD (BC),A
+$884E  66          LD H,(HL)
+$884F  02          LD (BC),A
+$8850  4C          LD C,H
+$8851  02          LD (BC),A
+$8852  56          LD D,(HL)
+$8853  02          LD (BC),A
+$8854  5B          LD E,E
+$8855  02          LD (BC),A
+$8856  56          LD D,(HL)
+$8857  02          LD (BC),A
+$8858  66          LD H,(HL)
+$8859  04          INC B
+$885A  73          LD (HL),E
+$885B  02          LD (BC),A
+$885C  66          LD H,(HL)
+$885D  02          LD (BC),A
+$885E  4C          LD C,H
+$885F  04          INC B
+$8860  56          LD D,(HL)
+$8861  02          LD (BC),A
+$8862  5B          LD E,E
+$8863  02          LD (BC),A
+$8864  66          LD H,(HL)
+$8865  02          LD (BC),A
+$8866  CD 02 73    CALL 0x7302
+$8869  02          LD (BC),A
+$886A  CD 02 80    CALL 0x8002
+$886D  02          LD (BC),A
+$886E  88          ADC A,B
+$886F  02          LD (BC),A
+$8870  99          SBC A,C
+$8871  04          INC B
+$8872  88          ADC A,B
+$8873  02          LD (BC),A
+$8874  73          LD (HL),E
+$8875  02          LD (BC),A
+$8876  66          LD H,(HL)
+$8877  02          LD (BC),A
+$8878  73          LD (HL),E
+$8879  02          LD (BC),A
+$887A  66          LD H,(HL)
+$887B  01 73 01    LD BC,0x0173
+$887E  88          ADC A,B
+$887F  02          LD (BC),A
+$8880  99          SBC A,C
+$8881  02          LD (BC),A
+$8882  AC          XOR H
+$8883  02          LD (BC),A
+$8884  CD 06 CD    CALL 0xCD06
+$8887  02          LD (BC),A
+$8888  CD 04 CD    CALL 0xCD04
+$888B  04          INC B
+$888C  AC          XOR H
+$888D  06 AC       LD B,0xAC
+$888F  02          LD (BC),A
+$8890  AC          XOR H
+$8891  04          INC B
+$8892  80          ADD A,B
+$8893  02          LD (BC),A
+$8894  88          ADC A,B
+$8895  02          LD (BC),A
+$8896  99          SBC A,C
+$8897  10 FF       DJNZ 0x8898
+$8899  C3 9E 78    JP 0x789E
+$889C  18 06       JR 0x88A4
+$889E  31 80 5B    LD SP,0x5B80
+$88A1  CD 7F 93    CALL 0x937F
+$88A4  31 80 5B    LD SP,0x5B80
+$88A7  AF          XOR A
+$88A8  32 F8 DC    LD (0xDCF8),A
+$88AB  CD 23 8B    CALL 0x8B23
+$88AE  CD A7 8F    CALL 0x8FA7
+$88B1  C3 72 7A    JP 0x7A72
+$88B4  AF          XOR A
+$88B5  32 1F DB    LD (0xDB1F),A
+$88B8  32 5F DA    LD (0xDA5F),A
+$88BB  32 7B D8    LD (0xD87B),A
+$88BE  32 1A DB    LD (0xDB1A),A
+$88C1  32 39 DC    LD (0xDC39),A
+$88C4  3D          DEC A
+$88C5  32 39 D9    LD (0xD939),A
+$88C8  CD 2C 7B    CALL 0x7B2C
+$88CB  3E 14       LD A,0x14
+$88CD  32 3B D9    LD (0xD93B),A
+$88D0  3E 80       LD A,0x80
+$88D2  32 3A D9    LD (0xD93A),A
+$88D5  21 78 DB    LD HL,0xDB78
+$88D8  3A 9E D9    LD A,(0xD99E)
+$88DB  FE 01       CP 0x01
+$88DD  28 03       JR Z,0x88E2
+$88DF  21 D8 DB    LD HL,0xDBD8
+$88E2  22 1B DB    LD (0xDB1B),HL
+$88E5  DD 2A 1B DB LD IX,(0xDB1B)
+$88E9  DD 36 07 00 LD (IX+0x07),0x00
+$88ED  CD 31 85    CALL 0x8531
+$88F0  CD ED 7B    CALL 0x7BED
+$88F3  CD A7 8F    CALL 0x8FA7
+$88F6  CD A5 7B    CALL 0x7BA5
+$88F9  3E 22       LD A,0x22
+$88FB  21 A4 79    LD HL,0x79A4
+$88FE  77          LD (HL),A
+$88FF  3A F8 DC    LD A,(0xDCF8)
+$8902  3C          INC A
+$8903  28 1F       JR Z,0x8924
+$8905  3E 0F       LD A,0x0F
+$8907  77          LD (HL),A
+$8908  3E 0F       LD A,0x0F
+$890A  CD 34 8F    CALL 0x8F34
+$890D  3A 9E D9    LD A,(0xD99E)
+$8910  C6 B0       ADD A,0xB0
+$8912  32 79 8D    LD (0x8D79),A
+$8915  3E 12       LD A,0x12
+$8917  CD 34 8F    CALL 0x8F34
+$891A  3E 1D       LD A,0x1D
+$891C  CD 34 8F    CALL 0x8F34
+$891F  06 19       LD B,0x19
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $8806  999 instrs, ends RET at $895E ===
+$8806  CD 02 80    CALL 0x8002
+$8809  02          LD (BC),A
+$880A  88          ADC A,B
+$880B  02          LD (BC),A
+$880C  99          SBC A,C
+$880D  04          INC B
+$880E  CD 10 66    CALL 0x6610
+$8811  02          LD (BC),A
+$8812  CD 02 73    CALL 0x7302
+$8815  02          LD (BC),A
+$8816  CD 02 80    CALL 0x8002
+$8819  02          LD (BC),A
+$881A  88          ADC A,B
+$881B  02          LD (BC),A
+$881C  99          SBC A,C
+$881D  04          INC B
+$881E  CD 10 66    CALL 0x6610
+$8821  04          INC B
+$8822  73          LD (HL),E
+$8823  02          LD (BC),A
+$8824  66          LD H,(HL)
+$8825  02          LD (BC),A
+$8826  4C          LD C,H
+$8827  02          LD (BC),A
+$8828  56          LD D,(HL)
+$8829  02          LD (BC),A
+$882A  5B          LD E,E
+$882B  02          LD (BC),A
+$882C  56          LD D,(HL)
+$882D  02          LD (BC),A
+$882E  66          LD H,(HL)
+$882F  04          INC B
+$8830  73          LD (HL),E
+$8831  02          LD (BC),A
+$8832  66          LD H,(HL)
+$8833  02          LD (BC),A
+$8834  4C          LD C,H
+$8835  04          INC B
+$8836  56          LD D,(HL)
+$8837  02          LD (BC),A
+$8838  5B          LD E,E
+$8839  02          LD (BC),A
+$883A  CD 06 88    CALL 0x8806
+$883D  02          LD (BC),A
+$883E  66          LD H,(HL)
+$883F  04          INC B
+$8840  88          ADC A,B
+$8841  04          INC B
+$8842  CD 06 88    CALL 0x8806
+$8845  02          LD (BC),A
+$8846  66          LD H,(HL)
+$8847  04          INC B
+$8848  88          ADC A,B
+$8849  04          INC B
+$884A  66          LD H,(HL)
+$884B  04          INC B
+$884C  73          LD (HL),E
+$884D  02          LD (BC),A
+$884E  66          LD H,(HL)
+$884F  02          LD (BC),A
+$8850  4C          LD C,H
+$8851  02          LD (BC),A
+$8852  56          LD D,(HL)
+$8853  02          LD (BC),A
+$8854  5B          LD E,E
+$8855  02          LD (BC),A
+$8856  56          LD D,(HL)
+$8857  02          LD (BC),A
+$8858  66          LD H,(HL)
+$8859  04          INC B
+$885A  73          LD (HL),E
+$885B  02          LD (BC),A
+$885C  66          LD H,(HL)
+$885D  02          LD (BC),A
+$885E  4C          LD C,H
+$885F  04          INC B
+$8860  56          LD D,(HL)
+$8861  02          LD (BC),A
+$8862  5B          LD E,E
+$8863  02          LD (BC),A
+$8864  66          LD H,(HL)
+$8865  02          LD (BC),A
+$8866  CD 02 73    CALL 0x7302
+$8869  02          LD (BC),A
+$886A  CD 02 80    CALL 0x8002
+$886D  02          LD (BC),A
+$886E  88          ADC A,B
+$886F  02          LD (BC),A
+$8870  99          SBC A,C
+$8871  04          INC B
+$8872  88          ADC A,B
+$8873  02          LD (BC),A
+$8874  73          LD (HL),E
+$8875  02          LD (BC),A
+$8876  66          LD H,(HL)
+$8877  02          LD (BC),A
+$8878  73          LD (HL),E
+$8879  02          LD (BC),A
+$887A  66          LD H,(HL)
+$887B  01 73 01    LD BC,0x0173
+$887E  88          ADC A,B
+$887F  02          LD (BC),A
+$8880  99          SBC A,C
+$8881  02          LD (BC),A
+$8882  AC          XOR H
+$8883  02          LD (BC),A
+$8884  CD 06 CD    CALL 0xCD06
+$8887  02          LD (BC),A
+$8888  CD 04 CD    CALL 0xCD04
+$888B  04          INC B
+$888C  AC          XOR H
+$888D  06 AC       LD B,0xAC
+$888F  02          LD (BC),A
+$8890  AC          XOR H
+$8891  04          INC B
+$8892  80          ADD A,B
+$8893  02          LD (BC),A
+$8894  88          ADC A,B
+$8895  02          LD (BC),A
+$8896  99          SBC A,C
+$8897  10 FF       DJNZ 0x8898
+$8899  C3 9E 78    JP 0x789E
+$889C  18 06       JR 0x88A4
+$889E  31 80 5B    LD SP,0x5B80
+$88A1  CD 7F 93    CALL 0x937F
+$88A4  31 80 5B    LD SP,0x5B80
+$88A7  AF          XOR A
+$88A8  32 F8 DC    LD (0xDCF8),A
+$88AB  CD 23 8B    CALL 0x8B23
+$88AE  CD A7 8F    CALL 0x8FA7
+$88B1  C3 72 7A    JP 0x7A72
+$88B4  AF          XOR A
+$88B5  32 1F DB    LD (0xDB1F),A
+$88B8  32 5F DA    LD (0xDA5F),A
+$88BB  32 7B D8    LD (0xD87B),A
+$88BE  32 1A DB    LD (0xDB1A),A
+$88C1  32 39 DC    LD (0xDC39),A
+$88C4  3D          DEC A
+$88C5  32 39 D9    LD (0xD939),A
+$88C8  CD 2C 7B    CALL 0x7B2C
+$88CB  3E 14       LD A,0x14
+$88CD  32 3B D9    LD (0xD93B),A
+$88D0  3E 80       LD A,0x80
+$88D2  32 3A D9    LD (0xD93A),A
+$88D5  21 78 DB    LD HL,0xDB78
+$88D8  3A 9E D9    LD A,(0xD99E)
+$88DB  FE 01       CP 0x01
+$88DD  28 03       JR Z,0x88E2
+$88DF  21 D8 DB    LD HL,0xDBD8
+$88E2  22 1B DB    LD (0xDB1B),HL
+$88E5  DD 2A 1B DB LD IX,(0xDB1B)
+$88E9  DD 36 07 00 LD (IX+0x07),0x00
+$88ED  CD 31 85    CALL 0x8531
+$88F0  CD ED 7B    CALL 0x7BED
+$88F3  CD A7 8F    CALL 0x8FA7
+$88F6  CD A5 7B    CALL 0x7BA5
+$88F9  3E 22       LD A,0x22
+$88FB  21 A4 79    LD HL,0x79A4
+$88FE  77          LD (HL),A
+$88FF  3A F8 DC    LD A,(0xDCF8)
+$8902  3C          INC A
+$8903  28 1F       JR Z,0x8924
+$8905  3E 0F       LD A,0x0F
+$8907  77          LD (HL),A
+$8908  3E 0F       LD A,0x0F
+$890A  CD 34 8F    CALL 0x8F34
+$890D  3A 9E D9    LD A,(0xD99E)
+$8910  C6 B0       ADD A,0xB0
+$8912  32 79 8D    LD (0x8D79),A
+$8915  3E 12       LD A,0x12
+$8917  CD 34 8F    CALL 0x8F34
+$891A  3E 1D       LD A,0x1D
+$891C  CD 34 8F    CALL 0x8F34
+$891F  06 19       LD B,0x19
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $884E  999 instrs, ends RET at $895E ===
+$884E  66          LD H,(HL)
+$884F  02          LD (BC),A
+$8850  4C          LD C,H
+$8851  02          LD (BC),A
+$8852  56          LD D,(HL)
+$8853  02          LD (BC),A
+$8854  5B          LD E,E
+$8855  02          LD (BC),A
+$8856  56          LD D,(HL)
+$8857  02          LD (BC),A
+$8858  66          LD H,(HL)
+$8859  04          INC B
+$885A  73          LD (HL),E
+$885B  02          LD (BC),A
+$885C  66          LD H,(HL)
+$885D  02          LD (BC),A
+$885E  4C          LD C,H
+$885F  04          INC B
+$8860  56          LD D,(HL)
+$8861  02          LD (BC),A
+$8862  5B          LD E,E
+$8863  02          LD (BC),A
+$8864  66          LD H,(HL)
+$8865  02          LD (BC),A
+$8866  CD 02 73    CALL 0x7302
+$8869  02          LD (BC),A
+$886A  CD 02 80    CALL 0x8002
+$886D  02          LD (BC),A
+$886E  88          ADC A,B
+$886F  02          LD (BC),A
+$8870  99          SBC A,C
+$8871  04          INC B
+$8872  88          ADC A,B
+$8873  02          LD (BC),A
+$8874  73          LD (HL),E
+$8875  02          LD (BC),A
+$8876  66          LD H,(HL)
+$8877  02          LD (BC),A
+$8878  73          LD (HL),E
+$8879  02          LD (BC),A
+$887A  66          LD H,(HL)
+$887B  01 73 01    LD BC,0x0173
+$887E  88          ADC A,B
+$887F  02          LD (BC),A
+$8880  99          SBC A,C
+$8881  02          LD (BC),A
+$8882  AC          XOR H
+$8883  02          LD (BC),A
+$8884  CD 06 CD    CALL 0xCD06
+$8887  02          LD (BC),A
+$8888  CD 04 CD    CALL 0xCD04
+$888B  04          INC B
+$888C  AC          XOR H
+$888D  06 AC       LD B,0xAC
+$888F  02          LD (BC),A
+$8890  AC          XOR H
+$8891  04          INC B
+$8892  80          ADD A,B
+$8893  02          LD (BC),A
+$8894  88          ADC A,B
+$8895  02          LD (BC),A
+$8896  99          SBC A,C
+$8897  10 FF       DJNZ 0x8898
+$8899  C3 9E 78    JP 0x789E
+$889C  18 06       JR 0x88A4
+$889E  31 80 5B    LD SP,0x5B80
+$88A1  CD 7F 93    CALL 0x937F
+$88A4  31 80 5B    LD SP,0x5B80
+$88A7  AF          XOR A
+$88A8  32 F8 DC    LD (0xDCF8),A
+$88AB  CD 23 8B    CALL 0x8B23
+$88AE  CD A7 8F    CALL 0x8FA7
+$88B1  C3 72 7A    JP 0x7A72
+$88B4  AF          XOR A
+$88B5  32 1F DB    LD (0xDB1F),A
+$88B8  32 5F DA    LD (0xDA5F),A
+$88BB  32 7B D8    LD (0xD87B),A
+$88BE  32 1A DB    LD (0xDB1A),A
+$88C1  32 39 DC    LD (0xDC39),A
+$88C4  3D          DEC A
+$88C5  32 39 D9    LD (0xD939),A
+$88C8  CD 2C 7B    CALL 0x7B2C
+$88CB  3E 14       LD A,0x14
+$88CD  32 3B D9    LD (0xD93B),A
+$88D0  3E 80       LD A,0x80
+$88D2  32 3A D9    LD (0xD93A),A
+$88D5  21 78 DB    LD HL,0xDB78
+$88D8  3A 9E D9    LD A,(0xD99E)
+$88DB  FE 01       CP 0x01
+$88DD  28 03       JR Z,0x88E2
+$88DF  21 D8 DB    LD HL,0xDBD8
+$88E2  22 1B DB    LD (0xDB1B),HL
+$88E5  DD 2A 1B DB LD IX,(0xDB1B)
+$88E9  DD 36 07 00 LD (IX+0x07),0x00
+$88ED  CD 31 85    CALL 0x8531
+$88F0  CD ED 7B    CALL 0x7BED
+$88F3  CD A7 8F    CALL 0x8FA7
+$88F6  CD A5 7B    CALL 0x7BA5
+$88F9  3E 22       LD A,0x22
+$88FB  21 A4 79    LD HL,0x79A4
+$88FE  77          LD (HL),A
+$88FF  3A F8 DC    LD A,(0xDCF8)
+$8902  3C          INC A
+$8903  28 1F       JR Z,0x8924
+$8905  3E 0F       LD A,0x0F
+$8907  77          LD (HL),A
+$8908  3E 0F       LD A,0x0F
+$890A  CD 34 8F    CALL 0x8F34
+$890D  3A 9E D9    LD A,(0xD99E)
+$8910  C6 B0       ADD A,0xB0
+$8912  32 79 8D    LD (0x8D79),A
+$8915  3E 12       LD A,0x12
+$8917  CD 34 8F    CALL 0x8F34
+$891A  3E 1D       LD A,0x1D
+$891C  CD 34 8F    CALL 0x8F34
+$891F  06 19       LD B,0x19
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $8856  999 instrs, ends RET at $895E ===
+$8856  56          LD D,(HL)
+$8857  02          LD (BC),A
+$8858  66          LD H,(HL)
+$8859  04          INC B
+$885A  73          LD (HL),E
+$885B  02          LD (BC),A
+$885C  66          LD H,(HL)
+$885D  02          LD (BC),A
+$885E  4C          LD C,H
+$885F  04          INC B
+$8860  56          LD D,(HL)
+$8861  02          LD (BC),A
+$8862  5B          LD E,E
+$8863  02          LD (BC),A
+$8864  66          LD H,(HL)
+$8865  02          LD (BC),A
+$8866  CD 02 73    CALL 0x7302
+$8869  02          LD (BC),A
+$886A  CD 02 80    CALL 0x8002
+$886D  02          LD (BC),A
+$886E  88          ADC A,B
+$886F  02          LD (BC),A
+$8870  99          SBC A,C
+$8871  04          INC B
+$8872  88          ADC A,B
+$8873  02          LD (BC),A
+$8874  73          LD (HL),E
+$8875  02          LD (BC),A
+$8876  66          LD H,(HL)
+$8877  02          LD (BC),A
+$8878  73          LD (HL),E
+$8879  02          LD (BC),A
+$887A  66          LD H,(HL)
+$887B  01 73 01    LD BC,0x0173
+$887E  88          ADC A,B
+$887F  02          LD (BC),A
+$8880  99          SBC A,C
+$8881  02          LD (BC),A
+$8882  AC          XOR H
+$8883  02          LD (BC),A
+$8884  CD 06 CD    CALL 0xCD06
+$8887  02          LD (BC),A
+$8888  CD 04 CD    CALL 0xCD04
+$888B  04          INC B
+$888C  AC          XOR H
+$888D  06 AC       LD B,0xAC
+$888F  02          LD (BC),A
+$8890  AC          XOR H
+$8891  04          INC B
+$8892  80          ADD A,B
+$8893  02          LD (BC),A
+$8894  88          ADC A,B
+$8895  02          LD (BC),A
+$8896  99          SBC A,C
+$8897  10 FF       DJNZ 0x8898
+$8899  C3 9E 78    JP 0x789E
+$889C  18 06       JR 0x88A4
+$889E  31 80 5B    LD SP,0x5B80
+$88A1  CD 7F 93    CALL 0x937F
+$88A4  31 80 5B    LD SP,0x5B80
+$88A7  AF          XOR A
+$88A8  32 F8 DC    LD (0xDCF8),A
+$88AB  CD 23 8B    CALL 0x8B23
+$88AE  CD A7 8F    CALL 0x8FA7
+$88B1  C3 72 7A    JP 0x7A72
+$88B4  AF          XOR A
+$88B5  32 1F DB    LD (0xDB1F),A
+$88B8  32 5F DA    LD (0xDA5F),A
+$88BB  32 7B D8    LD (0xD87B),A
+$88BE  32 1A DB    LD (0xDB1A),A
+$88C1  32 39 DC    LD (0xDC39),A
+$88C4  3D          DEC A
+$88C5  32 39 D9    LD (0xD939),A
+$88C8  CD 2C 7B    CALL 0x7B2C
+$88CB  3E 14       LD A,0x14
+$88CD  32 3B D9    LD (0xD93B),A
+$88D0  3E 80       LD A,0x80
+$88D2  32 3A D9    LD (0xD93A),A
+$88D5  21 78 DB    LD HL,0xDB78
+$88D8  3A 9E D9    LD A,(0xD99E)
+$88DB  FE 01       CP 0x01
+$88DD  28 03       JR Z,0x88E2
+$88DF  21 D8 DB    LD HL,0xDBD8
+$88E2  22 1B DB    LD (0xDB1B),HL
+$88E5  DD 2A 1B DB LD IX,(0xDB1B)
+$88E9  DD 36 07 00 LD (IX+0x07),0x00
+$88ED  CD 31 85    CALL 0x8531
+$88F0  CD ED 7B    CALL 0x7BED
+$88F3  CD A7 8F    CALL 0x8FA7
+$88F6  CD A5 7B    CALL 0x7BA5
+$88F9  3E 22       LD A,0x22
+$88FB  21 A4 79    LD HL,0x79A4
+$88FE  77          LD (HL),A
+$88FF  3A F8 DC    LD A,(0xDCF8)
+$8902  3C          INC A
+$8903  28 1F       JR Z,0x8924
+$8905  3E 0F       LD A,0x0F
+$8907  77          LD (HL),A
+$8908  3E 0F       LD A,0x0F
+$890A  CD 34 8F    CALL 0x8F34
+$890D  3A 9E D9    LD A,(0xD99E)
+$8910  C6 B0       ADD A,0xB0
+$8912  32 79 8D    LD (0x8D79),A
+$8915  3E 12       LD A,0x12
+$8917  CD 34 8F    CALL 0x8F34
+$891A  3E 1D       LD A,0x1D
+$891C  CD 34 8F    CALL 0x8F34
+$891F  06 19       LD B,0x19
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $88B0  999 instrs, ends RET at $895E ===
+$88B0  8F          ADC A,A
+$88B1  C3 72 7A    JP 0x7A72
+$88B4  AF          XOR A
+$88B5  32 1F DB    LD (0xDB1F),A
+$88B8  32 5F DA    LD (0xDA5F),A
+$88BB  32 7B D8    LD (0xD87B),A
+$88BE  32 1A DB    LD (0xDB1A),A
+$88C1  32 39 DC    LD (0xDC39),A
+$88C4  3D          DEC A
+$88C5  32 39 D9    LD (0xD939),A
+$88C8  CD 2C 7B    CALL 0x7B2C
+$88CB  3E 14       LD A,0x14
+$88CD  32 3B D9    LD (0xD93B),A
+$88D0  3E 80       LD A,0x80
+$88D2  32 3A D9    LD (0xD93A),A
+$88D5  21 78 DB    LD HL,0xDB78
+$88D8  3A 9E D9    LD A,(0xD99E)
+$88DB  FE 01       CP 0x01
+$88DD  28 03       JR Z,0x88E2
+$88DF  21 D8 DB    LD HL,0xDBD8
+$88E2  22 1B DB    LD (0xDB1B),HL
+$88E5  DD 2A 1B DB LD IX,(0xDB1B)
+$88E9  DD 36 07 00 LD (IX+0x07),0x00
+$88ED  CD 31 85    CALL 0x8531
+$88F0  CD ED 7B    CALL 0x7BED
+$88F3  CD A7 8F    CALL 0x8FA7
+$88F6  CD A5 7B    CALL 0x7BA5
+$88F9  3E 22       LD A,0x22
+$88FB  21 A4 79    LD HL,0x79A4
+$88FE  77          LD (HL),A
+$88FF  3A F8 DC    LD A,(0xDCF8)
+$8902  3C          INC A
+$8903  28 1F       JR Z,0x8924
+$8905  3E 0F       LD A,0x0F
+$8907  77          LD (HL),A
+$8908  3E 0F       LD A,0x0F
+$890A  CD 34 8F    CALL 0x8F34
+$890D  3A 9E D9    LD A,(0xD99E)
+$8910  C6 B0       ADD A,0xB0
+$8912  32 79 8D    LD (0x8D79),A
+$8915  3E 12       LD A,0x12
+$8917  CD 34 8F    CALL 0x8F34
+$891A  3E 1D       LD A,0x1D
+$891C  CD 34 8F    CALL 0x8F34
+$891F  06 19       LD B,0x19
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $8920  999 instrs, ends RET at $895E ===
+$8920  19          ADD HL,DE
+$8921  CD E7 7B    CALL 0x7BE7
+$8924  CD 7C 93    CALL 0x937C
+$8927  DD 2A 1B DB LD IX,(0xDB1B)
+$892B  DD 6E 05    LD IXL,(IX+0x05)
+$892E  DD 66 06    LD IXH,(IX+0x06)
+$8931  23          INC HL
+$8932  23          INC HL
+$8933  23          INC HL
+$8934  11 3A 8D    LD DE,0x8D3A
+$8937  01 09 00    LD BC,0x0009
+$893A  ED B0       LDIR
+$893C  EB          EX DE,HL
+$893D  36 A0       LD (HL),0xA0
+$893F  3E 02       LD A,0x02
+$8941  32 18 DB    LD (0xDB18),A
+$8944  3D          DEC A
+$8945  32 19 DB    LD (0xDB19),A
+$8948  3E FF       LD A,0xFF
+$894A  32 38 DC    LD (0xDC38),A
+$894D  CD 82 93    CALL 0x9382
+$8950  21 72 FF    LD HL,0xFF72
+$8953  11 10 00    LD DE,0x0010
+$8956  06 07       LD B,0x07
+$8958  36 00       LD (HL),0x00
+$895A  19          ADD HL,DE
+$895B  10 FB       DJNZ 0x8958
+$895D  C9          RET
+=== $899B  999 instrs, ends RET at $89A2 ===
+$899B  00          NOP
+$899C  19          ADD HL,DE
+$899D  7E          LD A,(HL)
+$899E  CD 34 8F    CALL 0x8F34
+$89A1  C9          RET
+=== $89E7  999 instrs, ends RET at $89EC ===
+$89E7  07          RLCA
+$89E8  00          NOP
+$89E9  ED B0       LDIR
+$89EB  C9          RET
+=== $8A7D  999 instrs, ends RET at $8B36 ===
+$8A7D  7C          LD A,H
+$8A7E  CD 24 81    CALL 0x8124
+$8A81  CD 4F 7A    CALL 0x7A4F
+$8A84  CD 56 88    CALL 0x8856
+$8A87  CD 79 93    CALL 0x9379
+$8A8A  CD 5E 79    CALL 0x795E
+$8A8D  CD B0 8A    CALL 0x8AB0
+$8A90  21 1E DB    LD HL,0xDB1E
+$8A93  34          INC (HL)
+$8A94  21 9B DC    LD HL,0xDC9B
+$8A97  7E          LD A,(HL)
+$8A98  A7          AND A
+$8A99  28 01       JR Z,0x8A9C
+$8A9B  35          DEC (HL)
+$8A9C  3A 7B D8    LD A,(0xD87B)
+$8A9F  A7          AND A
+$8AA0  28 07       JR Z,0x8AA9
+$8AA2  3A 3A D9    LD A,(0xD93A)
+$8AA5  E6 7F       AND 0x7F
+$8AA7  28 09       JR Z,0x8AB2
+$8AA9  3A 1A DB    LD A,(0xDB1A)
+$8AAC  FE 03       CP 0x03
+$8AAE  28 13       JR Z,0x8AC3
+$8AB0  18 C9       JR 0x8A7B
+$8AB2  06 32       LD B,0x32
+$8AB4  CD E7 7B    CALL 0x7BE7
+$8AB7  3A F8 DC    LD A,(0xDCF8)
+$8ABA  3C          INC A
+$8ABB  CA A4 78    JP Z,0x78A4
+$8ABE  CD 32 7A    CALL 0x7A32
+$8AC1  18 0D       JR 0x8AD0
+$8AC3  06 32       LD B,0x32
+$8AC5  CD E7 7B    CALL 0x7BE7
+$8AC8  CD 36 7B    CALL 0x7B36
+$8ACB  CD 16 7A    CALL 0x7A16
+$8ACE  18 A5       JR 0x8A75
+$8AD0  DD 2A 1B DB LD IX,(0xDB1B)
+$8AD4  DD 7E 02    LD A,(IX+0x02)
+$8AD7  A7          AND A
+$8AD8  20 1D       JR NZ,0x8AF7
+$8ADA  3A 9E D9    LD A,(0xD99E)
+$8ADD  C6 B0       ADD A,0xB0
+$8ADF  32 79 8D    LD (0x8D79),A
+$8AE2  CD A7 8F    CALL 0x8FA7
+$8AE5  3E 12       LD A,0x12
+$8AE7  CD 34 8F    CALL 0x8F34
+$8AEA  3E 11       LD A,0x11
+$8AEC  CD 34 8F    CALL 0x8F34
+$8AEF  06 4B       LD B,0x4B
+$8AF1  CD E7 7B    CALL 0x7BE7
+$8AF4  CD FC 91    CALL 0x91FC
+$8AF7  3A 9D D9    LD A,(0xD99D)
+$8AFA  FE 02       CP 0x02
+$8AFC  20 20       JR NZ,0x8B1E
+$8AFE  3A 9E D9    LD A,(0xD99E)
+$8B01  E6 01       AND 0x01
+$8B03  3C          INC A
+$8B04  4F          LD C,A
+$8B05  DD 21 78 DB LD IX,0xDB78
+$8B09  FE 01       CP 0x01
+$8B0B  28 04       JR Z,0x8B11
+$8B0D  DD 21 D8 DB LD IX,0xDBD8
+$8B11  DD 7E 02    LD A,(IX+0x02)
+$8B14  A7          AND A
+$8B15  28 07       JR Z,0x8B1E
+$8B17  79          LD A,C
+$8B18  32 9E D9    LD (0xD99E),A
+$8B1B  C3 75 7A    JP 0x7A75
+$8B1E  DD 2A 1B DB LD IX,(0xDB1B)
+$8B22  DD 7E 02    LD A,(IX+0x02)
+$8B25  A7          AND A
+$8B26  C2 75 7A    JP NZ,0x7A75
+$8B29  C3 A4 78    JP 0x78A4
+$8B2C  E5          PUSH HL
+$8B2D  21 3B DC    LD HL,0xDC3B
+$8B30  BE          CP (HL)
+$8B31  38 01       JR C,0x8B34
+$8B33  77          LD (HL),A
+$8B34  E1          POP HL
+$8B35  C9          RET
+=== $8AB0  999 instrs, ends RET at $8B36 ===
+$8AB0  18 C9       JR 0x8A7B
+$8AB2  06 32       LD B,0x32
+$8AB4  CD E7 7B    CALL 0x7BE7
+$8AB7  3A F8 DC    LD A,(0xDCF8)
+$8ABA  3C          INC A
+$8ABB  CA A4 78    JP Z,0x78A4
+$8ABE  CD 32 7A    CALL 0x7A32
+$8AC1  18 0D       JR 0x8AD0
+$8AC3  06 32       LD B,0x32
+$8AC5  CD E7 7B    CALL 0x7BE7
+$8AC8  CD 36 7B    CALL 0x7B36
+$8ACB  CD 16 7A    CALL 0x7A16
+$8ACE  18 A5       JR 0x8A75
+$8AD0  DD 2A 1B DB LD IX,(0xDB1B)
+$8AD4  DD 7E 02    LD A,(IX+0x02)
+$8AD7  A7          AND A
+$8AD8  20 1D       JR NZ,0x8AF7
+$8ADA  3A 9E D9    LD A,(0xD99E)
+$8ADD  C6 B0       ADD A,0xB0
+$8ADF  32 79 8D    LD (0x8D79),A
+$8AE2  CD A7 8F    CALL 0x8FA7
+$8AE5  3E 12       LD A,0x12
+$8AE7  CD 34 8F    CALL 0x8F34
+$8AEA  3E 11       LD A,0x11
+$8AEC  CD 34 8F    CALL 0x8F34
+$8AEF  06 4B       LD B,0x4B
+$8AF1  CD E7 7B    CALL 0x7BE7
+$8AF4  CD FC 91    CALL 0x91FC
+$8AF7  3A 9D D9    LD A,(0xD99D)
+$8AFA  FE 02       CP 0x02
+$8AFC  20 20       JR NZ,0x8B1E
+$8AFE  3A 9E D9    LD A,(0xD99E)
+$8B01  E6 01       AND 0x01
+$8B03  3C          INC A
+$8B04  4F          LD C,A
+$8B05  DD 21 78 DB LD IX,0xDB78
+$8B09  FE 01       CP 0x01
+$8B0B  28 04       JR Z,0x8B11
+$8B0D  DD 21 D8 DB LD IX,0xDBD8
+$8B11  DD 7E 02    LD A,(IX+0x02)
+$8B14  A7          AND A
+$8B15  28 07       JR Z,0x8B1E
+$8B17  79          LD A,C
+$8B18  32 9E D9    LD (0xD99E),A
+$8B1B  C3 75 7A    JP 0x7A75
+$8B1E  DD 2A 1B DB LD IX,(0xDB1B)
+$8B22  DD 7E 02    LD A,(IX+0x02)
+$8B25  A7          AND A
+$8B26  C2 75 7A    JP NZ,0x7A75
+$8B29  C3 A4 78    JP 0x78A4
+$8B2C  E5          PUSH HL
+$8B2D  21 3B DC    LD HL,0xDC3B
+$8B30  BE          CP (HL)
+$8B31  38 01       JR C,0x8B34
+$8B33  77          LD (HL),A
+$8B34  E1          POP HL
+$8B35  C9          RET
+=== $8AD0  999 instrs, ends RET at $8B36 ===
+$8AD0  DD 2A 1B DB LD IX,(0xDB1B)
+$8AD4  DD 7E 02    LD A,(IX+0x02)
+$8AD7  A7          AND A
+$8AD8  20 1D       JR NZ,0x8AF7
+$8ADA  3A 9E D9    LD A,(0xD99E)
+$8ADD  C6 B0       ADD A,0xB0
+$8ADF  32 79 8D    LD (0x8D79),A
+$8AE2  CD A7 8F    CALL 0x8FA7
+$8AE5  3E 12       LD A,0x12
+$8AE7  CD 34 8F    CALL 0x8F34
+$8AEA  3E 11       LD A,0x11
+$8AEC  CD 34 8F    CALL 0x8F34
+$8AEF  06 4B       LD B,0x4B
+$8AF1  CD E7 7B    CALL 0x7BE7
+$8AF4  CD FC 91    CALL 0x91FC
+$8AF7  3A 9D D9    LD A,(0xD99D)
+$8AFA  FE 02       CP 0x02
+$8AFC  20 20       JR NZ,0x8B1E
+$8AFE  3A 9E D9    LD A,(0xD99E)
+$8B01  E6 01       AND 0x01
+$8B03  3C          INC A
+$8B04  4F          LD C,A
+$8B05  DD 21 78 DB LD IX,0xDB78
+$8B09  FE 01       CP 0x01
+$8B0B  28 04       JR Z,0x8B11
+$8B0D  DD 21 D8 DB LD IX,0xDBD8
+$8B11  DD 7E 02    LD A,(IX+0x02)
+$8B14  A7          AND A
+$8B15  28 07       JR Z,0x8B1E
+$8B17  79          LD A,C
+$8B18  32 9E D9    LD (0xD99E),A
+$8B1B  C3 75 7A    JP 0x7A75
+$8B1E  DD 2A 1B DB LD IX,(0xDB1B)
+$8B22  DD 7E 02    LD A,(IX+0x02)
+$8B25  A7          AND A
+$8B26  C2 75 7A    JP NZ,0x7A75
+$8B29  C3 A4 78    JP 0x78A4
+$8B2C  E5          PUSH HL
+$8B2D  21 3B DC    LD HL,0xDC3B
+$8B30  BE          CP (HL)
+$8B31  38 01       JR C,0x8B34
+$8B33  77          LD (HL),A
+$8B34  E1          POP HL
+$8B35  C9          RET
+=== $8B23  999 instrs, ends RET at $8B36 ===
+$8B23  7E          LD A,(HL)
+$8B24  02          LD (BC),A
+$8B25  A7          AND A
+$8B26  C2 75 7A    JP NZ,0x7A75
+$8B29  C3 A4 78    JP 0x78A4
+$8B2C  E5          PUSH HL
+$8B2D  21 3B DC    LD HL,0xDC3B
+$8B30  BE          CP (HL)
+$8B31  38 01       JR C,0x8B34
+$8B33  77          LD (HL),A
+$8B34  E1          POP HL
+$8B35  C9          RET
+=== $8BB4  999 instrs, ends RET at $8BE7 ===
+$8BB4  3E 02       LD A,0x02
+$8BB6  CD A0 91    CALL 0x91A0
+$8BB9  DD 21 4A 8C LD IX,0x8C4A
+$8BBD  3E 06       LD A,0x06
+$8BBF  DD 77 02    LD (IX+0x02),A
+$8BC2  DD 77 03    LD (IX+0x03),A
+$8BC5  3E 05       LD A,0x05
+$8BC7  DD 21 58 8C LD IX,0x8C58
+$8BCB  DD 77 02    LD (IX+0x02),A
+$8BCE  DD 77 03    LD (IX+0x03),A
+$8BD1  21 2B 58    LD HL,0x582B
+$8BD4  22 4A 8C    LD (0x8C4A),HL
+$8BD7  21 4B 58    LD HL,0x584B
+$8BDA  22 58 8C    LD (0x8C58),HL
+$8BDD  AF          XOR A
+$8BDE  CD 34 8F    CALL 0x8F34
+$8BE1  3E 01       LD A,0x01
+$8BE3  CD 34 8F    CALL 0x8F34
+$8BE6  C9          RET
+=== $8BC4  999 instrs, ends RET at $8BE7 ===
+$8BC4  03          INC BC
+$8BC5  3E 05       LD A,0x05
+$8BC7  DD 21 58 8C LD IX,0x8C58
+$8BCB  DD 77 02    LD (IX+0x02),A
+$8BCE  DD 77 03    LD (IX+0x03),A
+$8BD1  21 2B 58    LD HL,0x582B
+$8BD4  22 4A 8C    LD (0x8C4A),HL
+$8BD7  21 4B 58    LD HL,0x584B
+$8BDA  22 58 8C    LD (0x8C58),HL
+$8BDD  AF          XOR A
+$8BDE  CD 34 8F    CALL 0x8F34
+$8BE1  3E 01       LD A,0x01
+$8BE3  CD 34 8F    CALL 0x8F34
+$8BE6  C9          RET
+=== $8C24  999 instrs, ends RET at $8C74 ===
+$8C24  9C          SBC A,H
+$8C25  DC 7A 0F    CALL C,0x0F7A
+$8C28  0F          RRCA
+$8C29  0F          RRCA
+$8C2A  0F          RRCA
+$8C2B  86          ADD A,(HL)
+$8C2C  77          LD (HL),A
+$8C2D  7A          LD A,D
+$8C2E  CB 3F       SRL A
+$8C30  CB 3F       SRL A
+$8C32  83          ADD A,E
+$8C33  32 9D DC    LD (0xDC9D),A
+$8C36  7A          LD A,D
+$8C37  CB 3F       SRL A
+$8C39  CB 3F       SRL A
+$8C3B  83          ADD A,E
+$8C3C  32 9E DC    LD (0xDC9E),A
+$8C3F  21 98 DC    LD HL,0xDC98
+$8C42  7A          LD A,D
+$8C43  CB 3F       SRL A
+$8C45  CB 3F       SRL A
+$8C47  83          ADD A,E
+$8C48  86          ADD A,(HL)
+$8C49  77          LD (HL),A
+$8C4A  7A          LD A,D
+$8C4B  A7          AND A
+$8C4C  28 09       JR Z,0x8C57
+$8C4E  79          LD A,C
+$8C4F  FE 03       CP 0x03
+$8C51  30 04       JR NC,0x8C57
+$8C53  3E 10       LD A,0x10
+$8C55  86          ADD A,(HL)
+$8C56  77          LD (HL),A
+$8C57  3E 30       LD A,0x30
+$8C59  82          ADD A,D
+$8C5A  83          ADD A,E
+$8C5B  83          ADD A,E
+$8C5C  32 99 DC    LD (0xDC99),A
+$8C5F  21 9A DC    LD HL,0xDC9A
+$8C62  78          LD A,B
+$8C63  87          ADD A,A
+$8C64  87          ADD A,A
+$8C65  CB 3A       SRL D
+$8C67  82          ADD A,D
+$8C68  57          LD D,A
+$8C69  7E          LD A,(HL)
+$8C6A  92          SUB D
+$8C6B  30 02       JR NC,0x8C6F
+$8C6D  3E 08       LD A,0x08
+$8C6F  77          LD (HL),A
+$8C70  32 9B DC    LD (0xDC9B),A
+$8C73  C9          RET
+=== $8EAC  999 instrs, ends RET at $8EF4 ===
+$8EAC  4F          LD C,A
+$8EAD  3A 1F D8    LD A,(0xD81F)
+$8EB0  81          ADD A,C
+$8EB1  47          LD B,A
+$8EB2  E6 7F       AND 0x7F
+$8EB4  FE 0B       CP 0x0B
+$8EB6  78          LD A,B
+$8EB7  38 03       JR C,0x8EBC
+$8EB9  3A 1F D8    LD A,(0xD81F)
+$8EBC  32 1F D8    LD (0xD81F),A
+$8EBF  5F          LD E,A
+$8EC0  3A 1D D8    LD A,(0xD81D)
+$8EC3  AB          XOR E
+$8EC4  7B          LD A,E
+$8EC5  CB BF       RES 7,A
+$8EC7  F2 CC 7E    JP P,0x7ECC
+$8ECA  ED 44       NEG
+$8ECC  5F          LD E,A
+$8ECD  CB 83       RES 0,E
+$8ECF  17          RLA
+$8ED0  3E 00       LD A,0x00
+$8ED2  DE 00       SBC A,0x00
+$8ED4  57          LD D,A
+$8ED5  DD 6E 04    LD IXL,(IX+0x04)
+$8ED8  DD 66 05    LD IXH,(IX+0x05)
+$8EDB  19          ADD HL,DE
+$8EDC  EB          EX DE,HL
+$8EDD  21 A0 FF    LD HL,0xFFA0
+$8EE0  19          ADD HL,DE
+$8EE1  CB 7C       BIT 7,H
+$8EE3  20 0E       JR NZ,0x8EF3
+$8EE5  21 87 0B    LD HL,0x0B87
+$8EE8  A7          AND A
+$8EE9  ED 52       SBC HL,DE
+$8EEB  38 06       JR C,0x8EF3
+$8EED  DD 73 04    LD (IX+0x04),E
+$8EF0  DD 72 05    LD (IX+0x05),D
+$8EF3  C9          RET
+=== $8F16  999 instrs, ends RET at $8F28 ===
+$8F16  5E          LD E,(HL)
+$8F17  2C          INC L
+$8F18  56          LD D,(HL)
+$8F19  2A 5A D7    LD HL,(0xD75A)
+$8F1C  19          ADD HL,DE
+$8F1D  11 0A 00    LD DE,0x000A
+$8F20  19          ADD HL,DE
+$8F21  7E          LD A,(HL)
+$8F22  0F          RRCA
+$8F23  0F          RRCA
+$8F24  0F          RRCA
+$8F25  FE 77       CP 0x77
+$8F27  C8          RET Z
+=== $8F26  999 instrs, ends RET at $8F28 ===
+$8F26  77          LD (HL),A
+$8F27  C8          RET Z
+=== $8F34  999 instrs, ends RET at $8F36 ===
+$8F34  77          LD (HL),A
+$8F35  C8          RET Z
+=== $8F67  999 instrs, ends RET at $8FD5 ===
+$8F67  E5          PUSH HL
+$8F68  3E FD       LD A,0xFD
+$8F6A  A1          AND C
+$8F6B  C6 11       ADD A,0x11
+$8F6D  4F          LD C,A
+$8F6E  78          LD A,B
+$8F6F  E6 07       AND 0x07
+$8F71  CB 38       SRL B
+$8F73  CB 38       SRL B
+$8F75  CB 38       SRL B
+$8F77  04          INC B
+$8F78  04          INC B
+$8F79  04          INC B
+$8F7A  04          INC B
+$8F7B  04          INC B
+$8F7C  D9          EXX
+$8F7D  06 03       LD B,0x03
+$8F7F  D9          EXX
+$8F80  CD 85 93    CALL 0x9385
+$8F83  F5          PUSH AF
+$8F84  82          ADD A,D
+$8F85  57          LD D,A
+$8F86  73          LD (HL),E
+$8F87  2C          INC L
+$8F88  72          LD (HL),D
+$8F89  2C          INC L
+$8F8A  F1          POP AF
+$8F8B  D9          EXX
+$8F8C  05          DEC B
+$8F8D  28 0A       JR Z,0x8F99
+$8F8F  D9          EXX
+$8F90  3C          INC A
+$8F91  FE 08       CP 0x08
+$8F93  38 EB       JR C,0x8F80
+$8F95  AF          XOR A
+$8F96  04          INC B
+$8F97  18 E7       JR 0x8F80
+$8F99  D9          EXX
+$8F9A  05          DEC B
+$8F9B  05          DEC B
+$8F9C  05          DEC B
+$8F9D  05          DEC B
+$8F9E  05          DEC B
+$8F9F  78          LD A,B
+$8FA0  87          ADD A,A
+$8FA1  80          ADD A,B
+$8FA2  0F          RRCA
+$8FA3  0F          RRCA
+$8FA4  0F          RRCA
+$8FA5  5F          LD E,A
+$8FA6  E6 1F       AND 0x1F
+$8FA8  57          LD D,A
+$8FA9  AB          XOR E
+$8FAA  5F          LD E,A
+$8FAB  FD 21 56 D7 LD IY,0xD756
+$8FAF  FD 19       ADD IY,DE
+$8FB1  FD 5E FE    LD E,(IY-0x02)
+$8FB4  FD 56 FF    LD D,(IY-0x01)
+$8FB7  73          LD (HL),E
+$8FB8  2C          INC L
+$8FB9  72          LD (HL),D
+$8FBA  2C          INC L
+$8FBB  FD 5E 00    LD E,(IY+0x00)
+$8FBE  FD 56 01    LD D,(IY+0x01)
+$8FC1  73          LD (HL),E
+$8FC2  2C          INC L
+$8FC3  72          LD (HL),D
+$8FC4  2A 91 93    LD HL,(0x9391)
+$8FC7  FD 75 FE    LD (IY-0x02),IYL
+$8FCA  FD 74 FF    LD (IY-0x01),IYH
+$8FCD  E1          POP HL
+$8FCE  FD 75 00    LD (IY+0x00),IYL
+$8FD1  FD 74 01    LD (IY+0x01),IYH
+$8FD4  C9          RET
+=== $8FA7  999 instrs, ends RET at $8FD5 ===
+$8FA7  1F          RRA
+$8FA8  57          LD D,A
+$8FA9  AB          XOR E
+$8FAA  5F          LD E,A
+$8FAB  FD 21 56 D7 LD IY,0xD756
+$8FAF  FD 19       ADD IY,DE
+$8FB1  FD 5E FE    LD E,(IY-0x02)
+$8FB4  FD 56 FF    LD D,(IY-0x01)
+$8FB7  73          LD (HL),E
+$8FB8  2C          INC L
+$8FB9  72          LD (HL),D
+$8FBA  2C          INC L
+$8FBB  FD 5E 00    LD E,(IY+0x00)
+$8FBE  FD 56 01    LD D,(IY+0x01)
+$8FC1  73          LD (HL),E
+$8FC2  2C          INC L
+$8FC3  72          LD (HL),D
+$8FC4  2A 91 93    LD HL,(0x9391)
+$8FC7  FD 75 FE    LD (IY-0x02),IYL
+$8FCA  FD 74 FF    LD (IY-0x01),IYH
+$8FCD  E1          POP HL
+$8FCE  FD 75 00    LD (IY+0x00),IYL
+$8FD1  FD 74 01    LD (IY+0x01),IYH
+$8FD4  C9          RET
+=== $8FC8  999 instrs, ends RET at $8FD5 ===
+$8FC8  75          LD (HL),L
+$8FC9  FE FD       CP 0xFD
+$8FCB  74          LD (HL),H
+$8FCC  FF          RST 0x38
+$8FCD  E1          POP HL
+$8FCE  FD 75 00    LD (IY+0x00),IYL
+$8FD1  FD 74 01    LD (IY+0x01),IYH
+$8FD4  C9          RET
+=== $8FE3  999 instrs, ends RET at $9000 ===
+$8FE3  A0          AND B
+$8FE4  ED A0       LDI
+$8FE6  ED A0       LDI
+$8FE8  ED A0       LDI
+$8FEA  C1          POP BC
+$8FEB  79          LD A,C
+$8FEC  21 52 FD    LD HL,0xFD52
+$8FEF  18 01       JR 0x8FF2
+$8FF1  6E          LD L,(HL)
+$8FF2  BE          CP (HL)
+$8FF3  20 FC       JR NZ,0x8FF1
+$8FF5  0A          LD A,(BC)
+$8FF6  77          LD (HL),A
+$8FF7  3A 50 FD    LD A,(0xFD50)
+$8FFA  02          LD (BC),A
+$8FFB  79          LD A,C
+$8FFC  32 50 FD    LD (0xFD50),A
+$8FFF  C9          RET
+=== $9163  999 instrs, ends RET at $91EA ===
+$9163  06 58       LD B,0x58
+$9165  D6 E4       SUB 0xE4
+$9167  0E 03       LD C,0x03
+$9169  FE 04       CP 0x04
+$916B  38 0A       JR C,0x9177
+$916D  0E 01       LD C,0x01
+$916F  FE 07       CP 0x07
+$9171  38 2A       JR C,0x919D
+$9173  D6 07       SUB 0x07
+$9175  0E 02       LD C,0x02
+$9177  11 01 00    LD DE,0x0001
+$917A  1F          RRA
+$917B  30 03       JR NC,0x9180
+$917D  11 63 01    LD DE,0x0163
+$9180  1F          RRA
+$9181  ED 52       SBC HL,DE
+$9183  11 62 01    LD DE,0x0162
+$9186  7E          LD A,(HL)
+$9187  C6 08       ADD A,0x08
+$9189  77          LD (HL),A
+$918A  23          INC HL
+$918B  7E          LD A,(HL)
+$918C  80          ADD A,B
+$918D  CE 00       ADC A,0x00
+$918F  77          LD (HL),A
+$9190  23          INC HL
+$9191  7E          LD A,(HL)
+$9192  80          ADD A,B
+$9193  CE 00       ADC A,0x00
+$9195  77          LD (HL),A
+$9196  19          ADD HL,DE
+$9197  7E          LD A,(HL)
+$9198  80          ADD A,B
+$9199  CE 00       ADC A,0x00
+$919B  77          LD (HL),A
+$919C  2B          DEC HL
+$919D  7E          LD A,(HL)
+$919E  80          ADD A,B
+$919F  CE 00       ADC A,0x00
+$91A1  77          LD (HL),A
+$91A2  2B          DEC HL
+$91A3  7E          LD A,(HL)
+$91A4  C6 08       ADD A,0x08
+$91A6  77          LD (HL),A
+$91A7  79          LD A,C
+$91A8  CD 63 91    CALL 0x9163
+$91AB  3E 02       LD A,0x02
+$91AD  CD 2C 7B    CALL 0x7B2C
+$91B0  C3 10 81    JP 0x8110
+$91B3  EA 81 11    JP PE,0x1181
+$91B6  83          ADD A,E
+$91B7  84          ADD A,H
+$91B8  86          ADD A,(HL)
+$91B9  D9          EXX
+$91BA  86          ADD A,(HL)
+$91BB  DD 21 70 FF LD IX,0xFF70
+$91BF  FD 21 FA DC LD IY,0xDCFA
+$91C3  FD 36 00 00 LD (IY+0x00),0x00
+$91C7  06 07       LD B,0x07
+$91C9  11 10 00    LD DE,0x0010
+$91CC  DD CB 02 4E BIT 1,(IX+0x02)
+$91D0  28 0E       JR Z,0x91E0
+$91D2  21 B3 81    LD HL,0x81B3
+$91D5  DD 5E 07    LD E,(IX+0x07)
+$91D8  CB 23       SLA E
+$91DA  19          ADD HL,DE
+$91DB  7E          LD A,(HL)
+$91DC  23          INC HL
+$91DD  66          LD H,(HL)
+$91DE  6F          LD L,A
+$91DF  E9          JP (HL)
+$91E0  1E 10       LD E,0x10
+$91E2  FD 34 00    INC (IY+0x00)
+$91E5  DD 19       ADD IX,DE
+$91E7  10 E3       DJNZ 0x91CC
+$91E9  C9          RET
+=== $91A0  999 instrs, ends RET at $91EA ===
+$91A0  00          NOP
+$91A1  77          LD (HL),A
+$91A2  2B          DEC HL
+$91A3  7E          LD A,(HL)
+$91A4  C6 08       ADD A,0x08
+$91A6  77          LD (HL),A
+$91A7  79          LD A,C
+$91A8  CD 63 91    CALL 0x9163
+$91AB  3E 02       LD A,0x02
+$91AD  CD 2C 7B    CALL 0x7B2C
+$91B0  C3 10 81    JP 0x8110
+$91B3  EA 81 11    JP PE,0x1181
+$91B6  83          ADD A,E
+$91B7  84          ADD A,H
+$91B8  86          ADD A,(HL)
+$91B9  D9          EXX
+$91BA  86          ADD A,(HL)
+$91BB  DD 21 70 FF LD IX,0xFF70
+$91BF  FD 21 FA DC LD IY,0xDCFA
+$91C3  FD 36 00 00 LD (IY+0x00),0x00
+$91C7  06 07       LD B,0x07
+$91C9  11 10 00    LD DE,0x0010
+$91CC  DD CB 02 4E BIT 1,(IX+0x02)
+$91D0  28 0E       JR Z,0x91E0
+$91D2  21 B3 81    LD HL,0x81B3
+$91D5  DD 5E 07    LD E,(IX+0x07)
+$91D8  CB 23       SLA E
+$91DA  19          ADD HL,DE
+$91DB  7E          LD A,(HL)
+$91DC  23          INC HL
+$91DD  66          LD H,(HL)
+$91DE  6F          LD L,A
+$91DF  E9          JP (HL)
+$91E0  1E 10       LD E,0x10
+$91E2  FD 34 00    INC (IY+0x00)
+$91E5  DD 19       ADD IX,DE
+$91E7  10 E3       DJNZ 0x91CC
+$91E9  C9          RET
+=== $91FC  999 instrs, ends RET at $929A ===
+$91FC  C5          PUSH BC
+$91FD  DD 6E 09    LD IXL,(IX+0x09)
+$9200  DD 66 0A    LD IXH,(IX+0x0A)
+$9203  7E          LD A,(HL)
+$9204  2B          DEC HL
+$9205  FE FF       CP 0xFF
+$9207  28 25       JR Z,0x922E
+$9209  23          INC HL
+$920A  DD 7E 0B    LD A,(IX+0x0B)
+$920D  3D          DEC A
+$920E  DD 77 0B    LD (IX+0x0B),A
+$9211  20 1B       JR NZ,0x922E
+$9213  CB 7E       BIT 7,(HL)
+$9215  23          INC HL
+$9216  28 01       JR Z,0x9219
+$9218  23          INC HL
+$9219  3E 01       LD A,0x01
+$921B  CB 7E       BIT 7,(HL)
+$921D  28 03       JR Z,0x9222
+$921F  23          INC HL
+$9220  7E          LD A,(HL)
+$9221  2B          DEC HL
+$9222  3C          INC A
+$9223  DD 77 0B    LD (IX+0x0B),A
+$9226  DD 75 09    LD (IX+0x09),IXL
+$9229  DD 74 0A    LD (IX+0x0A),IXH
+$922C  18 D5       JR 0x9203
+$922E  7E          LD A,(HL)
+$922F  A7          AND A
+$9230  28 1C       JR Z,0x924E
+$9232  1F          RRA
+$9233  DC BD 82    CALL C,0x82BD
+$9236  1F          RRA
+$9237  DC D1 82    CALL C,0x82D1
+$923A  1F          RRA
+$923B  DC E3 82    CALL C,0x82E3
+$923E  1F          RRA
+$923F  DC F5 82    CALL C,0x82F5
+$9242  1F          RRA
+$9243  DC 09 83    CALL C,0x8309
+$9246  1F          RRA
+$9247  DC 8A 82    CALL C,0x828A
+$924A  1F          RRA
+$924B  DC 9A 82    CALL C,0x829A
+$924E  CD 51 83    CALL 0x8351
+$9251  3A 1E DB    LD A,(0xDB1E)
+$9254  FD AE 00    XOR (IY+0x00)
+$9257  E6 03       AND 0x03
+$9259  20 29       JR NZ,0x9284
+$925B  CD 8B 93    CALL 0x938B
+$925E  4F          LD C,A
+$925F  3A 56 FF    LD A,(0xFF56)
+$9262  DD 96 06    SUB (IX+0x06)
+$9265  F2 6A 82    JP P,0x826A
+$9268  ED 44       NEG
+$926A  FE 09       CP 0x09
+$926C  06 00       LD B,0x00
+$926E  30 04       JR NC,0x9274
+$9270  3A 9E DC    LD A,(0xDC9E)
+$9273  47          LD B,A
+$9274  3A F7 FF    LD A,(0xFFF7)
+$9277  80          ADD A,B
+$9278  30 02       JR NC,0x927C
+$927A  3E FF       LD A,0xFF
+$927C  B9          CP C
+$927D  FD E5       PUSH IY
+$927F  D4 B0 88    CALL NC,0x88B0
+$9282  FD E1       POP IY
+$9284  C1          POP BC
+$9285  D1          POP DE
+$9286  E1          POP HL
+$9287  C3 E0 81    JP 0x81E0
+$928A  08          EX AF,AF'
+$928B  AF          XOR A
+$928C  DD 77 0C    LD (IX+0x0C),A
+$928F  DD 77 0D    LD (IX+0x0D),A
+$9292  DD 77 0E    LD (IX+0x0E),A
+$9295  DD 77 0F    LD (IX+0x0F),A
+$9298  08          EX AF,AF'
+$9299  C9          RET
+=== $92AA  999 instrs, ends RET at $92BD ===
+$92AA  09          ADD HL,BC
+$92AB  DD 7E 06    LD A,(IX+0x06)
+$92AE  BE          CP (HL)
+$92AF  79          LD A,C
+$92B0  38 31       JR C,0x92E3
+$92B2  18 41       JR 0x92F5
+$92B4  AF          XOR A
+$92B5  DD 77 0E    LD (IX+0x0E),A
+$92B8  DD 77 0F    LD (IX+0x0F),A
+$92BB  79          LD A,C
+$92BC  C9          RET
+=== $92BF  999 instrs, ends RET at $92D1 ===
+$92BF  0C          INC C
+$92C0  DD 66 0D    LD IXH,(IX+0x0D)
+$92C3  ED 5B F0 FF LD DE,(0xFFF0)
+$92C7  A7          AND A
+$92C8  ED 52       SBC HL,DE
+$92CA  DD 75 0C    LD (IX+0x0C),IXL
+$92CD  DD 74 0D    LD (IX+0x0D),IXH
+$92D0  C9          RET
+=== $9379  999 instrs, ends RET at $93A0 ===
+$9379  2A 54 FF    LD HL,(0xFF54)
+$937C  EB          EX DE,HL
+$937D  A7          AND A
+$937E  ED 52       SBC HL,DE
+$9380  11 F4 01    LD DE,0x01F4
+$9383  ED 52       SBC HL,DE
+$9385  30 19       JR NC,0x93A0
+$9387  DD 7E 0F    LD A,(IX+0x0F)
+$938A  CB 7F       BIT 7,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $937C  999 instrs, ends RET at $93A0 ===
+$937C  EB          EX DE,HL
+$937D  A7          AND A
+$937E  ED 52       SBC HL,DE
+$9380  11 F4 01    LD DE,0x01F4
+$9383  ED 52       SBC HL,DE
+$9385  30 19       JR NC,0x93A0
+$9387  DD 7E 0F    LD A,(IX+0x0F)
+$938A  CB 7F       BIT 7,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $937F  999 instrs, ends RET at $93A0 ===
+$937F  52          LD D,D
+$9380  11 F4 01    LD DE,0x01F4
+$9383  ED 52       SBC HL,DE
+$9385  30 19       JR NC,0x93A0
+$9387  DD 7E 0F    LD A,(IX+0x0F)
+$938A  CB 7F       BIT 7,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $9382  999 instrs, ends RET at $93A0 ===
+$9382  01 ED 52    LD BC,0x52ED
+$9385  30 19       JR NC,0x93A0
+$9387  DD 7E 0F    LD A,(IX+0x0F)
+$938A  CB 7F       BIT 7,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $9385  999 instrs, ends RET at $93A0 ===
+$9385  30 19       JR NC,0x93A0
+$9387  DD 7E 0F    LD A,(IX+0x0F)
+$938A  CB 7F       BIT 7,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $938B  999 instrs, ends RET at $93A0 ===
+$938B  7F          LD A,A
+$938C  28 01       JR Z,0x938F
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $938E  999 instrs, ends RET at $93A0 ===
+$938E  3C          INC A
+$938F  DD 86 06    ADD A,(IX+0x06)
+$9392  F2 96 83    JP P,0x8396
+$9395  AF          XOR A
+$9396  FE 70       CP 0x70
+$9398  38 02       JR C,0x939C
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $9399  999 instrs, ends RET at $93A0 ===
+$9399  02          LD (BC),A
+$939A  3E 6F       LD A,0x6F
+$939C  DD 77 06    LD (IX+0x06),A
+$939F  C9          RET
+=== $9435  999 instrs, ends RET at $9531 ===
+$9435  ED 5B F0 FF LD DE,(0xFFF0)
+$9439  21 00 00    LD HL,0x0000
+$943C  ED 52       SBC HL,DE
+$943E  22 F0 FF    LD (0xFFF0),HL
+$9441  FD 7E 0F    LD A,(IY+0x0F)
+$9444  07          RLCA
+$9445  5F          LD E,A
+$9446  16 00       LD D,0x00
+$9448  CB 12       RL D
+$944A  CB FB       SET 7,E
+$944C  21 70 00    LD HL,0x0070
+$944F  19          ADD HL,DE
+$9450  EB          EX DE,HL
+$9451  2A 54 FF    LD HL,(0xFF54)
+$9454  3A F1 FF    LD A,(0xFFF1)
+$9457  A7          AND A
+$9458  FA 5F 84    JP M,0x845F
+$945B  ED 52       SBC HL,DE
+$945D  18 01       JR 0x9460
+$945F  19          ADD HL,DE
+$9460  EB          EX DE,HL
+$9461  21 F7 FF    LD HL,0xFFF7
+$9464  3A 9D DC    LD A,(0xDC9D)
+$9467  86          ADD A,(HL)
+$9468  77          LD (HL),A
+$9469  3A 1F D8    LD A,(0xD81F)
+$946C  E6 7F       AND 0x7F
+$946E  4F          LD C,A
+$946F  3A F6 FF    LD A,(0xFFF6)
+$9472  81          ADD A,C
+$9473  C6 02       ADD A,0x02
+$9475  32 F6 FF    LD (0xFFF6),A
+$9478  3A F1 FF    LD A,(0xFFF1)
+$947B  A7          AND A
+$947C  F2 87 84    JP P,0x8487
+$947F  3A F6 FF    LD A,(0xFFF6)
+$9482  ED 44       NEG
+$9484  32 F6 FF    LD (0xFFF6),A
+$9487  DD 21 70 FF LD IX,0xFF70
+$948B  2E 00       LD L,0x00
+$948D  4D          LD C,L
+$948E  FD 66 0C    LD IYH,(IY+0x0C)
+$9491  06 06       LD B,0x06
+$9493  FD 7E 00    LD A,(IY+0x00)
+$9496  A7          AND A
+$9497  CA 25 85    JP Z,0x8525
+$949A  0C          INC C
+$949B  DD 73 04    LD (IX+0x04),E
+$949E  DD 72 05    LD (IX+0x05),D
+$94A1  FD 7E 06    LD A,(IY+0x06)
+$94A4  DD 77 06    LD (IX+0x06),A
+$94A7  DD 36 02 00 LD (IX+0x02),0x00
+$94AB  DD CB 02 CE SET 1,(IX+0x02)
+$94AF  DD 75 08    LD (IX+0x08),IXL
+$94B2  7D          LD A,L
+$94B3  A7          AND A
+$94B4  20 04       JR NZ,0x94BA
+$94B6  DD CB 02 DE SET 3,(IX+0x02)
+$94BA  84          ADD A,H
+$94BB  6F          LD L,A
+$94BC  AF          XOR A
+$94BD  DD 77 0E    LD (IX+0x0E),A
+$94C0  DD 77 0F    LD (IX+0x0F),A
+$94C3  DD 77 03    LD (IX+0x03),A
+$94C6  DD 36 07 00 LD (IX+0x07),0x00
+$94CA  D9          EXX
+$94CB  21 1D D8    LD HL,0xD81D
+$94CE  3A F1 FF    LD A,(0xFFF1)
+$94D1  AE          XOR (HL)
+$94D2  0E 04       LD C,0x04
+$94D4  FA DF 84    JP M,0x84DF
+$94D7  3A 1F D8    LD A,(0xD81F)
+$94DA  3C          INC A
+$94DB  E6 7F       AND 0x7F
+$94DD  B1          OR C
+$94DE  4F          LD C,A
+$94DF  3A F1 FF    LD A,(0xFFF1)
+$94E2  A7          AND A
+$94E3  79          LD A,C
+$94E4  F2 E9 84    JP P,0x84E9
+$94E7  ED 44       NEG
+$94E9  DD 36 0C 00 LD (IX+0x0C),0x00
+$94ED  DD 77 0D    LD (IX+0x0D),A
+$94F0  FD 46 00    LD B,(IY+0x00)
+$94F3  21 B0 67    LD HL,0x67B0
+$94F6  3E FF       LD A,0xFF
+$94F8  0E FF       LD C,0xFF
+$94FA  ED B1       CPIR
+$94FC  10 FA       DJNZ 0x94F8
+$94FE  DD 75 09    LD (IX+0x09),IXL
+$9501  DD 74 0A    LD (IX+0x0A),IXH
+$9504  3E 01       LD A,0x01
+$9506  CB 7E       BIT 7,(HL)
+$9508  28 02       JR Z,0x950C
+$950A  23          INC HL
+$950B  7E          LD A,(HL)
+$950C  3C          INC A
+$950D  DD 77 0B    LD (IX+0x0B),A
+$9510  21 86 5B    LD HL,0x5B86
+$9513  DD 75 00    LD (IX+0x00),IXL
+$9516  DD 74 01    LD (IX+0x01),IXH
+$9519  11 10 00    LD DE,0x0010
+$951C  DD 19       ADD IX,DE
+$951E  FD 23       INC IY
+$9520  D9          EXX
+$9521  05          DEC B
+$9522  C2 93 84    JP NZ,0x8493
+$9525  79          LD A,C
+$9526  F6 80       OR 0x80
+$9528  32 3A D9    LD (0xD93A),A
+$952B  3E 02       LD A,0x02
+$952D  32 39 DC    LD (0xDC39),A
+$9530  C9          RET
+=== $947F  999 instrs, ends RET at $9531 ===
+$947F  3A F6 FF    LD A,(0xFFF6)
+$9482  ED 44       NEG
+$9484  32 F6 FF    LD (0xFFF6),A
+$9487  DD 21 70 FF LD IX,0xFF70
+$948B  2E 00       LD L,0x00
+$948D  4D          LD C,L
+$948E  FD 66 0C    LD IYH,(IY+0x0C)
+$9491  06 06       LD B,0x06
+$9493  FD 7E 00    LD A,(IY+0x00)
+$9496  A7          AND A
+$9497  CA 25 85    JP Z,0x8525
+$949A  0C          INC C
+$949B  DD 73 04    LD (IX+0x04),E
+$949E  DD 72 05    LD (IX+0x05),D
+$94A1  FD 7E 06    LD A,(IY+0x06)
+$94A4  DD 77 06    LD (IX+0x06),A
+$94A7  DD 36 02 00 LD (IX+0x02),0x00
+$94AB  DD CB 02 CE SET 1,(IX+0x02)
+$94AF  DD 75 08    LD (IX+0x08),IXL
+$94B2  7D          LD A,L
+$94B3  A7          AND A
+$94B4  20 04       JR NZ,0x94BA
+$94B6  DD CB 02 DE SET 3,(IX+0x02)
+$94BA  84          ADD A,H
+$94BB  6F          LD L,A
+$94BC  AF          XOR A
+$94BD  DD 77 0E    LD (IX+0x0E),A
+$94C0  DD 77 0F    LD (IX+0x0F),A
+$94C3  DD 77 03    LD (IX+0x03),A
+$94C6  DD 36 07 00 LD (IX+0x07),0x00
+$94CA  D9          EXX
+$94CB  21 1D D8    LD HL,0xD81D
+$94CE  3A F1 FF    LD A,(0xFFF1)
+$94D1  AE          XOR (HL)
+$94D2  0E 04       LD C,0x04
+$94D4  FA DF 84    JP M,0x84DF
+$94D7  3A 1F D8    LD A,(0xD81F)
+$94DA  3C          INC A
+$94DB  E6 7F       AND 0x7F
+$94DD  B1          OR C
+$94DE  4F          LD C,A
+$94DF  3A F1 FF    LD A,(0xFFF1)
+$94E2  A7          AND A
+$94E3  79          LD A,C
+$94E4  F2 E9 84    JP P,0x84E9
+$94E7  ED 44       NEG
+$94E9  DD 36 0C 00 LD (IX+0x0C),0x00
+$94ED  DD 77 0D    LD (IX+0x0D),A
+$94F0  FD 46 00    LD B,(IY+0x00)
+$94F3  21 B0 67    LD HL,0x67B0
+$94F6  3E FF       LD A,0xFF
+$94F8  0E FF       LD C,0xFF
+$94FA  ED B1       CPIR
+$94FC  10 FA       DJNZ 0x94F8
+$94FE  DD 75 09    LD (IX+0x09),IXL
+$9501  DD 74 0A    LD (IX+0x0A),IXH
+$9504  3E 01       LD A,0x01
+$9506  CB 7E       BIT 7,(HL)
+$9508  28 02       JR Z,0x950C
+$950A  23          INC HL
+$950B  7E          LD A,(HL)
+$950C  3C          INC A
+$950D  DD 77 0B    LD (IX+0x0B),A
+$9510  21 86 5B    LD HL,0x5B86
+$9513  DD 75 00    LD (IX+0x00),IXL
+$9516  DD 74 01    LD (IX+0x01),IXH
+$9519  11 10 00    LD DE,0x0010
+$951C  DD 19       ADD IX,DE
+$951E  FD 23       INC IY
+$9520  D9          EXX
+$9521  05          DEC B
+$9522  C2 93 84    JP NZ,0x8493
+$9525  79          LD A,C
+$9526  F6 80       OR 0x80
+$9528  32 3A D9    LD (0xD93A),A
+$952B  3E 02       LD A,0x02
+$952D  32 39 DC    LD (0xDC39),A
+$9530  C9          RET
+=== $94A6  999 instrs, ends RET at $9531 ===
+$94A6  06 DD       LD B,0xDD
+$94A8  36 02       LD (HL),0x02
+$94AA  00          NOP
+$94AB  DD CB 02 CE SET 1,(IX+0x02)
+$94AF  DD 75 08    LD (IX+0x08),IXL
+$94B2  7D          LD A,L
+$94B3  A7          AND A
+$94B4  20 04       JR NZ,0x94BA
+$94B6  DD CB 02 DE SET 3,(IX+0x02)
+$94BA  84          ADD A,H
+$94BB  6F          LD L,A
+$94BC  AF          XOR A
+$94BD  DD 77 0E    LD (IX+0x0E),A
+$94C0  DD 77 0F    LD (IX+0x0F),A
+$94C3  DD 77 03    LD (IX+0x03),A
+$94C6  DD 36 07 00 LD (IX+0x07),0x00
+$94CA  D9          EXX
+$94CB  21 1D D8    LD HL,0xD81D
+$94CE  3A F1 FF    LD A,(0xFFF1)
+$94D1  AE          XOR (HL)
+$94D2  0E 04       LD C,0x04
+$94D4  FA DF 84    JP M,0x84DF
+$94D7  3A 1F D8    LD A,(0xD81F)
+$94DA  3C          INC A
+$94DB  E6 7F       AND 0x7F
+$94DD  B1          OR C
+$94DE  4F          LD C,A
+$94DF  3A F1 FF    LD A,(0xFFF1)
+$94E2  A7          AND A
+$94E3  79          LD A,C
+$94E4  F2 E9 84    JP P,0x84E9
+$94E7  ED 44       NEG
+$94E9  DD 36 0C 00 LD (IX+0x0C),0x00
+$94ED  DD 77 0D    LD (IX+0x0D),A
+$94F0  FD 46 00    LD B,(IY+0x00)
+$94F3  21 B0 67    LD HL,0x67B0
+$94F6  3E FF       LD A,0xFF
+$94F8  0E FF       LD C,0xFF
+$94FA  ED B1       CPIR
+$94FC  10 FA       DJNZ 0x94F8
+$94FE  DD 75 09    LD (IX+0x09),IXL
+$9501  DD 74 0A    LD (IX+0x0A),IXH
+$9504  3E 01       LD A,0x01
+$9506  CB 7E       BIT 7,(HL)
+$9508  28 02       JR Z,0x950C
+$950A  23          INC HL
+$950B  7E          LD A,(HL)
+$950C  3C          INC A
+$950D  DD 77 0B    LD (IX+0x0B),A
+$9510  21 86 5B    LD HL,0x5B86
+$9513  DD 75 00    LD (IX+0x00),IXL
+$9516  DD 74 01    LD (IX+0x01),IXH
+$9519  11 10 00    LD DE,0x0010
+$951C  DD 19       ADD IX,DE
+$951E  FD 23       INC IY
+$9520  D9          EXX
+$9521  05          DEC B
+$9522  C2 93 84    JP NZ,0x8493
+$9525  79          LD A,C
+$9526  F6 80       OR 0x80
+$9528  32 3A D9    LD (0xD93A),A
+$952B  3E 02       LD A,0x02
+$952D  32 39 DC    LD (0xDC39),A
+$9530  C9          RET
+=== $94C5  999 instrs, ends RET at $9531 ===
+$94C5  03          INC BC
+$94C6  DD 36 07 00 LD (IX+0x07),0x00
+$94CA  D9          EXX
+$94CB  21 1D D8    LD HL,0xD81D
+$94CE  3A F1 FF    LD A,(0xFFF1)
+$94D1  AE          XOR (HL)
+$94D2  0E 04       LD C,0x04
+$94D4  FA DF 84    JP M,0x84DF
+$94D7  3A 1F D8    LD A,(0xD81F)
+$94DA  3C          INC A
+$94DB  E6 7F       AND 0x7F
+$94DD  B1          OR C
+$94DE  4F          LD C,A
+$94DF  3A F1 FF    LD A,(0xFFF1)
+$94E2  A7          AND A
+$94E3  79          LD A,C
+$94E4  F2 E9 84    JP P,0x84E9
+$94E7  ED 44       NEG
+$94E9  DD 36 0C 00 LD (IX+0x0C),0x00
+$94ED  DD 77 0D    LD (IX+0x0D),A
+$94F0  FD 46 00    LD B,(IY+0x00)
+$94F3  21 B0 67    LD HL,0x67B0
+$94F6  3E FF       LD A,0xFF
+$94F8  0E FF       LD C,0xFF
+$94FA  ED B1       CPIR
+$94FC  10 FA       DJNZ 0x94F8
+$94FE  DD 75 09    LD (IX+0x09),IXL
+$9501  DD 74 0A    LD (IX+0x0A),IXH
+$9504  3E 01       LD A,0x01
+$9506  CB 7E       BIT 7,(HL)
+$9508  28 02       JR Z,0x950C
+$950A  23          INC HL
+$950B  7E          LD A,(HL)
+$950C  3C          INC A
+$950D  DD 77 0B    LD (IX+0x0B),A
+$9510  21 86 5B    LD HL,0x5B86
+$9513  DD 75 00    LD (IX+0x00),IXL
+$9516  DD 74 01    LD (IX+0x01),IXH
+$9519  11 10 00    LD DE,0x0010
+$951C  DD 19       ADD IX,DE
+$951E  FD 23       INC IY
+$9520  D9          EXX
+$9521  05          DEC B
+$9522  C2 93 84    JP NZ,0x8493
+$9525  79          LD A,C
+$9526  F6 80       OR 0x80
+$9528  32 3A D9    LD (0xD93A),A
+$952B  3E 02       LD A,0x02
+$952D  32 39 DC    LD (0xDC39),A
+$9530  C9          RET
+=== $94EC  999 instrs, ends RET at $9531 ===
+$94EC  00          NOP
+$94ED  DD 77 0D    LD (IX+0x0D),A
+$94F0  FD 46 00    LD B,(IY+0x00)
+$94F3  21 B0 67    LD HL,0x67B0
+$94F6  3E FF       LD A,0xFF
+$94F8  0E FF       LD C,0xFF
+$94FA  ED B1       CPIR
+$94FC  10 FA       DJNZ 0x94F8
+$94FE  DD 75 09    LD (IX+0x09),IXL
+$9501  DD 74 0A    LD (IX+0x0A),IXH
+$9504  3E 01       LD A,0x01
+$9506  CB 7E       BIT 7,(HL)
+$9508  28 02       JR Z,0x950C
+$950A  23          INC HL
+$950B  7E          LD A,(HL)
+$950C  3C          INC A
+$950D  DD 77 0B    LD (IX+0x0B),A
+$9510  21 86 5B    LD HL,0x5B86
+$9513  DD 75 00    LD (IX+0x00),IXL
+$9516  DD 74 01    LD (IX+0x01),IXH
+$9519  11 10 00    LD DE,0x0010
+$951C  DD 19       ADD IX,DE
+$951E  FD 23       INC IY
+$9520  D9          EXX
+$9521  05          DEC B
+$9522  C2 93 84    JP NZ,0x8493
+$9525  79          LD A,C
+$9526  F6 80       OR 0x80
+$9528  32 3A D9    LD (0xD93A),A
+$952B  3E 02       LD A,0x02
+$952D  32 39 DC    LD (0xDC39),A
+$9530  C9          RET
+=== $954C  999 instrs, ends RET at $955C ===
+$954C  98          SBC A,B
+$954D  DC 7E 32    CALL C,0x327E
+$9550  9A          SBC A,D
+$9551  D9          EXX
+$9552  DD 6E 03    LD IXL,(IX+0x03)
+$9555  DD 66 04    LD IXH,(IX+0x04)
+$9558  22 3C D9    LD (0xD93C),HL
+$955B  C9          RET
+=== $95BE  999 instrs, ends RET at $95C3 ===
+$95BE  C0          RET NZ
+$95BF  CD AB 87    CALL 0x87AB
+$95C2  C9          RET
+=== $96D8  999 instrs, ends RET at $97B0 ===
+$96D8  81          ADD A,C
+$96D9  C5          PUSH BC
+$96DA  DD 7E 0A    LD A,(IX+0x0A)
+$96DD  CB 47       BIT 0,A
+$96DF  DD CB 02 9E RES 3,(IX+0x02)
+$96E3  20 04       JR NZ,0x96E9
+$96E5  DD CB 02 DE SET 3,(IX+0x02)
+$96E9  A7          AND A
+$96EA  28 0C       JR Z,0x96F8
+$96EC  DD 35 0A    DEC (IX+0x0A)
+$96EF  C2 A5 87    JP NZ,0x87A5
+$96F2  DD CB 02 46 BIT 0,(IX+0x02)
+$96F6  28 05       JR Z,0x96FD
+$96F8  DD 35 08    DEC (IX+0x08)
+$96FB  20 06       JR NZ,0x9703
+$96FD  CD 4E 88    CALL 0x884E
+$9700  C3 A5 87    JP 0x87A5
+$9703  3A 56 FF    LD A,(0xFF56)
+$9706  DD BE 06    CP (IX+0x06)
+$9709  3E 01       LD A,0x01
+$970B  30 02       JR NC,0x970F
+$970D  ED 44       NEG
+$970F  DD 86 0E    ADD A,(IX+0x0E)
+$9712  4F          LD C,A
+$9713  F2 18 87    JP P,0x8718
+$9716  ED 44       NEG
+$9718  FE 07       CP 0x07
+$971A  38 03       JR C,0x971F
+$971C  DD 4E 0E    LD C,(IX+0x0E)
+$971F  DD 71 0E    LD (IX+0x0E),C
+$9722  79          LD A,C
+$9723  DD 86 06    ADD A,(IX+0x06)
+$9726  0E 00       LD C,0x00
+$9728  FA 32 87    JP M,0x8732
+$972B  FE 6F       CP 0x6F
+$972D  0E 6F       LD C,0x6F
+$972F  30 01       JR NC,0x9732
+$9731  4F          LD C,A
+$9732  DD 71 06    LD (IX+0x06),C
+$9735  DD 34 09    INC (IX+0x09)
+$9738  DD CB 09 46 BIT 0,(IX+0x09)
+$973C  28 37       JR Z,0x9775
+$973E  2A 54 FF    LD HL,(0xFF54)
+$9741  DD 5E 04    LD E,(IX+0x04)
+$9744  DD 56 05    LD D,(IX+0x05)
+$9747  A7          AND A
+$9748  ED 52       SBC HL,DE
+$974A  11 02 00    LD DE,0x0002
+$974D  30 07       JR NC,0x9756
+$974F  21 00 00    LD HL,0x0000
+$9752  A7          AND A
+$9753  ED 52       SBC HL,DE
+$9755  EB          EX DE,HL
+$9756  DD 6E 0C    LD IXL,(IX+0x0C)
+$9759  DD 66 0D    LD IXH,(IX+0x0D)
+$975C  A7          AND A
+$975D  ED 5A       ADC HL,DE
+$975F  EB          EX DE,HL
+$9760  0E 06       LD C,0x06
+$9762  06 00       LD B,0x00
+$9764  F2 6F 87    JP P,0x876F
+$9767  21 00 00    LD HL,0x0000
+$976A  A7          AND A
+$976B  ED 52       SBC HL,DE
+$976D  18 02       JR 0x9771
+$976F  6B          LD L,E
+$9770  62          LD H,D
+$9771  09          ADD HL,BC
+$9772  F2 7B 87    JP P,0x877B
+$9775  DD 5E 0C    LD E,(IX+0x0C)
+$9778  DD 56 0D    LD D,(IX+0x0D)
+$977B  DD 73 0C    LD (IX+0x0C),E
+$977E  DD 72 0D    LD (IX+0x0D),D
+$9781  DD 6E 04    LD IXL,(IX+0x04)
+$9784  DD 66 05    LD IXH,(IX+0x05)
+$9787  A7          AND A
+$9788  ED 5A       ADC HL,DE
+$978A  01 00 00    LD BC,0x0000
+$978D  FA 9D 87    JP M,0x879D
+$9790  4D          LD C,L
+$9791  44          LD B,H
+$9792  11 E7 0B    LD DE,0x0BE7
+$9795  A7          AND A
+$9796  ED 52       SBC HL,DE
+$9798  38 03       JR C,0x979D
+$979A  01 E7 0B    LD BC,0x0BE7
+$979D  CB 81       RES 0,C
+$979F  DD 71 04    LD (IX+0x04),C
+$97A2  DD 70 05    LD (IX+0x05),B
+$97A5  C1          POP BC
+$97A6  16 00       LD D,0x00
+$97A8  C3 E0 81    JP 0x81E0
+$97AB  3A BF DA    LD A,(0xDABF)
+$97AE  3C          INC A
+$97AF  C8          RET Z
+=== $9798  999 instrs, ends RET at $97B0 ===
+$9798  38 03       JR C,0x979D
+$979A  01 E7 0B    LD BC,0x0BE7
+$979D  CB 81       RES 0,C
+$979F  DD 71 04    LD (IX+0x04),C
+$97A2  DD 70 05    LD (IX+0x05),B
+$97A5  C1          POP BC
+$97A6  16 00       LD D,0x00
+$97A8  C3 E0 81    JP 0x81E0
+$97AB  3A BF DA    LD A,(0xDABF)
+$97AE  3C          INC A
+$97AF  C8          RET Z
+=== $9899  999 instrs, ends RET at $98A7 ===
+$9899  0F          RRCA
+$989A  0F          RRCA
+$989B  FE 87       CP 0x87
+$989D  38 04       JR C,0x98A3
+$989F  FE A5       CP 0xA5
+$98A1  38 04       JR C,0x98A7
+$98A3  19          ADD HL,DE
+$98A4  10 E4       DJNZ 0x988A
+$98A6  C9          RET
+=== $98EF  999 instrs, ends RET at $9920 ===
+$98EF  77          LD (HL),A
+$98F0  08          EX AF,AF'
+$98F1  3A F6 FF    LD A,(0xFFF6)
+$98F4  FD 77 0E    LD (IY+0x0E),A
+$98F7  17          RLA
+$98F8  9F          SBC A,A
+$98F9  FD 77 0F    LD (IY+0x0F),A
+$98FC  DD 7E 06    LD A,(IX+0x06)
+$98FF  FD 77 06    LD (IY+0x06),A
+$9902  DD 6E 04    LD IXL,(IX+0x04)
+$9905  DD 66 05    LD IXH,(IX+0x05)
+$9908  11 F8 FF    LD DE,0xFFF8
+$990B  FD CB 0F 7E BIT 7,(IY+0x0F)
+$990F  20 03       JR NZ,0x9914
+$9911  11 10 00    LD DE,0x0010
+$9914  19          ADD HL,DE
+$9915  FD 75 04    LD (IY+0x04),IYL
+$9918  FD 74 05    LD (IY+0x05),IYH
+$991B  21 3A D9    LD HL,0xD93A
+$991E  34          INC (HL)
+$991F  C9          RET
+=== $9900  999 instrs, ends RET at $9920 ===
+$9900  77          LD (HL),A
+$9901  06 DD       LD B,0xDD
+$9903  6E          LD L,(HL)
+$9904  04          INC B
+$9905  DD 66 05    LD IXH,(IX+0x05)
+$9908  11 F8 FF    LD DE,0xFFF8
+$990B  FD CB 0F 7E BIT 7,(IY+0x0F)
+$990F  20 03       JR NZ,0x9914
+$9911  11 10 00    LD DE,0x0010
+$9914  19          ADD HL,DE
+$9915  FD 75 04    LD (IY+0x04),IYL
+$9918  FD 74 05    LD (IY+0x05),IYH
+$991B  21 3A D9    LD HL,0xD93A
+$991E  34          INC (HL)
+$991F  C9          RET
+=== $994B  999 instrs, ends RET at $9992 ===
+$994B  07          RLCA
+$994C  11 10 00    LD DE,0x0010
+$994F  FD CB 02 4E BIT 1,(IY+0x02)
+$9953  28 38       JR Z,0x998D
+$9955  FD CB 02 46 BIT 0,(IY+0x02)
+$9959  28 32       JR Z,0x998D
+$995B  FD CB 02 5E BIT 3,(IY+0x02)
+$995F  28 2C       JR Z,0x998D
+$9961  FD 7E 07    LD A,(IY+0x07)
+$9964  FE 03       CP 0x03
+$9966  20 05       JR NZ,0x996D
+$9968  CD 7D 8A    CALL 0x8A7D
+$996B  18 20       JR 0x998D
+$996D  FE 01       CP 0x01
+$996F  20 1C       JR NZ,0x998D
+$9971  D9          EXX
+$9972  78          LD A,B
+$9973  FD 96 06    SUB (IY+0x06)
+$9976  F2 7B 89    JP P,0x897B
+$9979  ED 44       NEG
+$997B  B9          CP C
+$997C  30 0E       JR NC,0x998C
+$997E  FD 6E 04    LD IYL,(IY+0x04)
+$9981  FD 66 05    LD IYH,(IY+0x05)
+$9984  A7          AND A
+$9985  ED 52       SBC HL,DE
+$9987  7D          LD A,L
+$9988  FE 18       CP 0x18
+$998A  38 06       JR C,0x9992
+$998C  D9          EXX
+$998D  FD 19       ADD IY,DE
+$998F  10 BE       DJNZ 0x994F
+$9991  C9          RET
+=== $997E  999 instrs, ends RET at $9992 ===
+$997E  FD 6E 04    LD IYL,(IY+0x04)
+$9981  FD 66 05    LD IYH,(IY+0x05)
+$9984  A7          AND A
+$9985  ED 52       SBC HL,DE
+$9987  7D          LD A,L
+$9988  FE 18       CP 0x18
+$998A  38 06       JR C,0x9992
+$998C  D9          EXX
+$998D  FD 19       ADD IY,DE
+$998F  10 BE       DJNZ 0x994F
+$9991  C9          RET
+=== $9995  999 instrs, ends RET at $9997 ===
+$9995  7B          LD A,E
+$9996  D8          RET C
+=== $9A24  999 instrs, ends RET at $9A6B ===
+$9A24  10 00       DJNZ 0x9A26
+$9A26  06 06       LD B,0x06
+$9A28  DD 4E E6    LD C,(IX-0x1A)
+$9A2B  21 6B 8A    LD HL,0x8A6B
+$9A2E  D9          EXX
+$9A2F  21 8F 5B    LD HL,0x5B8F
+$9A32  DD 75 00    LD (IX+0x00),IXL
+$9A35  DD 74 01    LD (IX+0x01),IXH
+$9A38  DD 36 03 00 LD (IX+0x03),0x00
+$9A3C  DD 36 07 02 LD (IX+0x07),0x02
+$9A40  DD 36 08 02 LD (IX+0x08),0x02
+$9A44  DD CB 02 CE SET 1,(IX+0x02)
+$9A48  DD CB 02 DE SET 3,(IX+0x02)
+$9A4C  D9          EXX
+$9A4D  7E          LD A,(HL)
+$9A4E  23          INC HL
+$9A4F  DD 77 0A    LD (IX+0x0A),A
+$9A52  A7          AND A
+$9A53  28 04       JR Z,0x9A59
+$9A55  DD CB 02 9E RES 3,(IX+0x02)
+$9A59  7E          LD A,(HL)
+$9A5A  23          INC HL
+$9A5B  C6 0C       ADD A,0x0C
+$9A5D  DD 77 09    LD (IX+0x09),A
+$9A60  7E          LD A,(HL)
+$9A61  23          INC HL
+$9A62  81          ADD A,C
+$9A63  DD 77 06    LD (IX+0x06),A
+$9A66  DD 19       ADD IX,DE
+$9A68  10 C4       DJNZ 0x9A2E
+$9A6A  C9          RET
+=== $9A59  999 instrs, ends RET at $9A6B ===
+$9A59  7E          LD A,(HL)
+$9A5A  23          INC HL
+$9A5B  C6 0C       ADD A,0x0C
+$9A5D  DD 77 09    LD (IX+0x09),A
+$9A60  7E          LD A,(HL)
+$9A61  23          INC HL
+$9A62  81          ADD A,C
+$9A63  DD 77 06    LD (IX+0x06),A
+$9A66  DD 19       ADD IX,DE
+$9A68  10 C4       DJNZ 0x9A2E
+$9A6A  C9          RET
+=== $9A7C  999 instrs, ends RET at $9AB0 ===
+$9A7C  07          RLCA
+$9A7D  F5          PUSH AF
+$9A7E  E5          PUSH HL
+$9A7F  D5          PUSH DE
+$9A80  FD 7E 0A    LD A,(IY+0x0A)
+$9A83  A7          AND A
+$9A84  20 26       JR NZ,0x9AAC
+$9A86  FD 6E 04    LD IYL,(IY+0x04)
+$9A89  FD 66 05    LD IYH,(IY+0x05)
+$9A8C  ED 5B 5C D7 LD DE,(0xD75C)
+$9A90  A7          AND A
+$9A91  ED 52       SBC HL,DE
+$9A93  7D          LD A,L
+$9A94  D6 52       SUB 0x52
+$9A96  FE 1C       CP 0x1C
+$9A98  30 12       JR NC,0x9AAC
+$9A9A  FD 7E 06    LD A,(IY+0x06)
+$9A9D  C6 0E       ADD A,0x0E
+$9A9F  DD 96 06    SUB (IX+0x06)
+$9AA2  FE 1D       CP 0x1D
+$9AA4  30 06       JR NC,0x9AAC
+$9AA6  D1          POP DE
+$9AA7  E1          POP HL
+$9AA8  F1          POP AF
+$9AA9  C3 92 89    JP 0x8992
+$9AAC  D1          POP DE
+$9AAD  E1          POP HL
+$9AAE  F1          POP AF
+$9AAF  C9          RET
+=== $9B90  999 instrs, ends RET at $9BC4 ===
+$9B90  04          INC B
+$9B91  A0          AND B
+$9B92  00          NOP
+$9B93  FF          RST 0x38
+$9B94  88          ADC A,B
+$9B95  00          NOP
+$9B96  88          ADC A,B
+$9B97  05          DEC B
+$9B98  88          ADC A,B
+$9B99  06 88       LD B,0x88
+$9B9B  00          NOP
+$9B9C  00          NOP
+$9B9D  02          LD (BC),A
+$9B9E  42          LD B,D
+$9B9F  06 46       LD B,0x46
+$9BA1  06 42       LD B,0x42
+$9BA3  02          LD (BC),A
+$9BA4  00          NOP
+$9BA5  02          LD (BC),A
+$9BA6  42          LD B,D
+$9BA7  06 46       LD B,0x46
+$9BA9  06 42       LD B,0x42
+$9BAB  02          LD (BC),A
+$9BAC  00          NOP
+$9BAD  02          LD (BC),A
+$9BAE  42          LD B,D
+$9BAF  06 46       LD B,0x46
+$9BB1  06 42       LD B,0x42
+$9BB3  02          LD (BC),A
+$9BB4  06 32       LD B,0x32
+$9BB6  C5          PUSH BC
+$9BB7  CD 8E 93    CALL 0x938E
+$9BBA  3A BF D7    LD A,(0xD7BF)
+$9BBD  A7          AND A
+$9BBE  C1          POP BC
+$9BBF  20 F3       JR NZ,0x9BB4
+$9BC1  10 F3       DJNZ 0x9BB6
+$9BC3  C9          RET
+=== $9BC1  999 instrs, ends RET at $9BC4 ===
+$9BC1  10 F3       DJNZ 0x9BB6
+$9BC3  C9          RET
+=== $9BCB  999 instrs, ends RET at $9C24 ===
+$9BCB  FF          RST 0x38
+$9BCC  3A D8 D8    LD A,(0xD8D8)
+$9BCF  4F          LD C,A
+$9BD0  D9          EXX
+$9BD1  08          EX AF,AF'
+$9BD2  21 1A 58    LD HL,0x581A
+$9BD5  11 20 00    LD DE,0x0020
+$9BD8  3E 80       LD A,0x80
+$9BDA  08          EX AF,AF'
+$9BDB  D9          EXX
+$9BDC  FB          EI
+$9BDD  76          HALT
+$9BDE  F3          DI
+$9BDF  AF          XOR A
+$9BE0  D3 FE       OUT (0xFE),A
+$9BE2  3E 3E       LD A,0x3E
+$9BE4  06 0F       LD B,0x0F
+$9BE6  10 FE       DJNZ 0x9BE6
+$9BE8  E6 FF       AND 0xFF
+$9BEA  23          INC HL
+$9BEB  3D          DEC A
+$9BEC  C2 E4 8B    JP NZ,0x8BE4
+$9BEF  06 0D       LD B,0x0D
+$9BF1  10 FE       DJNZ 0x9BF1
+$9BF3  3E 00       LD A,0x00
+$9BF5  D3 FE       OUT (0xFE),A
+$9BF7  1A          LD A,(DE)
+$9BF8  1C          INC E
+$9BF9  D9          EXX
+$9BFA  4F          LD C,A
+$9BFB  08          EX AF,AF'
+$9BFC  0F          RRCA
+$9BFD  D2 04 8C    JP NC,0x8C04
+$9C00  19          ADD HL,DE
+$9C01  C3 07 8C    JP 0x8C07
+$9C04  46          LD B,(HL)
+$9C05  46          LD B,(HL)
+$9C06  46          LD B,(HL)
+$9C07  41          LD B,C
+$9C08  F9          LD SP,HL
+$9C09  C5          PUSH BC
+$9C0A  C5          PUSH BC
+$9C0B  C5          PUSH BC
+$9C0C  C5          PUSH BC
+$9C0D  C5          PUSH BC
+$9C0E  C5          PUSH BC
+$9C0F  C5          PUSH BC
+$9C10  C5          PUSH BC
+$9C11  C5          PUSH BC
+$9C12  C5          PUSH BC
+$9C13  00          NOP
+$9C14  00          NOP
+$9C15  00          NOP
+$9C16  D9          EXX
+$9C17  08          EX AF,AF'
+$9C18  0D          DEC C
+$9C19  C2 F7 8B    JP NZ,0x8BF7
+$9C1C  3E 00       LD A,0x00
+$9C1E  D3 FE       OUT (0xFE),A
+$9C20  31 00 00    LD SP,0x0000
+$9C23  C9          RET
+=== $9C36  999 instrs, ends RET at $9C49 ===
+$9C36  0E 02       LD C,0x02
+$9C38  F2 41 8C    JP P,0x8C41
+$9C3B  E6 7F       AND 0x7F
+$9C3D  4F          LD C,A
+$9C3E  0C          INC C
+$9C3F  7E          LD A,(HL)
+$9C40  23          INC HL
+$9C41  0D          DEC C
+$9C42  28 EB       JR Z,0x9C2F
+$9C44  12          LD (DE),A
+$9C45  13          INC DE
+$9C46  10 F9       DJNZ 0x9C41
+$9C48  C9          RET
+=== $9C47  999 instrs, ends RET at $9C49 ===
+$9C47  F9          LD SP,HL
+$9C48  C9          RET
+=== $9D63  999 instrs, ends RET at $9F0C ===
+$9D63  42          LD B,D
+$9D64  47          LD B,A
+$9D65  61          LD H,C
+$9D66  6D          LD L,L
+$9D67  65          LD H,L
+$9D68  20 20       JR NZ,0x9D8A
+$9D6A  4F          LD C,A
+$9D6B  76          HALT
+$9D6C  65          LD H,L
+$9D6D  F2 EC 58    JP P,0x58EC
+$9D70  43          LD B,E
+$9D71  42          LD B,D
+$9D72  50          LD D,B
+$9D73  6C          LD L,H
+$9D74  61          LD H,C
+$9D75  79          LD A,C
+$9D76  65          LD H,L
+$9D77  72          LD (HL),D
+$9D78  20 B1       JR NZ,0x9D2B
+$9D7A  41          LD B,C
+$9D7B  59          LD E,C
+$9D7C  05          DEC B
+$9D7D  03          INC BC
+$9D7E  59          LD E,C
+$9D7F  6F          LD L,A
+$9D80  75          LD (HL),L
+$9D81  20 68       JR NZ,0x9DEB
+$9D83  61          LD H,C
+$9D84  76          HALT
+$9D85  65          LD H,L
+$9D86  20 61       JR NZ,0x9DE9
+$9D88  6D          LD L,L
+$9D89  61          LD H,C
+$9D8A  73          LD (HL),E
+$9D8B  73          LD (HL),E
+$9D8C  65          LD H,L
+$9D8D  64          LD H,H
+$9D8E  20 61       JR NZ,0x9DF1
+$9D90  20 67       JR NZ,0x9DF9
+$9D92  72          LD (HL),D
+$9D93  65          LD H,L
+$9D94  61          LD H,C
+$9D95  74          LD (HL),H
+$9D96  20 73       JR NZ,0x9E0B
+$9D98  63          LD H,E
+$9D99  6F          LD L,A
+$9D9A  72          LD (HL),D
+$9D9B  E5          PUSH HL
+$9D9C  A3          AND E
+$9D9D  59          LD E,C
+$9D9E  06 05       LD B,0x05
+$9DA0  50          LD D,B
+$9DA1  6C          LD L,H
+$9DA2  65          LD H,L
+$9DA3  61          LD H,C
+$9DA4  73          LD (HL),E
+$9DA5  65          LD H,L
+$9DA6  20 65       JR NZ,0x9E0D
+$9DA8  6E          LD L,(HL)
+$9DA9  74          LD (HL),H
+$9DAA  65          LD H,L
+$9DAB  72          LD (HL),D
+$9DAC  20 79       JR NZ,0x9E27
+$9DAE  6F          LD L,A
+$9DAF  75          LD (HL),L
+$9DB0  72          LD (HL),D
+$9DB1  20 69       JR NZ,0x9E1C
+$9DB3  6E          LD L,(HL)
+$9DB4  69          LD L,C
+$9DB5  74          LD (HL),H
+$9DB6  69          LD L,C
+$9DB7  61          LD H,C
+$9DB8  6C          LD L,H
+$9DB9  F3          DI
+$9DBA  A9          XOR C
+$9DBB  58          LD E,B
+$9DBC  45          LD B,L
+$9DBD  43          LD B,E
+$9DBE  44          LD B,H
+$9DBF  72          LD (HL),D
+$9DC0  65          LD H,L
+$9DC1  61          LD H,C
+$9DC2  64          LD H,H
+$9DC3  6E          LD L,(HL)
+$9DC4  6F          LD L,A
+$9DC5  75          LD (HL),L
+$9DC6  67          LD H,A
+$9DC7  68          LD L,B
+$9DC8  74          LD (HL),H
+$9DC9  27          DAA
+$9DCA  F3          DI
+$9DCB  E6 58       AND 0x58
+$9DCD  05          DEC B
+$9DCE  03          INC BC
+$9DCF  44          LD B,H
+$9DD0  65          LD H,L
+$9DD1  66          LD H,(HL)
+$9DD2  65          LD H,L
+$9DD3  6E          LD L,(HL)
+$9DD4  63          LD H,E
+$9DD5  65          LD H,L
+$9DD6  73          LD (HL),E
+$9DD7  20 50       JR NZ,0x9E29
+$9DD9  65          LD H,L
+$9DDA  6E          LD L,(HL)
+$9DDB  65          LD H,L
+$9DDC  74          LD (HL),H
+$9DDD  72          LD (HL),D
+$9DDE  61          LD H,C
+$9DDF  74          LD (HL),H
+$9DE0  65          LD H,L
+$9DE1  E4 62 59    CALL PO,0x5962
+$9DE4  43          LD B,E
+$9DE5  42          LD B,D
+$9DE6  44          LD B,H
+$9DE7  65          LD H,L
+$9DE8  73          LD (HL),E
+$9DE9  74          LD (HL),H
+$9DEA  72          LD (HL),D
+$9DEB  75          LD (HL),L
+$9DEC  63          LD H,E
+$9DED  74          LD (HL),H
+$9DEE  20 53       JR NZ,0x9E43
+$9DF0  65          LD H,L
+$9DF1  71          LD (HL),C
+$9DF2  75          LD (HL),L
+$9DF3  65          LD H,L
+$9DF4  6E          LD L,(HL)
+$9DF5  63          LD H,E
+$9DF6  65          LD H,L
+$9DF7  20 49       JR NZ,0x9E42
+$9DF9  6E          LD L,(HL)
+$9DFA  69          LD L,C
+$9DFB  74          LD (HL),H
+$9DFC  69          LD L,C
+$9DFD  61          LD H,C
+$9DFE  74          LD (HL),H
+$9DFF  65          LD H,L
+$9E00  E4 E5 59    CALL PO,0x59E5
+$9E03  05          DEC B
+$9E04  04          INC B
+$9E05  57          LD D,A
+$9E06  61          LD H,C
+$9E07  76          HALT
+$9E08  65          LD H,L
+$9E09  20 64       JR NZ,0x9E6F
+$9E0B  65          LD H,L
+$9E0C  73          LD (HL),E
+$9E0D  74          LD (HL),H
+$9E0E  72          LD (HL),D
+$9E0F  75          LD (HL),L
+$9E10  63          LD H,E
+$9E11  74          LD (HL),H
+$9E12  69          LD L,C
+$9E13  6F          LD L,A
+$9E14  6E          LD L,(HL)
+$9E15  20 62       JR NZ,0x9E79
+$9E17  6F          LD L,A
+$9E18  6E          LD L,(HL)
+$9E19  75          LD (HL),L
+$9E1A  F3          DI
+$9E1B  2E 5A       LD L,0x5A
+$9E1D  05          DEC B
+$9E1E  04          INC B
+$9E1F  78          LD A,B
+$9E20  20 31       JR NZ,0x9E53
+$9E22  30 30       JR NC,0x9E54
+$9E24  B0          OR B
+$9E25  81          ADD A,C
+$9E26  5A          LD E,D
+$9E27  05          DEC B
+$9E28  04          INC B
+$9E29  44          LD B,H
+$9E2A  72          LD (HL),D
+$9E2B  65          LD H,L
+$9E2C  61          LD H,C
+$9E2D  64          LD H,H
+$9E2E  6E          LD L,(HL)
+$9E2F  6F          LD L,A
+$9E30  75          LD (HL),L
+$9E31  67          LD H,A
+$9E32  68          LD L,B
+$9E33  74          LD (HL),H
+$9E34  20 64       JR NZ,0x9E9A
+$9E36  65          LD H,L
+$9E37  73          LD (HL),E
+$9E38  74          LD (HL),H
+$9E39  72          LD (HL),D
+$9E3A  75          LD (HL),L
+$9E3B  63          LD H,E
+$9E3C  74          LD (HL),H
+$9E3D  69          LD L,C
+$9E3E  6F          LD L,A
+$9E3F  6E          LD L,(HL)
+$9E40  20 62       JR NZ,0x9EA4
+$9E42  6F          LD L,A
+$9E43  6E          LD L,(HL)
+$9E44  75          LD (HL),L
+$9E45  F3          DI
+$9E46  CE 5A       ADC A,0x5A
+$9E48  05          DEC B
+$9E49  04          INC B
+$9E4A  78          LD A,B
+$9E4B  20 31       JR NZ,0x9E7E
+$9E4D  30 B0       JR NC,0x9DFF
+$9E4F  CB 58       BIT 3,B
+$9E51  05          DEC B
+$9E52  43          LD B,E
+$9E53  2D          DEC L
+$9E54  20 4F       JR NZ,0x9EA5
+$9E56  70          LD (HL),B
+$9E57  74          LD (HL),H
+$9E58  69          LD L,C
+$9E59  6F          LD L,A
+$9E5A  6E          LD L,(HL)
+$9E5B  73          LD (HL),E
+$9E5C  20 AD       JR NZ,0x9E0B
+$9E5E  6C          LD L,H
+$9E5F  59          LD E,C
+$9E60  05          DEC B
+$9E61  03          INC BC
+$9E62  50          LD D,B
+$9E63  72          LD (HL),D
+$9E64  65          LD H,L
+$9E65  70          LD (HL),B
+$9E66  61          LD H,C
+$9E67  72          LD (HL),D
+$9E68  65          LD H,L
+$9E69  A1          AND C
+$9E6A  6B          LD L,E
+$9E6B  59          LD E,C
+$9E6C  06 42       LD B,0x42
+$9E6E  31 20 20    LD SP,0x2020
+$9E71  20 50       JR NZ,0x9EC3
+$9E73  6C          LD L,H
+$9E74  61          LD H,C
+$9E75  79          LD A,C
+$9E76  65          LD H,L
+$9E77  F2 CC 59    JP P,0x59CC
+$9E7A  06 03       LD B,0x03
+$9E7C  4A          LD C,D
+$9E7D  6F          LD L,A
+$9E7E  79          LD A,C
+$9E7F  73          LD (HL),E
+$9E80  74          LD (HL),H
+$9E81  69          LD L,C
+$9E82  63          LD H,E
+$9E83  EB          EX DE,HL
+$9E84  CC 59 06    CALL Z,0x0659
+$9E87  03          INC BC
+$9E88  4B          LD C,E
+$9E89  65          LD H,L
+$9E8A  79          LD A,C
+$9E8B  62          LD H,D
+$9E8C  6F          LD L,A
+$9E8D  61          LD H,C
+$9E8E  72          LD (HL),D
+$9E8F  E4 6B 59    CALL PO,0x596B
+$9E92  06 42       LD B,0x42
+$9E94  32 20 20    LD (0x2020),A
+$9E97  50          LD D,B
+$9E98  6C          LD L,H
+$9E99  61          LD H,C
+$9E9A  79          LD A,C
+$9E9B  65          LD H,L
+$9E9C  72          LD (HL),D
+$9E9D  F3          DI
+$9E9E  2B          DEC HL
+$9E9F  58          LD E,B
+$9EA0  06 43       LD B,0x43
+$9EA2  20 20       JR NZ,0x9EC4
+$9EA4  20 44       JR NZ,0x9EEA
+$9EA6  65          LD H,L
+$9EA7  6D          LD L,L
+$9EA8  6F          LD L,A
+$9EA9  20 20       JR NZ,0x9ECB
+$9EAB  A0          AND B
+$9EAC  ED 4B DD D8 LD BC,(0xD8DD)
+$9EB0  2A DB D8    LD HL,(0xD8DB)
+$9EB3  11 20 00    LD DE,0x0020
+$9EB6  2C          INC L
+$9EB7  22 DB D8    LD (0xD8DB),HL
+$9EBA  2D          DEC L
+$9EBB  71          LD (HL),C
+$9EBC  DD CB 00 46 BIT 0,(IX+0x00)
+$9EC0  28 05       JR Z,0x9EC7
+$9EC2  21 60 5B    LD HL,0x5B60
+$9EC5  18 0C       JR 0x9ED3
+$9EC7  19          ADD HL,DE
+$9EC8  70          LD (HL),B
+$9EC9  21 00 3C    LD HL,0x3C00
+$9ECC  FE 20       CP 0x20
+$9ECE  30 03       JR NC,0x9ED3
+$9ED0  21 00 3C    LD HL,0x3C00
+$9ED3  07          RLCA
+$9ED4  07          RLCA
+$9ED5  07          RLCA
+$9ED6  47          LD B,A
+$9ED7  E6 F8       AND 0xF8
+$9ED9  4F          LD C,A
+$9EDA  A8          XOR B
+$9EDB  47          LD B,A
+$9EDC  09          ADD HL,BC
+$9EDD  ED 5B D9 D8 LD DE,(0xD8D9)
+$9EE1  1C          INC E
+$9EE2  ED 53 D9 D8 LD (0xD8D9),DE
+$9EE6  1D          DEC E
+$9EE7  DD CB 00 46 BIT 0,(IX+0x00)
+$9EEB  20 1F       JR NZ,0x9F0C
+$9EED  0E 02       LD C,0x02
+$9EEF  06 04       LD B,0x04
+$9EF1  7E          LD A,(HL)
+$9EF2  0F          RRCA
+$9EF3  B6          OR (HL)
+$9EF4  2C          INC L
+$9EF5  12          LD (DE),A
+$9EF6  14          INC D
+$9EF7  AF          XOR A
+$9EF8  12          LD (DE),A
+$9EF9  14          INC D
+$9EFA  10 F5       DJNZ 0x9EF1
+$9EFC  15          DEC D
+$9EFD  7B          LD A,E
+$9EFE  C6 20       ADD A,0x20
+$9F00  5F          LD E,A
+$9F01  7A          LD A,D
+$9F02  CE 00       ADC A,0x00
+$9F04  E6 F8       AND 0xF8
+$9F06  57          LD D,A
+$9F07  0D          DEC C
+$9F08  C2 EF 8E    JP NZ,0x8EEF
+$9F0B  C9          RET
+=== $9DDA  999 instrs, ends RET at $9F0C ===
+$9DDA  6E          LD L,(HL)
+$9DDB  65          LD H,L
+$9DDC  74          LD (HL),H
+$9DDD  72          LD (HL),D
+$9DDE  61          LD H,C
+$9DDF  74          LD (HL),H
+$9DE0  65          LD H,L
+$9DE1  E4 62 59    CALL PO,0x5962
+$9DE4  43          LD B,E
+$9DE5  42          LD B,D
+$9DE6  44          LD B,H
+$9DE7  65          LD H,L
+$9DE8  73          LD (HL),E
+$9DE9  74          LD (HL),H
+$9DEA  72          LD (HL),D
+$9DEB  75          LD (HL),L
+$9DEC  63          LD H,E
+$9DED  74          LD (HL),H
+$9DEE  20 53       JR NZ,0x9E43
+$9DF0  65          LD H,L
+$9DF1  71          LD (HL),C
+$9DF2  75          LD (HL),L
+$9DF3  65          LD H,L
+$9DF4  6E          LD L,(HL)
+$9DF5  63          LD H,E
+$9DF6  65          LD H,L
+$9DF7  20 49       JR NZ,0x9E42
+$9DF9  6E          LD L,(HL)
+$9DFA  69          LD L,C
+$9DFB  74          LD (HL),H
+$9DFC  69          LD L,C
+$9DFD  61          LD H,C
+$9DFE  74          LD (HL),H
+$9DFF  65          LD H,L
+$9E00  E4 E5 59    CALL PO,0x59E5
+$9E03  05          DEC B
+$9E04  04          INC B
+$9E05  57          LD D,A
+$9E06  61          LD H,C
+$9E07  76          HALT
+$9E08  65          LD H,L
+$9E09  20 64       JR NZ,0x9E6F
+$9E0B  65          LD H,L
+$9E0C  73          LD (HL),E
+$9E0D  74          LD (HL),H
+$9E0E  72          LD (HL),D
+$9E0F  75          LD (HL),L
+$9E10  63          LD H,E
+$9E11  74          LD (HL),H
+$9E12  69          LD L,C
+$9E13  6F          LD L,A
+$9E14  6E          LD L,(HL)
+$9E15  20 62       JR NZ,0x9E79
+$9E17  6F          LD L,A
+$9E18  6E          LD L,(HL)
+$9E19  75          LD (HL),L
+$9E1A  F3          DI
+$9E1B  2E 5A       LD L,0x5A
+$9E1D  05          DEC B
+$9E1E  04          INC B
+$9E1F  78          LD A,B
+$9E20  20 31       JR NZ,0x9E53
+$9E22  30 30       JR NC,0x9E54
+$9E24  B0          OR B
+$9E25  81          ADD A,C
+$9E26  5A          LD E,D
+$9E27  05          DEC B
+$9E28  04          INC B
+$9E29  44          LD B,H
+$9E2A  72          LD (HL),D
+$9E2B  65          LD H,L
+$9E2C  61          LD H,C
+$9E2D  64          LD H,H
+$9E2E  6E          LD L,(HL)
+$9E2F  6F          LD L,A
+$9E30  75          LD (HL),L
+$9E31  67          LD H,A
+$9E32  68          LD L,B
+$9E33  74          LD (HL),H
+$9E34  20 64       JR NZ,0x9E9A
+$9E36  65          LD H,L
+$9E37  73          LD (HL),E
+$9E38  74          LD (HL),H
+$9E39  72          LD (HL),D
+$9E3A  75          LD (HL),L
+$9E3B  63          LD H,E
+$9E3C  74          LD (HL),H
+$9E3D  69          LD L,C
+$9E3E  6F          LD L,A
+$9E3F  6E          LD L,(HL)
+$9E40  20 62       JR NZ,0x9EA4
+$9E42  6F          LD L,A
+$9E43  6E          LD L,(HL)
+$9E44  75          LD (HL),L
+$9E45  F3          DI
+$9E46  CE 5A       ADC A,0x5A
+$9E48  05          DEC B
+$9E49  04          INC B
+$9E4A  78          LD A,B
+$9E4B  20 31       JR NZ,0x9E7E
+$9E4D  30 B0       JR NC,0x9DFF
+$9E4F  CB 58       BIT 3,B
+$9E51  05          DEC B
+$9E52  43          LD B,E
+$9E53  2D          DEC L
+$9E54  20 4F       JR NZ,0x9EA5
+$9E56  70          LD (HL),B
+$9E57  74          LD (HL),H
+$9E58  69          LD L,C
+$9E59  6F          LD L,A
+$9E5A  6E          LD L,(HL)
+$9E5B  73          LD (HL),E
+$9E5C  20 AD       JR NZ,0x9E0B
+$9E5E  6C          LD L,H
+$9E5F  59          LD E,C
+$9E60  05          DEC B
+$9E61  03          INC BC
+$9E62  50          LD D,B
+$9E63  72          LD (HL),D
+$9E64  65          LD H,L
+$9E65  70          LD (HL),B
+$9E66  61          LD H,C
+$9E67  72          LD (HL),D
+$9E68  65          LD H,L
+$9E69  A1          AND C
+$9E6A  6B          LD L,E
+$9E6B  59          LD E,C
+$9E6C  06 42       LD B,0x42
+$9E6E  31 20 20    LD SP,0x2020
+$9E71  20 50       JR NZ,0x9EC3
+$9E73  6C          LD L,H
+$9E74  61          LD H,C
+$9E75  79          LD A,C
+$9E76  65          LD H,L
+$9E77  F2 CC 59    JP P,0x59CC
+$9E7A  06 03       LD B,0x03
+$9E7C  4A          LD C,D
+$9E7D  6F          LD L,A
+$9E7E  79          LD A,C
+$9E7F  73          LD (HL),E
+$9E80  74          LD (HL),H
+$9E81  69          LD L,C
+$9E82  63          LD H,E
+$9E83  EB          EX DE,HL
+$9E84  CC 59 06    CALL Z,0x0659
+$9E87  03          INC BC
+$9E88  4B          LD C,E
+$9E89  65          LD H,L
+$9E8A  79          LD A,C
+$9E8B  62          LD H,D
+$9E8C  6F          LD L,A
+$9E8D  61          LD H,C
+$9E8E  72          LD (HL),D
+$9E8F  E4 6B 59    CALL PO,0x596B
+$9E92  06 42       LD B,0x42
+$9E94  32 20 20    LD (0x2020),A
+$9E97  50          LD D,B
+$9E98  6C          LD L,H
+$9E99  61          LD H,C
+$9E9A  79          LD A,C
+$9E9B  65          LD H,L
+$9E9C  72          LD (HL),D
+$9E9D  F3          DI
+$9E9E  2B          DEC HL
+$9E9F  58          LD E,B
+$9EA0  06 43       LD B,0x43
+$9EA2  20 20       JR NZ,0x9EC4
+$9EA4  20 44       JR NZ,0x9EEA
+$9EA6  65          LD H,L
+$9EA7  6D          LD L,L
+$9EA8  6F          LD L,A
+$9EA9  20 20       JR NZ,0x9ECB
+$9EAB  A0          AND B
+$9EAC  ED 4B DD D8 LD BC,(0xD8DD)
+$9EB0  2A DB D8    LD HL,(0xD8DB)
+$9EB3  11 20 00    LD DE,0x0020
+$9EB6  2C          INC L
+$9EB7  22 DB D8    LD (0xD8DB),HL
+$9EBA  2D          DEC L
+$9EBB  71          LD (HL),C
+$9EBC  DD CB 00 46 BIT 0,(IX+0x00)
+$9EC0  28 05       JR Z,0x9EC7
+$9EC2  21 60 5B    LD HL,0x5B60
+$9EC5  18 0C       JR 0x9ED3
+$9EC7  19          ADD HL,DE
+$9EC8  70          LD (HL),B
+$9EC9  21 00 3C    LD HL,0x3C00
+$9ECC  FE 20       CP 0x20
+$9ECE  30 03       JR NC,0x9ED3
+$9ED0  21 00 3C    LD HL,0x3C00
+$9ED3  07          RLCA
+$9ED4  07          RLCA
+$9ED5  07          RLCA
+$9ED6  47          LD B,A
+$9ED7  E6 F8       AND 0xF8
+$9ED9  4F          LD C,A
+$9EDA  A8          XOR B
+$9EDB  47          LD B,A
+$9EDC  09          ADD HL,BC
+$9EDD  ED 5B D9 D8 LD DE,(0xD8D9)
+$9EE1  1C          INC E
+$9EE2  ED 53 D9 D8 LD (0xD8D9),DE
+$9EE6  1D          DEC E
+$9EE7  DD CB 00 46 BIT 0,(IX+0x00)
+$9EEB  20 1F       JR NZ,0x9F0C
+$9EED  0E 02       LD C,0x02
+$9EEF  06 04       LD B,0x04
+$9EF1  7E          LD A,(HL)
+$9EF2  0F          RRCA
+$9EF3  B6          OR (HL)
+$9EF4  2C          INC L
+$9EF5  12          LD (DE),A
+$9EF6  14          INC D
+$9EF7  AF          XOR A
+$9EF8  12          LD (DE),A
+$9EF9  14          INC D
+$9EFA  10 F5       DJNZ 0x9EF1
+$9EFC  15          DEC D
+$9EFD  7B          LD A,E
+$9EFE  C6 20       ADD A,0x20
+$9F00  5F          LD E,A
+$9F01  7A          LD A,D
+$9F02  CE 00       ADC A,0x00
+$9F04  E6 F8       AND 0xF8
+$9F06  57          LD D,A
+$9F07  0D          DEC C
+$9F08  C2 EF 8E    JP NZ,0x8EEF
+$9F0B  C9          RET
+=== $9FE0  999 instrs, ends RET at $9FE3 ===
+$9FE0  10 F7       DJNZ 0x9FD9
+$9FE2  C9          RET
+=== $A000  999 instrs, ends RET at $A044 ===
+$A000  21 00 00    LD HL,0x0000
+$A003  22 DD D8    LD (0xD8DD),HL
+$A006  DD 21 DF D8 LD IX,0xD8DF
+$A00A  DD 75 00    LD (IX+0x00),IXL
+$A00D  06 08       LD B,0x08
+$A00F  21 D7 58    LD HL,0x58D7
+$A012  22 DB D8    LD (0xD8DB),HL
+$A015  21 44 90    LD HL,0x9044
+$A018  C5          PUSH BC
+$A019  E5          PUSH HL
+$A01A  2A DB D8    LD HL,(0xD8DB)
+$A01D  11 32 00    LD DE,0x0032
+$A020  19          ADD HL,DE
+$A021  22 DB D8    LD (0xD8DB),HL
+$A024  CD 16 8F    CALL 0x8F16
+$A027  E1          POP HL
+$A028  CD 26 8F    CALL 0x8F26
+$A02B  E5          PUSH HL
+$A02C  3E 20       LD A,0x20
+$A02E  CD AC 8E    CALL 0x8EAC
+$A031  3E 20       LD A,0x20
+$A033  CD AC 8E    CALL 0x8EAC
+$A036  3E 20       LD A,0x20
+$A038  CD AC 8E    CALL 0x8EAC
+$A03B  E1          POP HL
+$A03C  CD 67 8F    CALL 0x8F67
+$A03F  23          INC HL
+$A040  C1          POP BC
+$A041  10 D5       DJNZ 0xA018
+$A043  C9          RET
+=== $A0B7  999 instrs, ends RET at $A11B ===
+$A0B7  ED B0       LDIR
+$A0B9  CD C4 8B    CALL 0x8BC4
+$A0BC  FD 21 21 91 LD IY,0x9121
+$A0C0  CD D0 8A    CALL 0x8AD0
+$A0C3  CD 8E 93    CALL 0x938E
+$A0C6  3A BF D7    LD A,(0xD7BF)
+$A0C9  A7          AND A
+$A0CA  28 0A       JR Z,0xA0D6
+$A0CC  D1          POP DE
+$A0CD  F1          POP AF
+$A0CE  3E 01       LD A,0x01
+$A0D0  C1          POP BC
+$A0D1  06 01       LD B,0x01
+$A0D3  C5          PUSH BC
+$A0D4  18 02       JR 0xA0D8
+$A0D6  D1          POP DE
+$A0D7  F1          POP AF
+$A0D8  3D          DEC A
+$A0D9  20 D3       JR NZ,0xA0AE
+$A0DB  C1          POP BC
+$A0DC  10 C7       DJNZ 0xA0A5
+$A0DE  01 FA 00    LD BC,0x00FA
+$A0E1  C5          PUSH BC
+$A0E2  FD 21 23 91 LD IY,0x9123
+$A0E6  CD D0 8A    CALL 0x8AD0
+$A0E9  CD C4 8B    CALL 0x8BC4
+$A0EC  CD 8E 93    CALL 0x938E
+$A0EF  C1          POP BC
+$A0F0  3A BF D7    LD A,(0xD7BF)
+$A0F3  A7          AND A
+$A0F4  20 05       JR NZ,0xA0FB
+$A0F6  0B          DEC BC
+$A0F7  79          LD A,C
+$A0F8  B0          OR B
+$A0F9  20 E6       JR NZ,0xA0E1
+$A0FB  06 49       LD B,0x49
+$A0FD  11 30 B9    LD DE,0xB930
+$A100  C5          PUSH BC
+$A101  1C          INC E
+$A102  1C          INC E
+$A103  D5          PUSH DE
+$A104  21 9C 8B    LD HL,0x8B9C
+$A107  01 12 00    LD BC,0x0012
+$A10A  ED B0       LDIR
+$A10C  CD C4 8B    CALL 0x8BC4
+$A10F  D1          POP DE
+$A110  C1          POP BC
+$A111  10 ED       DJNZ 0xA100
+$A113  CD A7 8F    CALL 0x8FA7
+$A116  3A BF D7    LD A,(0xD7BF)
+$A119  A7          AND A
+$A11A  C0          RET NZ
+=== $A112  999 instrs, ends RET at $A11B ===
+$A112  ED CD       DB ED CD
+$A114  A7          AND A
+$A115  8F          ADC A,A
+$A116  3A BF D7    LD A,(0xD7BF)
+$A119  A7          AND A
+$A11A  C0          RET NZ
+=== $A200  999 instrs, ends RET at $A234 ===
+$A200  F8          RET M
+$A201  D9          EXX
+$A202  3D          DEC A
+$A203  28 03       JR Z,0xA208
+$A205  11 FC D9    LD DE,0xD9FC
+$A208  21 78 90    LD HL,0x9078
+$A20B  06 08       LD B,0x08
+$A20D  CD AA 92    CALL 0x92AA
+$A210  30 1E       JR NC,0xA230
+$A212  D5          PUSH DE
+$A213  E5          PUSH HL
+$A214  78          LD A,B
+$A215  FE 08       CP 0x08
+$A217  28 0F       JR Z,0xA228
+$A219  2B          DEC HL
+$A21A  2B          DEC HL
+$A21B  2B          DEC HL
+$A21C  EB          EX DE,HL
+$A21D  21 07 00    LD HL,0x0007
+$A220  19          ADD HL,DE
+$A221  EB          EX DE,HL
+$A222  01 07 00    LD BC,0x0007
+$A225  ED B0       LDIR
+$A227  47          LD B,A
+$A228  E1          POP HL
+$A229  11 F9 FF    LD DE,0xFFF9
+$A22C  19          ADD HL,DE
+$A22D  D1          POP DE
+$A22E  10 DD       DJNZ 0xA20D
+$A230  78          LD A,B
+$A231  FE 08       CP 0x08
+$A233  C8          RET Z
+=== $AC04  999 instrs, ends RET at $AC15 ===
+$AC04  20 D4       JR NZ,0xABDA
+$AC06  09          ADD HL,BC
+$AC07  AF          XOR A
+$AC08  EB          EX DE,HL
+$AC09  D5          PUSH DE
+$AC0A  CD C1 9B    CALL 0x9BC1
+$AC0D  3D          DEC A
+$AC0E  D1          POP DE
+$AC0F  13          INC DE
+$AC10  D9          EXX
+$AC11  CD C1 9B    CALL 0x9BC1
+$AC14  C9          RET
+=== $CD02  999 instrs, ends RET at $CD1E ===
+$CD02  FF          RST 0x38
+$CD03  FF          RST 0x38
+$CD04  FF          RST 0x38
+$CD05  FF          RST 0x38
+$CD06  FF          RST 0x38
+$CD07  FE FE       CP 0xFE
+$CD09  FF          RST 0x38
+$CD0A  FF          RST 0x38
+$CD0B  FF          RST 0x38
+$CD0C  FF          RST 0x38
+$CD0D  FF          RST 0x38
+$CD0E  FF          RST 0x38
+$CD0F  FF          RST 0x38
+$CD10  FF          RST 0x38
+$CD11  FF          RST 0x38
+$CD12  FF          RST 0x38
+$CD13  FF          RST 0x38
+$CD14  FF          RST 0x38
+$CD15  FF          RST 0x38
+$CD16  FF          RST 0x38
+$CD17  FF          RST 0x38
+$CD18  FF          RST 0x38
+$CD19  F9          LD SP,HL
+$CD1A  FC F0 E0    CALL M,0xE0F0
+$CD1D  C0          RET NZ
+=== $CD04  999 instrs, ends RET at $CD1E ===
+$CD04  FF          RST 0x38
+$CD05  FF          RST 0x38
+$CD06  FF          RST 0x38
+$CD07  FE FE       CP 0xFE
+$CD09  FF          RST 0x38
+$CD0A  FF          RST 0x38
+$CD0B  FF          RST 0x38
+$CD0C  FF          RST 0x38
+$CD0D  FF          RST 0x38
+$CD0E  FF          RST 0x38
+$CD0F  FF          RST 0x38
+$CD10  FF          RST 0x38
+$CD11  FF          RST 0x38
+$CD12  FF          RST 0x38
+$CD13  FF          RST 0x38
+$CD14  FF          RST 0x38
+$CD15  FF          RST 0x38
+$CD16  FF          RST 0x38
+$CD17  FF          RST 0x38
+$CD18  FF          RST 0x38
+$CD19  F9          LD SP,HL
+$CD1A  FC F0 E0    CALL M,0xE0F0
+$CD1D  C0          RET NZ
+=== $CD06  999 instrs, ends RET at $CD1E ===
+$CD06  FF          RST 0x38
+$CD07  FE FE       CP 0xFE
+$CD09  FF          RST 0x38
+$CD0A  FF          RST 0x38
+$CD0B  FF          RST 0x38
+$CD0C  FF          RST 0x38
+$CD0D  FF          RST 0x38
+$CD0E  FF          RST 0x38
+$CD0F  FF          RST 0x38
+$CD10  FF          RST 0x38
+$CD11  FF          RST 0x38
+$CD12  FF          RST 0x38
+$CD13  FF          RST 0x38
+$CD14  FF          RST 0x38
+$CD15  FF          RST 0x38
+$CD16  FF          RST 0x38
+$CD17  FF          RST 0x38
+$CD18  FF          RST 0x38
+$CD19  F9          LD SP,HL
+$CD1A  FC F0 E0    CALL M,0xE0F0
+$CD1D  C0          RET NZ
+=== $CFCE  999 instrs, ends RET at $D032 ===
+$CFCE  FF          RST 0x38
+$CFCF  FF          RST 0x38
+$CFD0  FF          RST 0x38
+$CFD1  FF          RST 0x38
+$CFD2  FF          RST 0x38
+$CFD3  FF          RST 0x38
+$CFD4  FF          RST 0x38
+$CFD5  FE FE       CP 0xFE
+$CFD7  FE FE       CP 0xFE
+$CFD9  FE FE       CP 0xFE
+$CFDB  FF          RST 0x38
+$CFDC  FF          RST 0x38
+$CFDD  FF          RST 0x38
+$CFDE  FF          RST 0x38
+$CFDF  FF          RST 0x38
+$CFE0  FF          RST 0x38
+$CFE1  FF          RST 0x38
+$CFE2  FF          RST 0x38
+$CFE3  FF          RST 0x38
+$CFE4  FF          RST 0x38
+$CFE5  FF          RST 0x38
+$CFE6  FF          RST 0x38
+$CFE7  FF          RST 0x38
+$CFE8  FF          RST 0x38
+$CFE9  9F          SBC A,A
+$CFEA  3F          CCF
+$CFEB  0F          RRCA
+$CFEC  07          RLCA
+$CFED  03          INC BC
+$CFEE  03          INC BC
+$CFEF  00          NOP
+$CFF0  00          NOP
+$CFF1  03          INC BC
+$CFF2  03          INC BC
+$CFF3  07          RLCA
+$CFF4  0F          RRCA
+$CFF5  3F          CCF
+$CFF6  9F          SBC A,A
+$CFF7  FF          RST 0x38
+$CFF8  FF          RST 0x38
+$CFF9  FF          RST 0x38
+$CFFA  FF          RST 0x38
+$CFFB  FF          RST 0x38
+$CFFC  FF          RST 0x38
+$CFFD  FF          RST 0x38
+$CFFE  FF          RST 0x38
+$CFFF  FF          RST 0x38
+$D000  FF          RST 0x38
+$D001  FF          RST 0x38
+$D002  FF          RST 0x38
+$D003  FF          RST 0x38
+$D004  FF          RST 0x38
+$D005  FF          RST 0x38
+$D006  FF          RST 0x38
+$D007  7F          LD A,A
+$D008  7F          LD A,A
+$D009  FF          RST 0x38
+$D00A  FF          RST 0x38
+$D00B  FF          RST 0x38
+$D00C  FF          RST 0x38
+$D00D  FF          RST 0x38
+$D00E  FF          RST 0x38
+$D00F  FF          RST 0x38
+$D010  FF          RST 0x38
+$D011  FF          RST 0x38
+$D012  FF          RST 0x38
+$D013  FF          RST 0x38
+$D014  FF          RST 0x38
+$D015  FF          RST 0x38
+$D016  FF          RST 0x38
+$D017  FF          RST 0x38
+$D018  FF          RST 0x38
+$D019  FF          RST 0x38
+$D01A  FF          RST 0x38
+$D01B  FF          RST 0x38
+$D01C  FF          RST 0x38
+$D01D  FF          RST 0x38
+$D01E  FF          RST 0x38
+$D01F  FF          RST 0x38
+$D020  FF          RST 0x38
+$D021  FF          RST 0x38
+$D022  FF          RST 0x38
+$D023  FF          RST 0x38
+$D024  FF          RST 0x38
+$D025  FF          RST 0x38
+$D026  FF          RST 0x38
+$D027  FF          RST 0x38
+$D028  FF          RST 0x38
+$D029  FF          RST 0x38
+$D02A  FF          RST 0x38
+$D02B  FF          RST 0x38
+$D02C  FF          RST 0x38
+$D02D  FF          RST 0x38
+$D02E  FF          RST 0x38
+$D02F  FF          RST 0x38
+$D030  FF          RST 0x38
+$D031  E0          RET PO
+=== $E240  999 instrs, ends RET at $E28D ===
+$E240  0A          LD A,(BC)
+$E241  8A          ADC A,D
+$E242  05          DEC B
+$E243  89          ADC A,C
+$E244  B0          OR B
+$E245  09          ADD HL,BC
+$E246  85          ADD A,L
+$E247  64          LD H,H
+$E248  01 85 FC    LD BC,0xFC85
+$E24B  11 85 00    LD DE,0x0085
+$E24E  00          NOP
+$E24F  59          LD E,C
+$E250  09          ADD HL,BC
+$E251  07          RLCA
+$E252  26 C8       LD H,0xC8
+$E254  02          LD (BC),A
+$E255  58          LD E,B
+$E256  BA          CP D
+$E257  09          ADD HL,BC
+$E258  4A          LD C,D
+$E259  BA          CP D
+$E25A  09          ADD HL,BC
+$E25B  7B          LD A,E
+$E25C  71          LD (HL),C
+$E25D  08          EX AF,AF'
+$E25E  21 CD 02    LD HL,0x02CD
+$E261  7E          LD A,(HL)
+$E262  DB 02       IN A,(0x02)
+$E264  7E          LD A,(HL)
+$E265  00          NOP
+$E266  00          NOP
+$E267  09          ADD HL,BC
+$E268  04          INC B
+$E269  00          NOP
+$E26A  09          ADD HL,BC
+$E26B  03          INC BC
+$E26C  00          NOP
+$E26D  04          INC B
+$E26E  64          LD H,H
+$E26F  01 69 9A    LD BC,0x9A69
+$E272  10 86       DJNZ 0xE1FA
+$E274  74          LD (HL),H
+$E275  0C          INC C
+$E276  90          SUB B
+$E277  F7          RST 0x30
+$E278  06 39       LD B,0x39
+$E27A  00          NOP
+$E27B  00          NOP
+$E27C  54          LD D,H
+$E27D  64          LD H,H
+$E27E  01 8E 2A    LD BC,0x2A8E
+$E281  04          INC B
+$E282  95          SUB L
+$E283  6F          LD L,A
+$E284  01 8E 74    LD BC,0x748E
+$E287  01 44 00    LD BC,0x0044
+$E28A  00          NOP
+$E28B  59          LD E,C
+$E28C  C8          RET Z
+=== $F5BD  999 instrs, ends RET at $F5C1 ===
+$F5BD  CD C1 F5    CALL 0xF5C1
+$F5C0  D0          RET NC
+=== $F5C1  999 instrs, ends RET at $F5FB ===
+$F5C1  D9          EXX
+$F5C2  0B          DEC BC
+$F5C3  78          LD A,B
+$F5C4  B1          OR C
+$F5C5  20 14       JR NZ,0xF5DB
+$F5C7  01 5A 55    LD BC,0x555A
+$F5CA  14          INC D
+$F5CB  CB 5A       BIT 3,D
+$F5CD  28 05       JR Z,0xF5D4
+$F5CF  16 42       LD D,0x42
+$F5D1  1C          INC E
+$F5D2  18 05       JR 0xF5D9
+$F5D4  3E 42       LD A,0x42
+$F5D6  3E 42       LD A,0x42
+$F5D8  3C          INC A
+$F5D9  18 0F       JR 0xF5EA
+$F5DB  00          NOP
+$F5DC  00          NOP
+$F5DD  00          NOP
+$F5DE  00          NOP
+$F5DF  00          NOP
+$F5E0  00          NOP
+$F5E1  00          NOP
+$F5E2  00          NOP
+$F5E3  00          NOP
+$F5E4  00          NOP
+$F5E5  00          NOP
+$F5E6  00          NOP
+$F5E7  00          NOP
+$F5E8  3E 00       LD A,0x00
+$F5EA  ED 53 C1 5A LD (0x5AC1),DE
+$F5EE  D9          EXX
+$F5EF  3E 0E       LD A,0x0E
+$F5F1  3D          DEC A
+$F5F2  20 FD       JR NZ,0xF5F1
+$F5F4  3E 00       LD A,0x00
+$F5F6  A7          AND A
+$F5F7  A7          AND A
+$F5F8  A7          AND A
+$F5F9  04          INC B
+$F5FA  C8          RET Z

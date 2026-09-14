@@ -1,0 +1,2115 @@
+; URIDIUM - function reference (first-load 48K image, entry $F500)
+; sources: recursive code map + linear sweep + dynamic trace + manual analysis
+; per entry: CALLERS | IN | OUT | DESC
+
+==========================================================================
+PART 1 - DOCUMENTED FUNCTIONS AND ANCHORS
+==========================================================================
+
+FUNC $5CFE  multiload_name_ucode
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Multiload filename 'Ucode'.
+
+FUNC $5D13  multiload_name_screen
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Multiload filename 'screen'.
+
+FUNC $5D60  multiload_name_part2
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Multiload filename 'part2'.
+
+FUNC $5D86  multiload_name_lastpart
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Multiload filename 'lastpart'.
+
+FUNC $5D93  uridium_multiload_stub
+  KIND : FUNC
+  IN     : none (BASIC hands over control)
+  OUT    : PC=$F500, continuation code copied
+  DESC   : Copies $014F loader bytes from the BASIC/channel area to $F500 and RETs into them.
+
+FUNC $7BE7  timed_wait_draw_loop
+  KIND : FUNC
+  CALLERS: $8921, $8AF1, $8AB4, $8AC5
+  SIZE   : 4 bytes mapped
+  IN     : B = iteration count ($32 or $4B)
+  OUT    : timed delay, glyph bytes $41/$00/$16 processed
+  DESC   : Parameterised wait-and-draw loop used for title panel animation and wave waits.
+
+FUNC $884E  sprite_plot_on_expire
+  KIND : FUNC
+  IN     : IX -> object
+  OUT    : sprite bytes re-plotted
+  DESC   : Blit entry used when an enemy object timer expires (CALL from the enemy move path).
+
+FUNC $8856  sprite_plot_bytes
+  KIND : FUNC
+  IN     : HL -> sprite bytes, BC -> screen address
+  OUT    : pixel bytes written to the bitmap
+  DESC   : Sprite blit inner loop: LD H,(HL) / LD C,H / LD D,(HL) then LD (BC),A per pixel byte.
+
+FUNC $88B4  init_game_vars
+  KIND : FUNC
+  IN     : A = level/game variant
+  OUT    : state vars $DB1F/$DA5F/$D87B/$DB1A/$DC39 = 0; $D939 = $FF; IX = selected table
+  DESC   : Resets the game state and selects the level table pair ($DB78/$DBD8) by ($D99E).
+
+FUNC $89E9  copy_block_ldir
+  KIND : FUNC
+  IN     : HL -> source, DE -> destination, BC = length
+  OUT    : block copied
+  DESC   : LDIR wrapper.
+
+FUNC $8A7D  object_update_sequencer
+  KIND : FUNC
+  CALLERS: $9968
+  SIZE   : 2 bytes mapped
+  IN     : IX -> object, HL/DE = context
+  OUT    : sub-behaviours run; counters $DB1E/$DC9B updated
+  DESC   : Per-frame sequencer: CALLs $8124, $7A4F, $8856, $9379, $795E, $8AB0 in order, then wave-state tests.
+
+FUNC $8AD0  wave_pattern_setup
+  KIND : FUNC
+  CALLERS: $A0C0, $A0E6
+  SIZE   : 1 bytes mapped
+  IN     : IX = ($DB1B) panel objects, ($D99E) = level
+  OUT    : $8D79 patched from ($D99E)+$B0; object list rebuilt; $4B bytes of $7BE7 drawn
+  DESC   : Per-wave pattern bring-up: rebuilds the list, pokes the title helpers, runs the dispatcher tail.
+
+FUNC $8B2C  clamp_store_max_dc3b
+  KIND : FUNC
+  IN     : A = value
+  OUT    : ($DC3B) = max(old value, A)
+  DESC   : Monotonic maximum store - keeps the largest observed value.
+
+FUNC $8B4F  compute_attr_index_iy2
+  KIND : FUNC
+  IN     : IY+2 = object attribute byte
+  OUT    : A = colour index, range-checked against $90
+  DESC   : Attribute colour index calculation from the object flags.
+
+FUNC $8BB4  title_init_panels
+  KIND : FUNC
+  CALLERS: $A29A
+  SIZE   : 1 bytes mapped
+  IN     : none
+  OUT    : panel objects IX=$8C4A/$8C58 sized 6/5 at attrs $582B/$584B
+  DESC   : Initialises the two title screen status panels and pokes $8F34 with 0 and 1.
+
+FUNC $8C24  compute_wave_timing_params
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : D, E, B = wave difficulty numbers
+  OUT    : $DC9D/$DC9E/$DC98 = D/4+E; $DC99 = $30+D+2E; $DC9A/$DC9B = max(8, B*4+D/2)
+  DESC   : Derives the wave cadence and speed parameters from the level numbers.
+
+FUNC $8CF7  clear_wave_objects
+  KIND : FUNC
+  IN     : HL -> start, DE = stride, B = count
+  OUT    : object array zeroed; ($DC39) = 0
+  DESC   : Zeroes the object array (fill loop) and resets the wave state.
+
+FUNC $8D01  move_object_x_check_limits
+  KIND : FUNC
+  IN     : IX -> object
+  OUT    : movement allowed or blocked (CALL $7DDD)
+  DESC   : Direction gate ($D81F >= 4) and position bound checks against $FF54 and $0B76.
+
+FUNC $8EAC  move_object_x_clamped
+  KIND : FUNC
+  CALLERS: $A02E, $A033, $A038, $A266
+  SIZE   : 2 bytes mapped
+  IN     : A = input delta, IX -> object
+  OUT    : (IX+4/5) X position moved
+  DESC   : Applies the signed direction ($D81F, magnitude < $0B) to the object X with bounds $FFA0..$0B87.
+
+FUNC $8F16  check_table_byte_d75a
+  KIND : FUNC
+  CALLERS: $A024, $A262
+  SIZE   : 4 bytes mapped
+  IN     : DE = offset, (HL) = base
+  OUT    : Z flag when the probed byte >> 3 equals $77
+  DESC   : Probes a byte in the table at ($D75A)+DE+$0A.
+
+FUNC $8F34  store_hl_a_earlyout
+  KIND : FUNC
+  CALLERS: $899E, $8BDE, $8BE3, $8AE7, $8AEC, $A240 (+3 more)
+  SIZE   : 3 bytes mapped
+  IN     : A = value, HL -> address
+  OUT    : (HL) = A unless A=0-flag or $7C
+  DESC   : Guarded byte write; the most frequently used helper in the first load (9 call sites).
+
+FUNC $8F67  build_object_list_d756
+  KIND : FUNC
+  CALLERS: $A03C
+  SIZE   : 2 bytes mapped
+  IN     : B = groups, C = table index, HL -> output cursor
+  OUT    : object list assembled; head at $9391 relinked
+  DESC   : Builds an object list from table $D756 (B groups x 8 entries via CALL $9385).
+
+FUNC $8FA7  object_list_unlink_iy
+  KIND : FUNC
+  CALLERS: $8AE2, $A113
+  SIZE   : 5 bytes mapped
+  IN     : IY -> object record, HL -> list cursor
+  OUT    : list links rewritten, head $9391 updated
+  DESC   : Unlinks/inserts an object in the linked list using the IY table at $D756.
+
+FUNC $8FE3  allocator_swap_node_fd52
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : BC = node, A = value
+  OUT    : chain at $FD52 searched, node value swapped with ($FD50)
+  DESC   : The in-game list allocator's free/realloc: LDI x3 copy plus linked search and swap.
+
+FUNC $9163  score_add_bonus_to_counters
+  KIND : FUNC
+  CALLERS: $91A8
+  SIZE   : 1 bytes mapped
+  IN     : A = bonus class, HL -> 3-byte counter
+  OUT    : counter increased (+8, +B, +B, +B with carries)
+  DESC   : Classifies the bonus into ranges (4/7) and adds it to the 24-bit score counters at offsets $162/$163.
+
+FUNC $91BB  dispatch_object_updates
+  KIND : FUNC
+  IN     : IX = $FF70 object pool, IY = $DCFA counters
+  OUT    : each active object's behaviour routine runs
+  DESC   : Iterates 7 objects x $10 bytes; BIT 1,(IX+2) gates dispatch; jump table at $81B3 indexed by type.
+
+FUNC $91FC  advance_sprite_frame
+  KIND : FUNC
+  CALLERS: $8AF4
+  SIZE   : 2 bytes mapped
+  IN     : IX -> object, HL -> sprite-definition chain
+  OUT    : frame pointer (IX+9/A) and delay (IX+B) advanced
+  DESC   : Walks the $FF-terminated sprite-def chain and steps the animation frame.
+
+FUNC $92BF  apply_wave_scroll_to_object
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : IX -> object, ($FFF0) = wave scroll vector
+  OUT    : (IX+$0C/$0D) -= scroll
+  DESC   : Applies the wave scroll vector to an object position.
+
+FUNC $9379  object_move_y_clamp_6f
+  KIND : FUNC
+  CALLERS: $8A87
+  SIZE   : 1 bytes mapped
+  IN     : IX -> object, HL/DE -> player position reference
+  OUT    : (IX+6) Y updated, clamped to $6F
+  DESC   : If the object is within $1F4 of the player, adds its signed Y velocity (+0F) with clamping.
+
+FUNC $9385  object_move_y_guarded
+  KIND : FUNC
+  IN     : IX -> object, HL/DE -> player reference
+  OUT    : (IX+6) Y moved if within $1F4, clamped $6F
+  DESC   : Guarded shared Y-movement helper (the $9379 family tail).
+
+FUNC $9435  spawn_wave_objects
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 1 bytes mapped
+  IN     : IY -> wave definition table, IX -> object pool cursor
+  OUT    : up to 6 objects created in the $FF70 pool; wave state $D93A/$DC39 set
+  DESC   : Walks wave entries, fills 16-byte objects (position, type, anim, flags), scans sprite tables at $67B0 with CPIR for $FF frame terminators.
+
+FUNC $954C  store_object_ptr_d93c
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : IX -> current object
+  OUT    : ($D93C) = IX+3/4
+  DESC   : Remembers the current object pointer for the dispatcher.
+
+FUNC $96D8  enemy_move_chase_player
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 3 bytes mapped
+  IN     : IX -> enemy object, ($FF56) = player X
+  OUT    : object position/velocity updated; expiry CALLs $884E
+  DESC   : Enemy AI: timers (IX+A)/(IX+8) expire, steers X toward the player, moves Y clamped to $6F, tail JP $81E0.
+
+FUNC $97D0  init_object_attrs_5b98
+  KIND : FUNC
+  IN     : IX -> object pool
+  OUT    : first inactive object gets (IX+7)=3 and attrs at $5B98
+  DESC   : Scans the 7 pool objects and initialises the attribute cell for the next one.
+
+FUNC $98EF  spawn_object_from_object
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 3 bytes mapped
+  IN     : IX = parent object, IY = target slot
+  OUT    : new object with copied type/position and launch offset ($FFF8/$10)
+  DESC   : Spawns a projectile/child object from a parent and increments the wave counter ($D93A).
+
+FUNC $994B  check_objects_near_player
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : IY -> object list, B = count, HL/DE = player position
+  OUT    : proximity result; type 3 objects CALL $8A7D
+  DESC   : Flag tests then Y-distance < $18 proximity check between objects and the player.
+
+FUNC $9A24  init_formation_from_data
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 1 bytes mapped
+  IN     : HL -> 3 bytes per object, IX -> pool cursor, C = X base
+  OUT    : 6 objects initialised (anim +0A, delay +9+$0C, X +6)
+  DESC   : Builds an enemy formation from level data bytes, staging attributes at $5B8F.
+
+FUNC $9A7C  check_hitbox_28x29
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 5 bytes mapped
+  IN     : IY -> object A, IX -> object B
+  OUT    : on overlap: JP $8992 (hit handler)
+  DESC   : AABB collision test: X within $52..$6E of ($D75C), Y within $1D of (IY+6)+$0E.
+
+FUNC $9ADD  select_variant_and_rebuild
+  KIND : FUNC
+  IN     : C = menu/state flags
+  OUT    : ($D99D) = 1 or 2
+  DESC   : Selects the game variant from the menu flags and rebuilds the object list ($8FA7) plus $7BA5.
+
+FUNC $9B49  title_screen_init_seq
+  KIND : FUNC
+  IN     : A = count, HL/DE = copy parameters
+  OUT    : title panels/objects initialised via $8BC4 x2, $8AD0, $938E
+  DESC   : The first-load title screen bring-up sequence.
+
+FUNC $9BCB  title_selection_blip
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : ($D8D8) = state
+  OUT    : border pulse + timed delay
+  DESC   : EI/HALT/DI interrupt wait then border OUT ($FE) - audible/visible selection feedback.
+
+FUNC $9C36  copy_counted_text
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 1 bytes mapped
+  IN     : HL -> counted text, DE -> destination, B = count
+  OUT    : text copied to destination
+  DESC   : Counted string copy used to stage title/credit text for display.
+
+FUNC $9C74  credits_present_text
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: ' Present ...'
+
+FUNC $9C81  credits_graftgold
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Graftgold Ltd 198..'.
+
+FUNC $9C99  credits_hewson
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Hewson 198..'.
+
+FUNC $9CA9  credits_design_by
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Original design and concept by'.
+
+FUNC $9CCB  credits_braybrook
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Andrew Braybrook'.
+
+FUNC $9CDF  credits_programmed_by
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Programmed by'.
+
+FUNC $9CF0  credits_robinson
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Title credits: 'Dominic Robinson'.
+
+FUNC $9D04  msg_hall_of_fame
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Hall of Fame'.
+
+FUNC $9D2C  msg_land_now
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'LAND NOW'.
+
+FUNC $9D48  msg_three_mantas
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: ' 3 Mantas'.
+
+FUNC $9D55  msg_paused
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: ' Paused'.
+
+FUNC $9D63  msg_game_over
+  KIND : DATA
+  CALLERS: (none - entered dynamically)
+  SIZE   : 6 bytes mapped
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Game Over'.
+
+FUNC $9D7E  msg_enter_initials
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : High-score prompt: 'enter your initials'.
+
+FUNC $9DBB  msg_dreadnought
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Dreadnought'.
+
+FUNC $9DCF  msg_defences_penetrated
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Defences Penetrated'.
+
+FUNC $9DE2  msg_destruct_sequence
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Destruct Sequence Initiated'.
+
+FUNC $9E05  msg_wave_bonus
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Wave destruction bonus'.
+
+FUNC $9E29  msg_dreadnought_bonus
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Dreadnought destruction bonus'.
+
+FUNC $9E52  msg_options
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Options'.
+
+FUNC $9E62  msg_prepare
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Message: 'Prepare'.
+
+FUNC $9E7C  msg_select_joystick
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Menu: 'Joystick'.
+
+FUNC $9E88  msg_select_keyboard
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Menu: 'Keyboard'.
+
+FUNC $9EAC  draw_sprite_4x2
+  KIND : FUNC
+  IN     : IX -> object, ($D8D9/$D8DB) position, ($D8DD) -> source
+  OUT    : 4x2 attribute cells drawn to the bitmap
+  DESC   : Char-row screen address calculation (RLCA x3) and masked sprite blit.
+
+FUNC $9FE3  panels_reinit_next_screen
+  KIND : FUNC
+  IN     : none
+  OUT    : panel objects $8C4A/$8C58 re-aimed at attrs $580B/$582B; $8F34 pokes 0/1/$0A
+  DESC   : Moves the title panel objects to their next-screen positions and re-arms them.
+
+FUNC $A000  title_panel_scan_init
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 1 bytes mapped
+  IN     : none
+  OUT    : ($D8DD)=0; IX=$D8DF self-linked
+  DESC   : Initialises the title panel scan state (the scan itself at $A00D is inside this function).
+
+FUNC $A00D  scan_title_panels_8
+  KIND : FUNC
+  IN     : IX = $D8DF panel links, HL = $9044 names
+  OUT    : 8 panels scanned at $58D7 with $32 stride
+  DESC   : Title panel table scan using $8F16/$8F26 checks.
+
+FUNC $A0B7  title_init_variant_b
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 1 bytes mapped
+  IN     : ($D7BF) = variant flag
+  OUT    : panels/wave setup via $8BC4, $8AD0, $938E
+  DESC   : Alternate title bring-up path selected by the variant flag.
+
+FUNC $A175  apply_level_speed_table
+  KIND : FUNC
+  IN     : ($D99E) = level number
+  OUT    : speed cells at $91CF+ filled from $D9F8/$D9FC
+  DESC   : Selects the per-level speed table and ADCs the values into the panel speed cells.
+
+FUNC $A1FC  scroll_title_panels
+  KIND : FUNC
+  IN     : ($D99E) = level number
+  OUT    : 8 title panels scrolled via CALL $92AA with the $9078 table
+  DESC   : Scrolls the title panels by the level speed (pass-2 anchor $A200 is inside this function).
+
+FUNC $A2E1  title_anim_step_with_sound
+  KIND : FUNC
+  IN     : HL -> panel
+  OUT    : panel scanned ($8F16), list rebuilt ($8F67), timed sound loop (XOR $F8)
+  DESC   : One step of the title animation including the sound toggle preparation.
+
+FUNC $A379  object_behaviour_jumptable
+  KIND : FUNC
+  IN     : A = object type index
+  OUT    : JP to the behaviour routine
+  DESC   : Trampoline table: $9567/$957D/$95AE/$95B7/$98EF/$9CFD/$9A24/$9AB5/$954C/$9D3C.
+
+FUNC $A3EA  switch_to_object_stack
+  KIND : FUNC
+  IN     : current SP = frame to save, IY = new stack
+  OUT    : SP = IY, registers restored from the new frame
+  DESC   : Switches the CPU stack to an object's own frame (dispatcher helper).
+
+FUNC $A4AE  find_free_3byte_entry
+  KIND : FUNC
+  IN     : DE -> table start, ($6A17) = hint
+  OUT    : HL -> first free entry
+  DESC   : Scans 3-byte entries until the $80 end-flag is seen.
+
+FUNC $A4F7  calc_sprite_addr_from_y
+  KIND : FUNC
+  IN     : HL -> Y position pair
+  OUT    : D = bitmap row third from the $62xx row table
+  DESC   : Converts a Y coordinate into a bitmap address via the screen-row lookup.
+
+FUNC $A5AB  copy_block_ldir_ret
+  KIND : FUNC
+  IN     : HL/DE/BC
+  OUT    : block copied
+  DESC   : LDIR; RET block-copy variant.
+
+FUNC $A5AE  set_variant1_after_walk
+  KIND : FUNC
+  IN     : none
+  OUT    : ($D99D) = 1
+  DESC   : Runs the $9899 table walk then forces game variant 1.
+
+FUNC $A5B7  proximity_check_wrapper
+  KIND : FUNC
+  IN     : object registers
+  OUT    : proximity check results
+  DESC   : Sequential wrapper: CALL $994B then CALL $997E.
+
+FUNC $A5BE  save_sp_setup_wave
+  KIND : FUNC
+  IN     : current SP
+  OUT    : ($96D5) = SP; DE = ($D75E) + $F8
+  DESC   : Parks the dispatcher stack pointer and prepares the wave pointer.
+
+FUNC $A702  spawn_next_wave_object
+  KIND : FUNC
+  IN     : ($DAB9) = current index
+  OUT    : E = index+1, D = $7E
+  DESC   : Advances the wave object index and jumps into the spawn path ($971D).
+
+FUNC $A796  wave_state_advance
+  KIND : FUNC
+  IN     : ($DC3B) marker, ($DC3A) counter
+  OUT    : table $9853 selected or state advanced
+  DESC   : Wave-completion state machine driven by the clamp-stored marker.
+
+FUNC $A827  engine_tone_out
+  KIND : FUNC
+  IN     : C = iterations, ($9811) = port shadow
+  OUT    : EAR bit toggled - square wave output
+  DESC   : Engine/sound-effect tone: XOR $F8 then OUT ($FE),A inside a timed loop.
+
+FUNC $A8A9  interrupt_init_im2
+  KIND : FUNC
+  IN     : IY = vector base
+  OUT    : IM 2 active, ($FDFD) = vector byte, $FF01.. slots filled
+  DESC   : Switches to interrupt mode 2, installs the vector table, then CALLs $9C36 to stage the title text.
+
+FUNC $A92A  push_object_defaults
+  KIND : FUNC
+  IN     : HL -> default values, IX -> object
+  OUT    : defaults pushed onto the object stack
+  DESC   : Preloads object initial values with a PUSH pattern ($0C rounds).
+
+FUNC $A97E  allocator_init_chain_fd52
+  KIND : FUNC
+  IN     : none
+  OUT    : $FD50/$FD52 = $FD54; 11 free nodes, stride $0E
+  DESC   : Initialises the in-game allocator free chain (used by $8FE3).
+
+FUNC $A9A1  init_formation_pool_ff10
+  KIND : FUNC
+  IN     : HL anchors -> ($D7B8/$D7BA/$D7BC)
+  OUT    : 16 formations initialised via CALL $9A24 into the $FF10 pool
+  DESC   : Builds the second formation pool from the $D750 definitions.
+
+FUNC $AABB  read_input_port_fe
+  KIND : FUNC
+  IN     : none
+  OUT    : A = active-low key bits of the selected half-row
+  DESC   : Reads a keyboard/EAR half-row and complements it (menu input cluster $AABB-$AAF2).
+
+FUNC $AC4A  reposition_object_offscreen
+  KIND : FUNC
+  IN     : IX -> object, ($D75C) = wave scroll
+  OUT    : object RES 0 (+2) and re-aimed at the scroll position
+  DESC   : Recycles off-screen objects: clears the active bit and re-aims at the wave scroll.
+
+FUNC $AD15  handle_menu_keys
+  KIND : FUNC
+  IN     : C = menu/state flags
+  OUT    : key handler routed ($9C15, $9B90 with DE=$B860)
+  DESC   : Dispatches menu key processing including the space-key waiter.
+
+FUNC $AD87  xor_blit_masked
+  KIND : FUNC
+  IN     : HL -> source, DE -> destination, B/C = masks
+  OUT    : masked XOR bytes written to the destination
+  DESC   : Masked sprite XOR-blit step.
+
+FUNC $B130  title_scroll_dispatch
+  KIND : FUNC
+  IN     : ($DAB8) = speed selector
+  OUT    : ($A1F3) patched, then the $A1FC scroll path
+  DESC   : Chooses the title scroll variant from the speed selector.
+
+FUNC $B209  update_object_attrs_loop
+  KIND : FUNC
+  IN     : IY -> objects, DE = stride, HL -> reference
+  OUT    : (IY+4) refreshed from ($D99A) when the type differs
+  DESC   : Per-object attribute refresh loop.
+
+FUNC $B860  wait_for_space_keypress
+  KIND : FUNC
+  IN     : none
+  OUT    : returns after Space press and release (row $FB)
+  DESC   : Waits for a Space keypress with a release debounce loop.
+
+FUNC $BCE0  reinit_sysvars_and_stack
+  KIND : FUNC
+  IN     : none
+  OUT    : sysvars $5C0B-$5CB5 cleared; SP=$FCFF; allocator $FD50 primed
+  DESC   : Post-load handover: resets the BASIC system area and prepares the game stack/allocator.
+
+FUNC $DD05  wavetable1_element_names
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Wave name table 1: Zinc..Uridium (15 carriers).
+
+FUNC $E500  wavetable2_element_names
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : Wave name table 2: Silicon..Uridium (15 carriers).
+
+FUNC $F500  loader_init
+  KIND : FUNC
+  CALLERS: (none - entered dynamically)
+  SIZE   : 2 bytes mapped
+  IN     : memory = first-load 48K image
+  OUT    : screen cleared, attributes painted, loader registers primed
+  DESC   : DI; clear screen bitmap $4000-$5AB4 (BC=$1CB5); paint title attribute bands; prepare the tape-read state machine.
+
+FUNC $F50F  loader_paint_attributes
+  KIND : FUNC
+  IN     : A=$FE attribute byte, HL=$55C1
+  OUT    : attribute rows at $55C1+ written
+  DESC   : Paints the title colour bands into the attribute area.
+
+FUNC $F520  loader_set_alt_fill_regs
+  KIND : FUNC
+  IN     : none
+  OUT    : BC'=$FFFF, DE'=$4242
+  DESC   : Preloads the shadow-register fill byte (0x42) used later by glyph drawing.
+
+FUNC $F527  loader_setup_load_regs
+  KIND : FUNC
+  IN     : none
+  OUT    : SP=$FCFF, DE=$C000, IX=$4000
+  DESC   : Sets the loader stack, the remaining load length ($C000) and the destination address.
+
+FUNC $F540  tape_sample_ear_into_c
+  KIND : FUNC
+  IN     : none
+  OUT    : C = EAR bit masked $20, Z flag set
+  DESC   : Reads the EAR input once and primes the edge-polarity state for the sampler.
+
+FUNC $F547  loader_reentry_ret_nz
+  KIND : FUNC
+  IN     : flags from the sampler
+  OUT    : returns when an EAR edge is seen
+  DESC   : Conditional re-entry of the tape sampler loop (falls through on the primed state).
+
+FUNC $F54B  tape_edge_sync_loop
+  KIND : FUNC
+  IN     : none
+  OUT    : CY state
+  DESC   : JR NC sync loop of the tape bit reader (waits for the next pulse edge).
+
+FUNC $F5E8  loader_delay_and_store
+  KIND : FUNC
+  IN     : DE = loader position
+  OUT    : ($5AC1) = DE
+  DESC   : Short delay then stashes the loader read position.
+
+FUNC $F5FB  tape_wait_ear_edge
+  KIND : FUNC
+  IN     : B = timeout counter, C = last edge state
+  OUT    : CY set when edge found before timeout
+  DESC   : Samples EAR (IN $7FFE / RRA) until a pulse edge or timeout - the tape bit reader.
+
+FUNC $FF59  score_font_glyphs
+  KIND : DATA
+  IN     : -
+  OUT    : -
+  DESC   : 8x8 digit/letter bitmaps for the score panel.
+
+==========================================================================
+PART 2 - ADDITIONAL FUNCTIONS FROM THE RECURSIVE CODE MAP
+(mechanical entries - not yet analysed; $0000-$3FFF = ZX ROM)
+==========================================================================
+
+FUNC $0008  (undocumented)  [ROM]
+  CALLERS: $1C0C, $0114, $01B0, $0642, $0670, $1CEE (+19 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C5D)
+
+FUNC $0010  (undocumented)  [ROM]
+  CALLERS: $0194, $01F5, $025F, $4965, $4966, $07AD (+18 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : JP 0x15F2
+
+FUNC $0011  (undocumented)  [ROM]
+  CALLERS: $CAE7
+  SIZE   : 1 bytes mapped
+  FIRST  : JP P,0xFF15
+
+FUNC $0018  (undocumented)  [ROM]
+  CALLERS: $7CE0, $0652, $1805, $180B, $1BF4, $4F4F (+33 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C5D)
+
+FUNC $0028  (undocumented)  [ROM]
+  CALLERS: $0438, $043E, $044A, $1CEA, $1CF6, $5588 (+44 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : JP 0x335B
+
+FUNC $0030  (undocumented)  [ROM]
+  CALLERS: $7B9C, $E277, $F103, $F104, $F10B, $F10C (+13 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH BC
+
+FUNC $0038  (undocumented)  [ROM]
+  CALLERS: $CFCE, $CFCF, $CFD0, $CFD1, $CFD2, $CFD3 (+3080 more)
+  SIZE   : 3 bytes mapped
+  FIRST  : PUSH AF
+
+FUNC $0074  (undocumented)  [ROM]
+  CALLERS: $0020
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C5D)
+
+FUNC $007D  (undocumented)  [ROM]
+  CALLERS: $001C
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x21
+
+FUNC $0080  (undocumented)  [ROM]
+  CALLERS: $CE3B
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x0D
+
+FUNC $00FE  (undocumented)  [ROM]
+  CALLERS: $508C
+  SIZE   : 4 bytes mapped
+  FIRST  : LD C,C
+
+FUNC $0100  (undocumented)  [ROM]
+  CALLERS: $5468
+  SIZE   : 2 bytes mapped
+  FIRST  : LD C,A
+
+FUNC $028E  (undocumented)  [ROM]
+  CALLERS: $02BF
+  SIZE   : 1 bytes mapped
+  FIRST  : LD L,0x2F
+
+FUNC $02BF  (undocumented)  [ROM]
+  CALLERS: $004A
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x028E
+
+FUNC $0302  (undocumented)  [ROM]
+  CALLERS: $7B60
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $031E  (undocumented)  [ROM]
+  CALLERS: $02D8
+  SIZE   : 2 bytes mapped
+  FIRST  : LD B,D
+
+FUNC $0333  (undocumented)  [ROM]
+  CALLERS: $0303
+  SIZE   : 2 bytes mapped
+  FIRST  : LD A,E
+
+FUNC $04C2  (undocumented)  [ROM]
+  CALLERS: $098A
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0x053F
+
+FUNC $0556  (undocumented)  [ROM]
+  CALLERS: $076E, $0802
+  SIZE   : 5 bytes mapped
+  FIRST  : INC D
+
+FUNC $05E3  (undocumented)  [ROM]
+  CALLERS: $057B, $0582, $05CA
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x05E7
+
+FUNC $05E7  (undocumented)  [ROM]
+  CALLERS: $056C, $0591, $059B, $05E3
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,0x16
+
+FUNC $0659  (undocumented)  [ROM]
+  CALLERS: $9E84
+  SIZE   : 2 bytes mapped
+  FIRST  : LD E,H
+
+FUNC $0740  (undocumented)  [ROM]
+  CALLERS: $5527
+  SIZE   : 2 bytes mapped
+  FIRST  : LD E,H
+
+FUNC $080D  (undocumented)  [ROM]
+  CALLERS: $7B70
+  SIZE   : 5 bytes mapped
+  FIRST  : INC C
+
+FUNC $092C  (undocumented)  [ROM]
+  CALLERS: $08EB, $0927
+  SIZE   : 1 bytes mapped
+  FIRST  : JR NZ,0x093E
+
+FUNC $09F4  (undocumented)  [ROM]
+  CALLERS: $1161, $18D4
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x0B03
+
+FUNC $0B03  (undocumented)  [ROM]
+  CALLERS: $09F4, $0B30
+  SIZE   : 1 bytes mapped
+  FIRST  : BIT 1,(IY+0x01)
+
+FUNC $0B24  (undocumented)  [ROM]
+  CALLERS: $0AD9
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x80
+
+FUNC $0B38  (undocumented)  [ROM]
+  CALLERS: $0B2D
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0x5C92
+
+FUNC $0BDB  (undocumented)  [ROM]
+  CALLERS: $0BCB
+  SIZE   : 5 bytes mapped
+  FIRST  : LD A,H
+
+FUNC $0C02  (undocumented)  [ROM]
+  CALLERS: $7BBC
+  SIZE   : 1 bytes mapped
+  FIRST  : BIT 5,A
+
+FUNC $0C0A  (undocumented)  [ROM]
+  CALLERS: $1299, $0792, $1346, $134D, $097A, $0CA4
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $0C10  (undocumented)  [ROM]
+  CALLERS: $0B5F
+  SIZE   : 1 bytes mapped
+  FIRST  : LD DE,0x0095
+
+FUNC $0C41  (undocumented)  [ROM]
+  CALLERS: $0C14
+  SIZE   : 4 bytes mapped
+  FIRST  : PUSH AF
+
+FUNC $0C55  (undocumented)  [ROM]
+  CALLERS: $0B95
+  SIZE   : 1 bytes mapped
+  FIRST  : BIT 1,(IY+0x01)
+
+FUNC $0D4D  (undocumented)  [ROM]
+  CALLERS: $0D75, $111D, $114D, $0DC1, $0D18
+  SIZE   : 2 bytes mapped
+  FIRST  : XOR A
+
+FUNC $0D6B  (undocumented)  [ROM]
+  CALLERS: $1292, $1EC3
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x0DAF
+
+FUNC $0DAF  (undocumented)  [ROM]
+  CALLERS: $0D6B, $12E6, $179D
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0x0000
+
+FUNC $0DD9  (undocumented)  [ROM]
+  CALLERS: $2171, $1184, $0D44
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0x5B00
+
+FUNC $0DFE  (undocumented)  [ROM]
+  CALLERS: $0CD2
+  SIZE   : 1 bytes mapped
+  FIRST  : LD B,0x17
+
+FUNC $0E00  (undocumented)  [ROM]
+  CALLERS: $0D2D
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x0E9B
+
+FUNC $0E02  (undocumented)  [ROM]
+  CALLERS: $7BB4
+  SIZE   : 7 bytes mapped
+  FIRST  : LD C,0x0E
+
+FUNC $0E88  (undocumented)  [ROM]
+  CALLERS: $0E38, $0E6E
+  SIZE   : 6 bytes mapped
+  FIRST  : LD A,H
+
+FUNC $0E9B  (undocumented)  [ROM]
+  CALLERS: $0E45, $0DF0, $0CDC, $0E00
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,0x18
+
+FUNC $0ECD  (undocumented)  [ROM]
+  CALLERS: $130C, $0B8E
+  SIZE   : 2 bytes mapped
+  FIRST  : DI
+
+FUNC $0EDF  (undocumented)  [ROM]
+  CALLERS: $128B, $0F07
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0x5B00
+
+FUNC $0EF4  (undocumented)  [ROM]
+  CALLERS: $0ED4
+  SIZE   : 2 bytes mapped
+  FIRST  : LD A,B
+
+FUNC $0F2C  (undocumented)  [ROM]
+  CALLERS: $2152, $215E, $12B1
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C3D)
+
+FUNC $0F7A  (undocumented)  [ROM]
+  CALLERS: $8C25
+  SIZE   : 6 bytes mapped
+  FIRST  : POP BC
+
+FUNC $1001  (undocumented)  [ROM]
+  CALLERS: $4CAB
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (IY+0x00),0x10
+
+FUNC $104A  (undocumented)  [ROM]
+  CALLERS: $EBB5
+  SIZE   : 1 bytes mapped
+  FIRST  : SUB 0x17
+
+FUNC $1097  (undocumented)  [ROM]
+  CALLERS: $1362
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $111D  (undocumented)  [ROM]
+  CALLERS: $216A
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x0D4D
+
+FUNC $1190  (undocumented)  [ROM]
+  CALLERS: $1098
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C61)
+
+FUNC $1195  (undocumented)  [ROM]
+  CALLERS: $113D
+  SIZE   : 1 bytes mapped
+  FIRST  : LD DE,(0x5C59)
+
+FUNC $11A7  (undocumented)  [ROM]
+  CALLERS: $214B, $12C6
+  SIZE   : 2 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $1457  (undocumented)  [ROM]
+  CALLERS: $FF3C
+  SIZE   : 5 bytes mapped
+  FIRST  : LD B,E
+
+FUNC $1550  (undocumented)  [ROM]
+  CALLERS: $FF1C
+  SIZE   : 2 bytes mapped
+  FIRST  : LD L,B
+
+FUNC $15D4  (undocumented)  [ROM]
+  CALLERS: $0F38, $0F68, $0F6C, $101E, $1021, $0981 (+1 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : BIT 5,(IY+0x02)
+
+FUNC $15EF  (undocumented)  [ROM]
+  CALLERS: $133C, $1A42, $2F47, $2F59
+  SIZE   : 1 bytes mapped
+  FIRST  : LD E,0x30
+
+FUNC $1601  (undocumented)  [ROM]
+  CALLERS: $1802, $12AE, $0777, $2084, $0DBE, $0D96 (+4 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : ADD A,A
+
+FUNC $1652  (undocumented)  [ROM]
+  CALLERS: $0F88
+  SIZE   : 1 bytes mapped
+  FIRST  : LD BC,0x0001
+
+FUNC $1655  (undocumented)  [ROM]
+  CALLERS: $085E, $16A2, $0F77, $0889, $2699, $158E (+4 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $1664  (undocumented)  [ROM]
+  CALLERS: $19F0, $165A
+  SIZE   : 3 bytes mapped
+  FIRST  : PUSH AF
+
+FUNC $1695  (undocumented)  [ROM]
+  CALLERS: $1918
+  SIZE   : 2 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $16B0  (undocumented)  [ROM]
+  CALLERS: $12A9, $1326
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C59)
+
+FUNC $16DC  (undocumented)  [ROM]
+  CALLERS: $1624, $2503, $2729
+  SIZE   : 6 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $1795  (undocumented)  [ROM]
+  CALLERS: $12A6
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (0x5C3F),SP
+
+FUNC $17FB  (undocumented)  [ROM]
+  CALLERS: $7CA8
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (IY+0x02),0x00
+
+FUNC $1855  (undocumented)  [ROM]
+  CALLERS: $1835
+  SIZE   : 1 bytes mapped
+  FIRST  : LD BC,(0x5C49)
+
+FUNC $18B6  (undocumented)  [ROM]
+  CALLERS: $18A6, $199A
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x0E
+
+FUNC $18C1  (undocumented)  [ROM]
+  CALLERS: $189E, $190A
+  SIZE   : 2 bytes mapped
+  FIRST  : EXX
+
+FUNC $18E1  (undocumented)  [ROM]
+  CALLERS: $1145, $18A1
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C5B)
+
+FUNC $190F  (undocumented)  [ROM]
+  CALLERS: $184E
+  SIZE   : 7 bytes mapped
+  FIRST  : LD E,(HL)
+
+FUNC $192A  (undocumented)  [ROM]
+  CALLERS: $1A33, $1A39, $1A3E
+  SIZE   : 4 bytes mapped
+  FIRST  : XOR A
+
+FUNC $1937  (undocumented)  [ROM]
+  CALLERS: $18AF
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2D1B
+
+FUNC $196E  (undocumented)  [ROM]
+  CALLERS: $1830, $1915, $1E47, $1572, $17C0, $17CA (+1 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $1980  (undocumented)  [ROM]
+  CALLERS: $1975, $1859
+  SIZE   : 8 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $198B  (undocumented)  [ROM]
+  CALLERS: $1BE7
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (0x5C5D),HL
+
+FUNC $19B8  (undocumented)  [ROM]
+  CALLERS: $08E5, $197A, $1577, $292B, $0902, $17CF (+2 more)
+  SIZE   : 3 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $19DD  (undocumented)  [ROM]
+  CALLERS: $19E5
+  SIZE   : 2 bytes mapped
+  FIRST  : AND A
+
+FUNC $19E5  (undocumented)  [ROM]
+  CALLERS: $0883, $1EC0, $109C
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x19DD
+
+FUNC $19E8  (undocumented)  [ROM]
+  CALLERS: $0845, $11AD, $157A, $0936, $096B
+  SIZE   : 9 bytes mapped
+  FIRST  : PUSH BC
+
+FUNC $19FB  (undocumented)  [ROM]
+  CALLERS: $1B1B, $12D5
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C59)
+
+FUNC $1A1B  (undocumented)  [ROM]
+  CALLERS: $1354, $135F
+  SIZE   : 4 bytes mapped
+  FIRST  : PUSH DE
+
+FUNC $1A28  (undocumented)  [ROM]
+  CALLERS: $186E
+  SIZE   : 7 bytes mapped
+  FIRST  : PUSH DE
+
+FUNC $1B17  (undocumented)  [ROM]
+  CALLERS: $12B4
+  SIZE   : 1 bytes mapped
+  FIRST  : RES 7,(IY+0x01)
+
+FUNC $1B8A  (undocumented)  [ROM]
+  CALLERS: $1300
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,0xFFFE
+
+FUNC $1BEE  (undocumented)  [ROM]
+  CALLERS: $1C12, $0699, $06AD, $1822, $071A, $072E (+1 more)
+  SIZE   : 2 bytes mapped
+  FIRST  : CALL 0x2530
+
+FUNC $1C1F  (undocumented)  [ROM]
+  CALLERS: $20DD, $20F3
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x28B2
+
+FUNC $1C59  (undocumented)  [ROM]
+  CALLERS: $21C7
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH AF
+
+FUNC $1C79  (undocumented)  [ROM]
+  CALLERS: $2001
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x20
+
+FUNC $1C82  (undocumented)  [ROM]
+  CALLERS: $1815, $2075, $06E1, $072B, $06F6, $2013 (+3 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x24FB
+
+FUNC $1CDE  (undocumented)  [ROM]
+  CALLERS: $1C0D, $181F
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x0D
+
+FUNC $1E45  (undocumented)  [ROM]
+  CALLERS: $1EA7
+  SIZE   : 3 bytes mapped
+  FIRST  : LD H,B
+
+FUNC $1E67  (undocumented)  [ROM]
+  CALLERS: $1EA1
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x1E99
+
+FUNC $1E94  (undocumented)  [ROM]
+  CALLERS: $207C, $2208
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2DD5
+
+FUNC $1E99  (undocumented)  [ROM]
+  CALLERS: $045F, $1825, $1E67, $0731, $06FC, $0705 (+2 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2DA2
+
+FUNC $1F05  (undocumented)  [ROM]
+  CALLERS: $082B, $1656, $33AE
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C65)
+
+FUNC $1F54  (undocumented)  [ROM]
+  CALLERS: $0EFD
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,0x7F
+
+FUNC $1FC3  (undocumented)  [ROM]
+  CALLERS: $2079, $2204, $1FF5, $2004, $2016, $202F
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2530
+
+FUNC $1FDF  (undocumented)  [ROM]
+  CALLERS: $20CB
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x18
+
+FUNC $1FFC  (undocumented)  [ROM]
+  CALLERS: $1FEA, $21AF
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x18
+
+FUNC $2045  (undocumented)  [ROM]
+  CALLERS: $2068, $1FE0
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x29
+
+FUNC $2048  (undocumented)  [ROM]
+  CALLERS: $06D0
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x0D
+
+FUNC $204E  (undocumented)  [ROM]
+  CALLERS: $21B2, $20C1, $1FE5, $1FED
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x18
+
+FUNC $2070  (undocumented)  [ROM]
+  CALLERS: $1806, $2028
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x23
+
+FUNC $2105  (undocumented)  [ROM]
+  CALLERS: $7A31
+  SIZE   : 2 bytes mapped
+  FIRST  : LD E,H
+
+FUNC $21B9  (undocumented)  [ROM]
+  CALLERS: $2159, $218C
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C61)
+
+FUNC $21D6  (undocumented)  [ROM]
+  CALLERS: $2165
+  SIZE   : 9 bytes mapped
+  FIRST  : LD HL,(0x5C51)
+
+FUNC $21F2  (undocumented)  [ROM]
+  CALLERS: $2024
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0xD9
+
+FUNC $22AA  (undocumented)  [ROM]
+  CALLERS: $22E9
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,0xAF
+
+FUNC $22E5  (undocumented)  [ROM]
+  CALLERS: $24EE
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (0x5C7D),BC
+
+FUNC $2307  (undocumented)  [ROM]
+  CALLERS: $2007, $24B7
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2314
+
+FUNC $2314  (undocumented)  [ROM]
+  CALLERS: $2307, $230C
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2DD5
+
+FUNC $2406  (undocumented)  [ROM]
+  CALLERS: $E6D2
+  SIZE   : 1 bytes mapped
+  FIRST  : LD BC,0x3A38
+
+FUNC $24B7  (undocumented)  [ROM]
+  CALLERS: $2477
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2307
+
+FUNC $24FB  (undocumented)  [ROM]
+  CALLERS: $3616, $1C8C, $1C82, $04AA, $1C5A, $202C
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x18
+
+FUNC $2530  (undocumented)  [ROM]
+  CALLERS: $0611, $0675, $17FF, $1CE6, $1CF1, $1BEE (+14 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : BIT 7,(IY+0x01)
+
+FUNC $28AB  (undocumented)  [ROM]
+  CALLERS: $2965, $2974, $297C
+  SIZE   : 3 bytes mapped
+  FIRST  : INC HL
+
+FUNC $28B2  (undocumented)  [ROM]
+  CALLERS: $0660, $26C9, $1C1F
+  SIZE   : 1 bytes mapped
+  FIRST  : SET 6,(IY+0x01)
+
+FUNC $2996  (undocumented)  [ROM]
+  CALLERS: $26CF, $1C30
+  SIZE   : 3 bytes mapped
+  FIRST  : XOR A
+
+FUNC $2A52  (undocumented)  [ROM]
+  CALLERS: $271D, $2A45
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2530
+
+FUNC $2AB2  (undocumented)  [ROM]
+  CALLERS: $21A7, $29A7
+  SIZE   : 1 bytes mapped
+  FIRST  : RES 6,(IY+0x01)
+
+FUNC $2ACC  (undocumented)  [ROM]
+  CALLERS: $2A02
+  SIZE   : 5 bytes mapped
+  FIRST  : XOR A
+
+FUNC $2AEE  (undocumented)  [ROM]
+  CALLERS: $29FD, $2A2C
+  SIZE   : 7 bytes mapped
+  FIRST  : EX DE,HL
+
+FUNC $2AF4  (undocumented)  [ROM]
+  CALLERS: $2A08, $2A27, $2A30
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2530
+
+FUNC $2AFF  (undocumented)  [ROM]
+  CALLERS: $21AA
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C4D)
+
+FUNC $2BF1  (undocumented)  [ROM]
+  CALLERS: $0631, $04B7, $1C3D, $2B8E, $2BC7, $2A55 (+1 more)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD HL,(0x5C65)
+
+FUNC $2C88  (undocumented)  [ROM]
+  CALLERS: $28CF, $28D4, $2684, $2924, $2B1F, $2943
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2D1B
+
+FUNC $2C8D  (undocumented)  [ROM]
+  CALLERS: $28B7, $20ED
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x41
+
+FUNC $2C9B  (undocumented)  [ROM]
+  CALLERS: $2692
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0xC4
+
+FUNC $2D1B  (undocumented)  [ROM]
+  CALLERS: $2C88, $1937, $2CC4, $2D22, $2CCC, $2CFF
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0x30
+
+FUNC $2D22  (undocumented)  [ROM]
+  CALLERS: $2D40, $2CDB
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x2D1B
+
+FUNC $2D3B  (undocumented)  [ROM]
+  CALLERS: $1A09, $2CBC, $2D05
+  SIZE   : 4 bytes mapped
+  FIRST  : PUSH AF
+
+FUNC $2D4F  (undocumented)  [ROM]
+  CALLERS: $2E36
+  SIZE   : 3 bytes mapped
+  FIRST  : RLCA
+
+FUNC $2D7F  (undocumented)  [ROM]
+  CALLERS: $2DB4, $2E0F, $329B
+  SIZE   : 13 bytes mapped
+  FIRST  : INC HL
+
+FUNC $2DA2  (undocumented)  [ROM]
+  CALLERS: $1E99, $1A0C, $2DD5
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x28
+
+FUNC $2DC1  (undocumented)  [ROM]
+  CALLERS: $2E2A
+  SIZE   : 8 bytes mapped
+  FIRST  : LD D,A
+
+FUNC $2DD5  (undocumented)  [ROM]
+  CALLERS: $1E94, $2D08, $2314
+  SIZE   : 8 bytes mapped
+  FIRST  : CALL 0x2DA2
+
+FUNC $2F8B  (undocumented)  [ROM]
+  CALLERS: $2EF0, $2EF5
+  SIZE   : 3 bytes mapped
+  FIRST  : PUSH DE
+
+FUNC $2FBA  (undocumented)  [ROM]
+  CALLERS: $2ED0, $31C3
+  SIZE   : 38 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $2FDD  (undocumented)  [ROM]
+  CALLERS: $2EDC
+  SIZE   : 3 bytes mapped
+  FIRST  : AND A
+
+FUNC $3004  (undocumented)  [ROM]
+  CALLERS: $2FF5, $3189
+  SIZE   : 7 bytes mapped
+  FIRST  : INC E
+
+FUNC $3034  (undocumented)  [ROM]
+  CALLERS: $5D3F
+  SIZE   : 8 bytes mapped
+  FIRST  : LD (HL),E
+
+FUNC $30A9  (undocumented)  [ROM]
+  CALLERS: $2AF8
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH BC
+
+FUNC $30C0  (undocumented)  [ROM]
+  CALLERS: $31B4, $31BA
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x34E9
+
+FUNC $327E  (undocumented)  [ROM]
+  CALLERS: $954D
+  SIZE   : 1 bytes mapped
+  FIRST  : LD (HL),0x00
+
+FUNC $3293  (undocumented)  [ROM]
+  CALLERS: $31AF
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x3296
+
+FUNC $3297  (undocumented)  [ROM]
+  CALLERS: $37E2
+  SIZE   : 5 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $33A9  (undocumented)  [ROM]
+  CALLERS: $33C0, $2AB7
+  SIZE   : 3 bytes mapped
+  FIRST  : PUSH DE
+
+FUNC $33B4  (undocumented)  [ROM]
+  CALLERS: $0435, $26DA, $26BD
+  SIZE   : 1 bytes mapped
+  FIRST  : LD DE,(0x5C65)
+
+FUNC $33C0  (undocumented)  [ROM]
+  CALLERS: $33B8, $298A
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x33A9
+
+FUNC $3406  (undocumented)  [ROM]
+  CALLERS: $0432
+  SIZE   : 6 bytes mapped
+  FIRST  : LD C,A
+
+FUNC $34E9  (undocumented)  [ROM]
+  CALLERS: $1CFA, $30C0
+  SIZE   : 16 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $350B  (undocumented)  [ROM]
+  CALLERS: $2D59
+  SIZE   : 2 bytes mapped
+  FIRST  : PUSH HL
+
+FUNC $360D  (undocumented)  [ROM]
+  CALLERS: $FD14
+  SIZE   : 3 bytes mapped
+  FIRST  : ADC A,D
+
+FUNC $3680  (undocumented)  [ROM]
+  CALLERS: $55FA, $54FA
+  SIZE   : 2 bytes mapped
+  FIRST  : POP HL
+
+FUNC $369F  (undocumented)  [ROM]
+  CALLERS: $55DA
+  SIZE   : 1 bytes mapped
+  FIRST  : RET
+
+FUNC $386C  (undocumented)  [ROM]
+  CALLERS: $6F57
+  SIZE   : 1 bytes mapped
+  FIRST  : JR C,0x3837
+
+FUNC $3E03  (undocumented)  [ROM]
+  CALLERS: $4C88
+  SIZE   : 71 bytes mapped
+  FIRST  : LD D,(HL)
+
+FUNC $3F66  (undocumented)  [ROM]
+  CALLERS: $454D
+  SIZE   : 21 bytes mapped
+  FIRST  : INC C
+
+FUNC $4144  (undocumented)  [RAM]
+  CALLERS: $0186
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $4150  (undocumented)  [RAM]
+  CALLERS: $01C6
+  SIZE   : 41 bytes mapped
+  FIRST  : NOP
+
+FUNC $454C  (undocumented)  [RAM]
+  CALLERS: $01C3, $00C2
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $4552  (undocumented)  [RAM]
+  CALLERS: $01A5
+  SIZE   : 1 bytes mapped
+  FIRST  : ADD A,0x63
+
+FUNC $4942  (undocumented)  [RAM]
+  CALLERS: $00FC
+  SIZE   : 38 bytes mapped
+  FIRST  : NOP
+
+FUNC $494C  (undocumented)  [RAM]
+  CALLERS: $01BF
+  SIZE   : 28 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $4C4C  (undocumented)  [RAM]
+  CALLERS: $0179
+  SIZE   : 27 bytes mapped
+  FIRST  : RST 0x30
+
+FUNC $4E49  (undocumented)  [RAM]
+  CALLERS: $0165
+  SIZE   : 8 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $4F46  (undocumented)  [RAM]
+  CALLERS: $0121, $01A8, $149B
+  SIZE   : 30 bytes mapped
+  FIRST  : LD E,H
+
+FUNC $504C  (undocumented)  [RAM]
+  CALLERS: $0173
+  SIZE   : 10 bytes mapped
+  FIRST  : NOP
+
+FUNC $5153  (undocumented)  [RAM]
+  CALLERS: $00DF
+  SIZE   : 1 bytes mapped
+  FIRST  : DJNZ 0x5155
+
+FUNC $5453  (undocumented)  [RAM]
+  CALLERS: $017E
+  SIZE   : 3 bytes mapped
+  FIRST  : NOP
+
+FUNC $54E2  (undocumented)  [RAM]
+  CALLERS: $7096
+  SIZE   : 13 bytes mapped
+  FIRST  : NOP
+
+FUNC $588D  (undocumented)  [RAM]
+  CALLERS: $3808
+  SIZE   : 1 bytes mapped
+  FIRST  : LD B,0x06
+
+FUNC $5CDA  (undocumented)  [RAM]
+  CALLERS: $0247
+  SIZE   : 1 bytes mapped
+  FIRST  : LD C,0x00
+
+FUNC $6002  (undocumented)  [RAM]
+  CALLERS: $7D4C
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $6610  (undocumented)  [RAM]
+  CALLERS: $880E, $881E, $87B2, $87A2
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $66FF  (undocumented)  [RAM]
+  CALLERS: $7D0C
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $6E49  (undocumented)  [RAM]
+  CALLERS: $14AB, $14F9
+  SIZE   : 14 bytes mapped
+  FIRST  : NOP
+
+FUNC $6F02  (undocumented)  [RAM]
+  CALLERS: $7DA0
+  SIZE   : 2 bytes mapped
+  FIRST  : RRA
+
+FUNC $7102  (undocumented)  [RAM]
+  CALLERS: $7DAC
+  SIZE   : 3 bytes mapped
+  FIRST  : INC B
+
+FUNC $7302  (undocumented)  [RAM]
+  CALLERS: $8812, $8866, $8802, $87A6, $8796
+  SIZE   : 1 bytes mapped
+  FIRST  : JR Z,0x72C5
+
+FUNC $7776  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : INC E
+
+FUNC $78B4  (undocumented)  [RAM]
+  CALLERS: $8A75
+  SIZE   : 3 bytes mapped
+  FIRST  : LD B,B
+
+FUNC $79A6  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 9 bytes mapped
+  FIRST  : LD (BC),A
+
+FUNC $79EC  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : INC D
+
+FUNC $7A32  (undocumented)  [RAM]
+  CALLERS: $8ABE
+  SIZE   : 8 bytes mapped
+  FIRST  : DEC B
+
+FUNC $7A4F  (undocumented)  [RAM]
+  CALLERS: $8A81
+  SIZE   : 5 bytes mapped
+  FIRST  : POP BC
+
+FUNC $7B2C  (undocumented)  [RAM]
+  CALLERS: $91AD
+  SIZE   : 8 bytes mapped
+  FIRST  : NOP
+
+FUNC $7BA5  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 4 bytes mapped
+  FIRST  : NOP
+
+FUNC $7BED  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 14 bytes mapped
+  FIRST  : INC B
+
+FUNC $7C09  (undocumented)  [RAM]
+  CALLERS: $8A78
+  SIZE   : 4 bytes mapped
+  FIRST  : NOP
+
+FUNC $7C74  (undocumented)  [RAM]
+  CALLERS: $8A7B
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,0xFD
+
+FUNC $7DDD  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD B,0x78
+
+FUNC $7E56  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : LD L,E
+
+FUNC $7EF4  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 11 bytes mapped
+  FIRST  : LD B,C
+
+FUNC $7F3F  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 8 bytes mapped
+  FIRST  : ADD HL,BC
+
+FUNC $7FD5  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8002  (undocumented)  [RAM]
+  CALLERS: $8806, $8816, $886A, $87AA, $879A
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $803B  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8124  (undocumented)  [RAM]
+  CALLERS: $8A7E
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $81BB  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $828A  (undocumented)  [RAM]
+  CALLERS: $9247
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $829A  (undocumented)  [RAM]
+  CALLERS: $924B
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $82BD  (undocumented)  [RAM]
+  CALLERS: $9233
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $82D1  (undocumented)  [RAM]
+  CALLERS: $9237
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $82E3  (undocumented)  [RAM]
+  CALLERS: $923B
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $82F5  (undocumented)  [RAM]
+  CALLERS: $923F
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8309  (undocumented)  [RAM]
+  CALLERS: $9243
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8351  (undocumented)  [RAM]
+  CALLERS: $924E
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8402  (undocumented)  [RAM]
+  CALLERS: $E6E4
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8531  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $855C  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $85C3  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $8672  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $87AB  (undocumented)  [RAM]
+  CALLERS: $95BF
+  SIZE   : 8 bytes mapped
+  FIRST  : LD (BC),A
+
+FUNC $8806  (undocumented)  [RAM]
+  CALLERS: $883A, $8842, $87CE, $87D6
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x8002
+
+FUNC $88B0  (undocumented)  [RAM]
+  CALLERS: $927F
+  SIZE   : 2 bytes mapped
+  FIRST  : ADC A,A
+
+FUNC $8920  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : ADD HL,DE
+
+FUNC $899B  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 4 bytes mapped
+  FIRST  : NOP
+
+FUNC $89E7  (undocumented)  [RAM]
+  CALLERS: $9997, $98AC
+  SIZE   : 3 bytes mapped
+  FIRST  : RLCA
+
+FUNC $8AB0  (undocumented)  [RAM]
+  CALLERS: $8A8D
+  SIZE   : 1 bytes mapped
+  FIRST  : JR 0x8A7B
+
+FUNC $8B23  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 4 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $8BC4  (undocumented)  [RAM]
+  CALLERS: $A0B9, $A0E9, $A10C
+  SIZE   : 2 bytes mapped
+  FIRST  : INC BC
+
+FUNC $8F26  (undocumented)  [RAM]
+  CALLERS: $A028
+  SIZE   : 3 bytes mapped
+  FIRST  : LD (HL),A
+
+FUNC $8FC8  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 7 bytes mapped
+  FIRST  : LD (HL),L
+
+FUNC $91A0  (undocumented)  [RAM]
+  CALLERS: $8BB6
+  SIZE   : 5 bytes mapped
+  FIRST  : NOP
+
+FUNC $92AA  (undocumented)  [RAM]
+  CALLERS: $A20D
+  SIZE   : 2 bytes mapped
+  FIRST  : ADD HL,BC
+
+FUNC $937C  (undocumented)  [RAM]
+  CALLERS: $8924
+  SIZE   : 5 bytes mapped
+  FIRST  : EX DE,HL
+
+FUNC $937F  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : LD D,D
+
+FUNC $9382  (undocumented)  [RAM]
+  CALLERS: $894D
+  SIZE   : 2 bytes mapped
+  FIRST  : LD BC,0x52ED
+
+FUNC $938B  (undocumented)  [RAM]
+  CALLERS: $925B, $9427
+  SIZE   : 2 bytes mapped
+  FIRST  : LD A,A
+
+FUNC $9399  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : LD (BC),A
+
+FUNC $9402  (undocumented)  [RAM]
+  CALLERS: $7E7C
+  SIZE   : 2 bytes mapped
+  FIRST  : ADD HL,DE
+
+FUNC $947F  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD A,(0xFFF6)
+
+FUNC $94A6  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : LD B,0xDD
+
+FUNC $94C5  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : INC BC
+
+FUNC $94EC  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : NOP
+
+FUNC $95BE  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : RET NZ
+
+FUNC $9798  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : JR C,0x979D
+
+FUNC $9899  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : RRCA
+
+FUNC $9900  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 6 bytes mapped
+  FIRST  : LD (HL),A
+
+FUNC $990A  (undocumented)  [RAM]
+  CALLERS: $FF20
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $997E  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : LD IYL,(IY+0x04)
+
+FUNC $9995  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : LD A,E
+
+FUNC $9A59  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : LD A,(HL)
+
+FUNC $9B90  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 10 bytes mapped
+  FIRST  : INC B
+
+FUNC $9BC1  (undocumented)  [RAM]
+  CALLERS: $AC0A, $AC11
+  SIZE   : 1 bytes mapped
+  FIRST  : DJNZ 0x9BB6
+
+FUNC $9C47  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 2 bytes mapped
+  FIRST  : LD SP,HL
+
+FUNC $9FE0  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : DJNZ 0x9FD9
+
+FUNC $A112  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 5 bytes mapped
+  FIRST  : DB ED CD
+
+FUNC $A200  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 4 bytes mapped
+  FIRST  : RET M
+
+FUNC $AC04  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : JR NZ,0xABDA
+
+FUNC $B5E6  (undocumented)  [RAM]
+  CALLERS: $381A
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $BD3C  (undocumented)  [RAM]
+  CALLERS: $0104
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $CB7A  (undocumented)  [RAM]
+  CALLERS: $8C41
+  SIZE   : 34 bytes mapped
+  FIRST  : INC B
+
+FUNC $CCC8  (undocumented)  [RAM]
+  CALLERS: $026D
+  SIZE   : 14 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $CD02  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 6 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $CD06  (undocumented)  [RAM]
+  CALLERS: $8884
+  SIZE   : 2 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $CFCE  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 8 bytes mapped
+  FIRST  : RST 0x38
+
+FUNC $D972  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 3 bytes mapped
+  FIRST  : LD H,(HL)
+
+FUNC $E0F0  (undocumented)  [RAM]
+  CALLERS: $CD1A
+  SIZE   : 8 bytes mapped
+  FIRST  : ADD A,(HL)
+
+FUNC $E240  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 9 bytes mapped
+  FIRST  : LD A,(BC)
+
+FUNC $E4E0  (undocumented)  [RAM]
+  CALLERS: $022D
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $EA44  (undocumented)  [RAM]
+  CALLERS: $EBD9
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0x7E02
+
+FUNC $F0E0  (undocumented)  [RAM]
+  CALLERS: $CF41
+  SIZE   : 1 bytes mapped
+  FIRST  : CP 0xF9
+
+FUNC $F0F8  (undocumented)  [RAM]
+  CALLERS: $D2BD
+  SIZE   : 2 bytes mapped
+  FIRST  : LD D,L
+
+FUNC $F5BD  (undocumented)  [RAM]
+  CALLERS: $F557, $F55E, $F5A2
+  SIZE   : 1 bytes mapped
+  FIRST  : CALL 0xF5C1
+
+FUNC $F5C1  (undocumented)  [RAM]
+  CALLERS: $F548, $F56D, $F577, $F5BD
+  SIZE   : 5 bytes mapped
+  FIRST  : EXX
+
+FUNC $F69F  (undocumented)  [RAM]
+  CALLERS: (entered dynamically)
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $F800  (undocumented)  [RAM]
+  CALLERS: $D638
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $F8F8  (undocumented)  [RAM]
+  CALLERS: $D13C, $D13F, $CCBB
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FC7E  (undocumented)  [RAM]
+  CALLERS: $5203
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FCE2  (undocumented)  [RAM]
+  CALLERS: $6E56
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FCFE  (undocumented)  [RAM]
+  CALLERS: $CF93
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FE00  (undocumented)  [RAM]
+  CALLERS: $C549
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FEFC  (undocumented)  [RAM]
+  CALLERS: $CCC4
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP
+
+FUNC $FFF9  (undocumented)  [RAM]
+  CALLERS: $CD25
+  SIZE   : 7 bytes mapped
+  FIRST  : LD B,D
+
+FUNC $FFFF  (undocumented)  [RAM]
+  CALLERS: $D352, $CEBC, $CF4E
+  SIZE   : 1 bytes mapped
+  FIRST  : NOP

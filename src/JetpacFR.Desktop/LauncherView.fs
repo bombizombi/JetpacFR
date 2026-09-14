@@ -276,9 +276,24 @@ module LauncherView =
             | :? ListBoxItem as it -> Some(it.Tag :?> GameManifest)
             | _ -> None
 
-        let reselectDefault () =
-            let def = Projects.startupOf games
-            list.SelectedIndex <- games |> List.findIndex (fun g -> g.GameId = def.GameId)
+        /// Re-read the games folder and rebuild the list, keeping the user's
+        /// selection: the previously chosen game stays selected while it
+        /// exists (returning from the emulator lands back on it), and only a
+        /// vanished project falls back to the startup default. The capture
+        /// must happen before refill - Items.Clear resets the selection.
+        let rescanNow () =
+            let keep = selectedGame
+            games <- Projects.discover ()
+            refill ()
+
+            let preferred =
+                match keep with
+                | Some s when games |> List.exists (fun g -> g.GameId = s.GameId) -> s.GameId
+                | _ -> (Projects.startupOf games).GameId
+
+            match games |> List.tryFindIndex (fun g -> g.GameId = preferred) with
+            | Some i -> list.SelectedIndex <- i
+            | None -> ()
 
         list.SelectionChanged.Add(fun _ ->
             selectedGame <-
@@ -292,8 +307,7 @@ module LauncherView =
             | Some g -> ctx.OpenEmulator g
             | None -> ())
 
-        refill ()
-        reselectDefault ()
+        rescanNow ()
 
         // ---- bottom edge: small Rescan (left) and Exit (right)
         let bottom = Grid(Margin = Thickness(0.0, 12.0, 0.0, 0.0))
@@ -309,10 +323,82 @@ module LauncherView =
                 ToolTip = "re-read the games folder: picks up newly added projects, traces and status changes"
             )
 
-        rescan.Click.Add(fun _ ->
-            games <- Projects.discover ()
-            refill ()
-            reselectDefault ())
+        rescan.Click.Add(fun _ -> rescanNow ())
+
+        // Import a tape file (.tzx) that has no games/<id> project yet: copy it
+        // into a fresh games/<id>/ folder with a manifest (rom = the shared
+        // 48.rom, boot = auto) and rescan, so the game joins the list without
+        // any hand-written project files.
+        let importGame () =
+            let gamesDir = Projects.findGamesDir ()
+
+            if gamesDir = "" then
+                System.Windows.MessageBox.Show(
+                    "no games/ folder found next to the app - cannot import",
+                    "Add game"
+                )
+                |> ignore
+            else
+                let dlg =
+                    Microsoft.Win32.OpenFileDialog(
+                        Title = "Add game - pick a TZX tape",
+                        Filter = "ZX Spectrum tape (*.tzx)|*.tzx|All files (*.*)|*.*"
+                    )
+
+                if dlg.ShowDialog() = Nullable<bool>(true) then
+                    try
+                        let srcFile = dlg.FileName
+                        let baseName = IO.Path.GetFileNameWithoutExtension srcFile
+
+                        let id =
+                            System.String(
+                                baseName.ToLowerInvariant().ToCharArray()
+                                |> Array.filter System.Char.IsLetterOrDigit
+                            )
+
+                        let id = if id = "" then "game" else id
+                        let rom = LocalAssets.find "48.rom" // throws when assets/ is unreachable
+                        let mutable dir = IO.Path.Combine(gamesDir, id)
+                        let mutable n = 1
+
+                        while Directory.Exists dir do
+                            dir <- IO.Path.Combine(gamesDir, sprintf "%s%d" id n)
+                            n <- n + 1
+
+                        Directory.CreateDirectory dir |> ignore
+                        let tapeName = IO.Path.GetFileName srcFile
+                        File.Copy(srcFile, IO.Path.Combine(dir, tapeName))
+                        // The manifest sits in games/<id>/, so the shared ROM is
+                        // two levels up: ../../assets/<rom>.
+                        let romRel = sprintf "../../assets/%s" (IO.Path.GetFileName rom)
+
+                        let json =
+                            sprintf
+                                "{\n  \"name\": %s,\n  \"rom\": %s,\n  \"tzx\": %s,\n  \"boot\": \"auto\"\n}"
+                                (System.Text.Json.JsonSerializer.Serialize baseName)
+                                (System.Text.Json.JsonSerializer.Serialize romRel)
+                                (System.Text.Json.JsonSerializer.Serialize tapeName)
+
+                        IO.File.WriteAllText(IO.Path.Combine(dir, "manifest.json"), json)
+                        rescanNow ()
+                    with ex ->
+                        System.Windows.MessageBox.Show(
+                            sprintf "import failed: %s" ex.Message,
+                            "Add game"
+                        )
+                        |> ignore
+
+        let addGame =
+            Button(
+                Content = "Add game…",
+                Width = 96.0,
+                Height = 24.0,
+                Margin = Thickness(8.0, 0.0, 0.0, 0.0),
+                ToolTip =
+                    "import a .tzx tape as a new project: creates games/<id> with a manifest (boot: auto, shared 48K rom) and rescans the list"
+            )
+
+        addGame.Click.Add(fun _ -> importGame ())
 
         let leftBox =
             StackPanel(Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left)
@@ -320,6 +406,7 @@ module LauncherView =
         Grid.SetColumn(leftBox, 0)
         bottom.Children.Add leftBox |> ignore
         leftBox.Children.Add rescan |> ignore
+        leftBox.Children.Add addGame |> ignore
 
         // The deliberately small alternative boot path: emulate the real tape
         // instead of the flash loader (for custom loaders the trap cannot
@@ -377,8 +464,4 @@ module LauncherView =
 
         root.Children.Add list |> ignore
 
-        root,
-        (fun () ->
-            games <- Projects.discover ()
-            refill ()
-            reselectDefault ())
+        root, rescanNow

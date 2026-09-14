@@ -43,11 +43,23 @@ module Boot =
 
         List.ofSeq spans
 
+    /// How long the machine runs after the tape finishes, so the loader
+    /// chain gives way to the game proper before the entry snapshot is
+    /// taken. Stopping at the first RAM instruction parks the boot inside
+    /// the game's own multiload tape loader on Uridium-style tapes.
+    let settleFrames = 120
+
+    /// Hard cap on tape-playback frames (~20 minutes of tape time). The
+    /// exhaust gate relies on the tape state machine, but a broken tape
+    /// must not hang the boot forever.
+    let maxTapeFrames = 60000
+
     /// Boot to the first instruction the game's own code executes after the
     /// tape finishes loading: run frames until every CODE block has landed
-    /// at its header start address, then single-step until PC leaves the
-    /// ROM (the load routine and BASIC all run in ROM; the first RAM
-    /// instruction is the USR jump target). Returns (spec, entryCycles).
+    /// at its header start address (when the tape declares any), keep going
+    /// until the tape is exhausted (custom EAR loaders read pulses long
+    /// after the ROM load finished), then single-step until PC leaves the
+    /// ROM and settle. Returns (spec, entryCycles).
     let bootToEntry
         (romPath: string)
         (tzxPath: string)
@@ -56,10 +68,6 @@ module Boot =
         let rom = File.ReadAllBytes romPath
         let tzx = File.ReadAllBytes tzxPath
         let spans = findCodeSpans tzx
-
-        if spans.IsEmpty then
-            failwith "TZX contains no CODE blocks - cannot auto-boot"
-
         let spec = Jetpac.Core.Spectrum48()
         spec.LoadRom rom
         spec.InsertTape tzx
@@ -80,28 +88,48 @@ module Boot =
         // ROM loader prints header names onto the loading screen, BASIC
         // POKEs loader variables) must not invalidate an already-loaded
         // block. The gate is "every CODE block arrived at its address".
-        let matched = Array.create spans.Length false
-        let mutable pendingCount = spans.Length
-        let mutable frames = 0
+        // Headerless/Program-header tapes (load-over-everything cracks)
+        // declare no CODE spans and are gated by the tape exhaust below.
+        if not (List.isEmpty spans) then
+            let matched = Array.create spans.Length false
+            let mutable pendingCount = spans.Length
+            let mutable frames = 0
 
-        while frames < 20000 && pendingCount > 0 do
+            while frames < 20000 && pendingCount > 0 do
+                spec.RunFrame()
+                frames <- frames + 1
+
+                match onFrame with
+                | Some f -> f (spec.ScreenBuffer, spec.FrameCount)
+                | None -> ()
+
+                for j in 0 .. spans.Length - 1 do
+                    if not matched[j] then
+                        let s, e = spans[j]
+
+                        if spanLoaded s e then
+                            matched[j] <- true
+                            pendingCount <- pendingCount - 1
+
+            if pendingCount > 0 then
+                failwithf "Tape CODE blocks never matched after %d frames" frames
+
+        // Play the tape out: the game's own loader (Uridium reads the EAR
+        // bit by bit) keeps consuming pulses long after the ROM load, and
+        // only real end-of-tape means the whole game is in memory. The
+        // playback counts as boot-driven: a loader polling once per frame
+        // must not trip the heuristic's auto-stop.
+        spec.TapeSetManual()
+
+        let mutable tapeFrames = 0
+
+        while tapeFrames < maxTapeFrames && not spec.DebugTapeAtEnd do
             spec.RunFrame()
-            frames <- frames + 1
+            tapeFrames <- tapeFrames + 1
 
             match onFrame with
             | Some f -> f (spec.ScreenBuffer, spec.FrameCount)
             | None -> ()
-
-            for j in 0 .. spans.Length - 1 do
-                if not matched[j] then
-                    let s, e = spans[j]
-
-                    if spanLoaded s e then
-                        matched[j] <- true
-                        pendingCount <- pendingCount - 1
-
-        if pendingCount > 0 then
-            failwithf "Tape CODE blocks never matched after %d frames" frames
 
         let z80 = spec.DebugZ80
         let mutable g = 0
@@ -112,5 +140,14 @@ module Boot =
 
         if z80.Regs.Pc() < 0x4000 then
             failwithf "Never reached a RAM instruction after loading (pc=%04X)" (z80.Regs.Pc())
+
+        // Settle: the loader chain hands over to the game (title paint,
+        // attribute work) in the frames right after the tape ends.
+        for _ in 1 .. settleFrames do
+            spec.RunFrame()
+
+            match onFrame with
+            | Some f -> f (spec.ScreenBuffer, spec.FrameCount)
+            | None -> ()
 
         spec, int64 (z80.CycleCount())

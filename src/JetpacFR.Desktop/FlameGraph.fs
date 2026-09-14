@@ -598,24 +598,15 @@ type FlameGraph() as self =
 
                     t <- t + step
 
-                // Frame boundaries when they are far enough apart.
+                // Frame boundaries when they are far enough apart. framePx is
+                // average pixels per frame (frames are ~constant 69888 ticks):
+                // 1.0/ppTick is ticks-per-pixel, which is huge at fit-all zoom
+                // and used to draw all ~800 lines + one FormattedText each per
+                // repaint - tens of ms on the UI thread, every playhead tick.
                 if win.FrameTicks.Length > 0 then
-                    let framePx = 1.0 / ppTick
+                    let framePx = float win.EndTick / float win.FrameTicks.Length * ppTick
 
                     if framePx >= 6.0 then
-                        let lo = max 0L origin
-                        let hi = origin + visibleSpan
-
-                        for j in 0 .. win.FrameTicks.Length - 1 do
-                            let bt = win.FrameTicks[j]
-
-                            if bt >= lo && bt <= hi then
-                                let x = this.XOf bt
-                                dc.DrawLine(framePen, Point(x, 0.0), Point(x, h))
-
-                                if framePx >= 40.0 then
-                                    let label = ft (string (win.FirstFrame + j)) 8.0 labelFg false
-                                    dc.DrawText(label, Point(x + 2.0, 1.0))
 
                 // Rectangles. Two regimes: once a frame is narrower than the
                 // fidelity threshold, paint LOD pyramid runs - geometry is bounded
