@@ -1061,9 +1061,32 @@ let runTimeline (romPath: string) (tzxPath: string) : int =
         | _ -> false
 
     check
+        "timeline dual save writes both formats and verifies identical"
+        (saveResult = Ok()
+         && File.Exists path
+         && File.Exists(StateTimelineStore.toV2Path path))
+        (sprintf "%A" saveResult)
+
+    check
         "timeline file round-trips every state"
-        (saveResult = Ok() && loadedOk)
-        (sprintf "%A / %A" saveResult loadResult)
+        loadedOk
+        (sprintf "%A" loadResult)
+
+    // The lone-.jst clutch: delete the twin, load again, and require the load
+    // itself to rebuild it while returning the same states.
+    File.Delete(StateTimelineStore.toV2Path path)
+
+    let clutchResult = StateTimelineStore.tryLoad path fp
+
+    let clutchOk =
+        match clutchResult with
+        | TimelineLoaded(timeline, events) ->
+            File.Exists(StateTimelineStore.toV2Path path)
+            && timeline.Count = recorded.StateTimeline.Count
+            && events = List.ofSeq recorded.KeyLog.Events
+        | _ -> false
+
+    check "lone .jst load rebuilds the .js2 twin" clutchOk (sprintf "%A" clutchResult)
 
     check
         "timeline identity rejects another game"

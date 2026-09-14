@@ -54,4 +54,9 @@ Can you change it so that the heatmap (refreshHeatmap) and the strip (refreshStr
 
 
 
+do not change anything. Can you tell me about this reexecution of frames from the flame graph, at what points are they triggered, and why?  what do we use them for? 
+What would happen if we didn't execute those instructions?  Ok, lets say that we do not have the flame graph.  In that case, try to think about the reasons why we need the full inter frame execution, and why the picture of the screen for that frame would simply not be enough?   
+
+
+Ok, create a second format for storing trace files to disk.  Right now they store a flat 64 kb memory bytes plus registers and other data.  i want you to first create a byte stream, constant for all frames, then do the XOR operation with the previous frame (if it exists) and then do a compression scheme on resulting byte stream.  But implement it in a way that keeps both versions, compressed and uncompressed when saving, and on load, loads both and compares the results which should be identical.  ALso comment the code that after some time the uncompressed version can be removed (perhaps use compile time #if directives for this?).  Also, as a temporary clutch functionality, if the dual saved traces .jst and .js2 do not exist, and only .jst exists, create a temporary duplication function that will create .js2 file from the .jst file).
 

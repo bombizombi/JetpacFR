@@ -286,11 +286,18 @@ type MainWindow() as self =
             | Ok() ->
                 s.ClearTimelineDirty()
 
+                let v2Bytes =
+                    try
+                        (FileInfo(StateTimelineStore.toV2Path (slotPath game currentSlot))).Length
+                    with _ ->
+                        0L
+
                 statusText.Text <-
                     sprintf
-                        "timeline saved: %d frames, %.1f MB"
+                        "timeline saved: %d frames, %.1f MB + twin %.1f MB (.js2)"
                         s.StateTimeline.Count
                         (float s.StateTimeline.BytesUsed / (1024.0 * 1024.0))
+                        (float v2Bytes / (1024.0 * 1024.0))
             | Error error -> statusText.Text <- sprintf "timeline save failed for %s: %s" game.Name error
         | _ -> ()
 
@@ -2632,16 +2639,26 @@ type MainWindow() as self =
         segs
 
     let refreshStrip () =
+        // While the machine runs or replays, read the recorder's
+        // incrementally maintained buckets: a segment scan over an installed
+        // flameTrace is O(window entries) - millions - on the UI thread, and
+        // 10 Hz of that starved the replay stepper (the T-range label below
+        // already follows this same rule; the segs must too).
         let segs =
-            match flameTrace with
-            | Some t -> segmentsOf t
-            | None ->
-                match loaded with
+            if running || replaying then
+                match session with
+                | Some s -> s.Recorder.SegmentCounts
+                | None -> Array.empty
+            else
+                match flameTrace with
                 | Some t -> segmentsOf t
                 | None ->
-                    match session with
-                    | Some s -> s.Recorder.SegmentCounts
-                    | None -> Array.empty
+                    match loaded with
+                    | Some t -> segmentsOf t
+                    | None ->
+                        match session with
+                        | Some s -> s.Recorder.SegmentCounts
+                        | None -> Array.empty
 
         if segs.Length > 0 then
             let maxS = max 1 (Array.max segs)
@@ -5654,7 +5671,12 @@ type MainWindow() as self =
                     with _ ->
                         ()
 
-                    statusText.Text <- sprintf "%s: slot '%s' cleared" game.Name currentSlot
+                    try
+                        File.Delete(StateTimelineStore.toV2Path (slotPath game currentSlot))
+                    with _ ->
+                        ()
+
+                    statusText.Text <- sprintf "%s: slot '%s' cleared (.jst + .js2)" game.Name currentSlot
                 | None -> ()
 
                 syncSlider ()
@@ -7273,8 +7295,14 @@ type MainWindow() as self =
         let flameAutoTimer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 700.0)
 
         flameAutoTimer.Tick.Add(fun _ ->
+            // Stand down while the machine runs or replays: a build
+            // re-executes the whole range on a worker, competing with the
+            // frame stepper for cores and GC - replay crawls while it runs.
+            // Pause catches up within one tick.
             if
-                flameAutoBtn.IsChecked.HasValue
+                not running
+                && not replaying
+                && flameAutoBtn.IsChecked.HasValue
                 && flameAutoBtn.IsChecked.Value
                 && session.IsSome
                 && not flameBuilding
