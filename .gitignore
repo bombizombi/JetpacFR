@@ -368,3 +368,4 @@ MigrationBackup/
 node_modules/
 FodyWeavers.xsd
 /games/jetpac/timeline.jst
+*.js2
