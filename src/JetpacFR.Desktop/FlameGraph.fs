@@ -145,13 +145,15 @@ type FlameOverlay(getPlayheadTick: unit -> int64 option, getCursorTick: unit -> 
 ///   drag              -> pan (horizontal time, vertical depth)
 ///   wheel             -> zoom around the cursor
 ///   shift+wheel       -> scroll depth
-///   right-click       -> RectMenu (the host offers "name function" etc.)
+///   right-click       -> RectMenu (the host offers "name function" etc.);
+///                        the payload carries the tick under the mouse so the
+///                        host can offer "go to exact instruction at ..."
 type FlameGraph() as self =
     inherit FrameworkElement()
 
     let seekRequested = Event<int64 * int>() // (tick, frame; frame -1 when unknown)
     let viewportChanged = Event<unit>()
-    let rectMenu = Event<FlameRect * int * int>() // (rect, frame, entry index)
+    let rectMenu = Event<FlameRect * int * int * int64>() // (rect, frame, entry index)
 
     // Per-mode canvas chrome. Tints are identical in both modes; only the
     // canvas, lines and lane fills change. Playhead/cursor pens live on the
@@ -567,7 +569,11 @@ type FlameGraph() as self =
                     else
                         r.StartIndex
 
-                rectMenu.Trigger(r, frame, entryIdx)
+                // the tick under the mouse, clamped into the box: the "exact
+                // instruction at ..." menu item resolves its landing there
+                let tick = max r.StartTick (min (this.TickAt p.X) (r.EndTick - 1L))
+
+                rectMenu.Trigger(r, frame, entryIdx, tick)
                 e.Handled <- true
             | _ -> ()
 

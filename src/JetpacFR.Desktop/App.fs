@@ -13,6 +13,7 @@ open System.Windows.Media
 open System.Windows.Media.Imaging
 open System.Windows.Shapes
 open System.Windows.Threading
+//open System.Diagnostics
 open NAudio.Wave
 
 // Disambiguate ControlFile comment kinds from WPF shapes (WPF's Line
@@ -7261,15 +7262,111 @@ type MainWindow() as self =
                 frameSeek reason frame
             | _ -> statusText.Text <- "flame click: this window has no frame mapping - click ignored")
 
-        // right-click: jump to the function, or name it from the comment box
-        // (control.json symbols feed the labels here AND the regenerated CE).
-        flameCtrl.RectMenu.Add(fun (r, _frame, _entryIdx) ->
+        /// Land on one exact instruction of the flame window: park the live
+        /// machine on that entry's post-execution state (frame restore +
+        /// prefix re-execution through ParkAtInstruction - the step-back
+        /// machinery) and point every view at it. Interrupt markers share
+        /// their step with the vector instruction, so only real instructions
+        /// count toward the prefix.
+        let goToFlameEntry (ft: Trace) (idx: int) (reason: string) =
+            match session with
+            | None -> statusText.Text <- sprintf "%s: no live session to park" reason
+            | Some s ->
+                if idx < 0 || idx >= ft.Entries.Length then
+                    statusText.Text <-
+                        sprintf "%s: entry %d outside the window (%d entries)" reason idx ft.Entries.Length
+                else
+                    let frameNo = frameOfEntry ft idx
+                    // first window entry of that frame: padded boundary [f - 2]
+                    // ends session frame f - 1 (see frameOfEntry)
+                    let frameStartTick =
+                        if frameNo >= 2 && frameNo - 2 < ft.FrameTicks.Length then
+                            ft.FrameTicks[frameNo - 2]
+                        else
+                            0u
+
+                    let mutable first = idx
+
+                    while first > 0 && ft.Entries[first - 1].Tick >= frameStartTick do
+                        first <- first - 1
+
+                    let mutable steps = 0
+
+                    for j in first..idx do
+                        if ft.Entries[j].Length > 0uy then steps <- steps + 1
+
+                    cursor <- idx
+                    memCursor <- (int ft.Entries[idx].Pc) &&& 0xFFFF
+                    execViewHold <- false
+
+                    try
+                        s.ParkAtInstruction(frameNo, steps)
+                        presentGame ()
+                        showLiveRegs s |> ignore
+
+                        statusText.Text <-
+                            sprintf
+                                "%s: parked at $%04X entry #%d (frame %d, %d steps into the frame)"
+                                reason
+                                memCursor
+                                idx
+                                frameNo
+                                steps
+                    with ex ->
+                        statusText.Text <-
+                            sprintf
+                                "%s: %s - cursor moved, machine stays parked at the frame boundary"
+                                reason
+                                ex.Message
+
+                    refreshAll ()
+                    syncSlider ()
+                    rebuildCommentPane true
+
+        // right-click: land on the clicked invocation's start, name it, or
+        // park on the exact instruction under the mouse (control.json symbols
+        // feed the labels here AND the regenerated CE).
+        flameCtrl.RectMenu.Add(fun (r, _frame, _entryIdx, clickTick) ->
             match control with
             | None -> statusText.Text <- "no control file - click New ctrl first"
             | Some _ ->
+                // the window's instruction tier: usually installed, rebuilt
+                // from the window when replay detached it
+                let ft = flameTrace |> Option.orElse (flameCtrl.Window |> Option.bind traceOfWindow)
                 let menu = ContextMenu()
-                let jump = MenuItem(Header = sprintf "go to $%04X in code view" (int r.Entry))
-                jump.Click.Add(fun _ -> focusCodeView "flame jump" (int r.Entry))
+
+                let jump =
+                    MenuItem(Header = sprintf "go to $%04X in code view" (int r.Entry))
+
+                jump.Click.Add(fun _ ->
+                    match ft with
+                    | Some ft ->
+                        // the walker opens a box ON the CALL/RST instruction
+                        // itself - the caller's instruction, whose cycles the
+                        // box's span includes. The function's first own
+                        // instruction is the first entry in the box whose PC
+                        // is the entry address (skipping any interrupt
+                        // marker/ISR frames that fired before it ran).
+                        let s0 = int r.StartIndex
+                        let e0 = min (int r.EndIndex - 1) (ft.Entries.Length - 1)
+
+                        let idx =
+                            if r.Kind = FlameKind.FlameCall || r.Kind = FlameKind.FlameRst then
+                                let mutable k = s0
+
+                                while k < e0 && (int ft.Entries[k].Pc) <> (int r.Entry) do
+                                    k <- k + 1
+
+                                k
+                            else
+                                s0
+
+                        goToFlameEntry ft idx "flame jump"
+                    | None ->
+                        // no instruction tier kept (cache-trimmed window):
+                        // fall back to the address-level jump
+                        focusCodeView "flame jump" (int r.Entry))
+
                 menu.Items.Add jump |> ignore
 
                 let name =
@@ -7286,6 +7383,42 @@ type MainWindow() as self =
                     | None -> ())
 
                 menu.Items.Add name |> ignore
+
+                let exact =
+                    MenuItem(Header = sprintf "go to exact instruction at tick %d" clickTick)
+
+                exact.Click.Add(fun _ ->
+                    // resolve the landing through the window's unwrapped
+                    // per-entry ticks: rect ticks are window-relative, trace
+                    // entry ticks are the wrapped-back uint32 form
+                    match ft, flameCtrl.Window with
+                    | Some ft, Some w when w.EntryTicks.IsSome ->
+                        let et = w.EntryTicks.Value
+                        let s0 = int r.StartIndex
+
+                        let e0 =
+                            min (int r.EndIndex - 1) (min (ft.Entries.Length - 1) (et.Length - 1))
+
+                        if e0 < s0 then
+                            statusText.Text <-
+                                "flame jump: the box holds no instruction detail - rebuild the flame over its frames"
+                        else
+                            // last window entry executed at or before the click tick
+                            let rec search lo hi =
+                                if lo >= hi then lo
+                                else
+                                    let mid = (lo + hi) / 2
+
+                                    if et[mid] <= clickTick then search (mid + 1) hi else search lo mid
+
+                            let idx = max s0 (search s0 (e0 + 1) - 1)
+
+                            goToFlameEntry ft idx (sprintf "exact at tick %d" clickTick)
+                    | _ ->
+                        statusText.Text <-
+                            "flame jump: the window kept no instruction tier - rebuild it over frames containing this box")
+
+                menu.Items.Add exact |> ignore
                 menu.PlacementTarget <- flameCtrl
                 menu.Placement <- PlacementMode.MousePoint
                 menu.IsOpen <- true)

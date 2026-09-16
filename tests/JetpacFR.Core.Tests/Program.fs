@@ -3215,6 +3215,8 @@ let main argv =
     | cmd :: _ when
         cmd = "--gen-game"
         || cmd = "--regen"
+        || cmd = "--null-ce"
+        || cmd = "--capture-tape"
         || cmd = "--materialize"
         || cmd = "--diff-game"
         ->

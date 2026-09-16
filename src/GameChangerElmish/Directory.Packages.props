@@ -1,0 +1,15 @@
+<Project>
+    <PropertyGroup>
+        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+        <CentralPackageVersionOverrideEnabled>false</CentralPackageVersionOverrideEnabled>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageVersion Include="FSharp.Core" Version="10.1.401" />
+        <PackageVersion Include="Fable.Core" Version="5.2.0" />
+        <PackageVersion Include="Fable.Elmish" Version="5.0.2" />
+        <PackageVersion Include="Fable.Elmish.HMR" Version="9.0.0" />
+        <PackageVersion Include="Fable.Elmish.React" Version="5.6.0" />
+        <PackageVersion Include="Fable.Promise" Version="3.2.1" />
+        <PackageVersion Include="Feliz" Version="3.3.3" />
+    </ItemGroup>
+</Project>

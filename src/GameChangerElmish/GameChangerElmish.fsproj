@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net11.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Fable-clean emulator core, compiled in verbatim (the same subset
+             JetpacFR.Web uses): the port machine, the CE engine, the game
+             image. elmish-land manages the page entries below; keep these
+             ahead of them. -->
+        <Compile Include="../Jetpac2.Core/Keyboard.fs"/>
+        <Compile Include="../Jetpac2.Core/Timing.fs"/>
+        <Compile Include="../Jetpac2.Core/Screen.fs"/>
+        <Compile Include="../Jetpac2.Core/Machine.fs"/>
+        <Compile Include="../Jetpac2.Core/Z80Table.fs"/>
+        <Compile Include="../Jetpac2.Core/Z80Asm.fs"/>
+        <Compile Include="../Jetpac2.Core/Z80Vocab.fs"/>
+        <Compile Include="../Jetpac2.Core/Z80Decode.fs"/>
+        <Compile Include="../Jetpac2.Core/Beeper.fs"/>
+        <Compile Include="../Jetpac2.Core/Generated.fs"/>
+        <Compile Include="../JetpacFR.Core/Disasm.fs"/>
+        <Compile Include="../JetpacFR.Core/Z80CE.fs"/>
+        <Compile Include="../JetpacFR.Core/CEGame.fs"/>
+        <Compile Include="../JetpacFR.Core/GameRegistry.fs"/>
+        <Compile Include="../../games/uridium/WebImage.fs"/>
+        <Compile Include="src/Host.fs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Include="src/Shared.fs"/>
+        <Compile Include="src/Pages/NotFound.fs"/>
+        <Compile Include="src/Pages/Layout.fs"/>
+        <Compile Include="src/Pages/Page.fs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include=".elmish-land/Base/ElmishLand.GameChangerElmish.Base.fsproj" />
+    </ItemGroup>
+</Project>

@@ -6,6 +6,7 @@
     <Project Path="src/JetpacFR.Core/JetpacFR.Core.fsproj" />
     <Project Path="src/JetpacFR.Desktop/JetpacFR.Desktop.fsproj" />
     <Project Path="src/JetpacFR.Web/JetpacFR.Web.fsproj" />
+    <Project Path="src/GameChangerElmish/GameChangerElmish.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/JetpacFR.Core.Tests/JetpacFR.Core.Tests.fsproj" />

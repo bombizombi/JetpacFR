@@ -1,0 +1,16 @@
+{
+  "name": "gamechangerelmish",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+      "start": "dotnet elmish-land server",
+      "build": "dotnet elmish-land build"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  }
+}

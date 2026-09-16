@@ -369,3 +369,8 @@ node_modules/
 FodyWeavers.xsd
 /games/jetpac/timeline.jst
 *.js2
+
+# Fable dev-server artifacts emitted next to sources (GameChangerElmish)
+src/Jetpac2.Core/*.fs.js
+src/JetpacFR.Core/*.fs.js
+games/uridium/WebImage.fs.js

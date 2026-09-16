@@ -1,0 +1,15 @@
+# Elmish Land: generated code is rebuilt by `elmish-land restore`
+.elmish-land/
+
+# Build outputs
+bin/
+obj/
+dist/
+node_modules/
+
+# Fable output of this project's own sources (dev: `dotnet fable ... --outDir .`)
+src/*.fs.js
+src/Pages/*.fs.js
+
+# Editor
+.vscode/

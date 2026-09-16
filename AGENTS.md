@@ -77,6 +77,44 @@ The web shell is Fable-compiled F# over raw DOM; generated `.js` lands in
   after adding projects or traces. A project can only open in the browser
   when its assets are deployed under `webroot/games/<id>` (`web: true`).
 
+### Mobile game pages (src/GameChangerElmish)
+
+`src/GameChangerElmish` is an **Elmish Land 2.0** app (Fable 5 + Feliz 3 +
+Vite 8, hash routing) hosting mobile-first touch play pages; games are picked
+with `?game=<id>` and register themselves in `src/Host.fs` (`Games`). Its
+emulator core is the same Fable-clean subset JetpacFR.Web compiles, plus the
+game image module `games/<id>/WebImage.fs`.
+
+- Run dev server: `cd src/GameChangerElmish && elmish-land server`
+  (http://localhost:5173). Production build: `elmish-land build` -> `dist/`.
+- After editing its F#, recompile the JS the dev server serves:
+  `dotnet fable GameChangerElmish.fsproj --outDir .` then reload the page
+  (fable is pinned in the project-local `dotnet-tools.json`; `dotnet fable`
+  resolves it there). Fable writes outside-project outputs **next to their
+  sources** (`src/Jetpac2.Core/*.fs.js`, `games/uridium/WebImage.fs.js`) -
+  gitignored, do not commit or hand-edit them. `.elmish-land/` is generated
+  (`elmish-land restore`); never edit it.
+- The `global.json` there pins the 11.0.100 RC SDK (`allowPrerelease`) - the
+  same SDK the rest of the repo's net11.0 projects build with.
+- Null-CE game versions (raw bytes in the CE file, the default version):
+  `dotnet run --project tests/JetpacFR.Core.Tests -- --null-ce games/<id>
+  [--web-image]`. Writes `versions/vNNN_nullce.fs` (parity-gated), bumps
+  `activeVersion`, materializes `CeProgram.fs`; `--web-image` also generates
+  `WebImage.fs` (needs `memory.bin` + `state.txt` in the game dir). Add the
+  generated `WebImage.fs` to the GameChangerElmish fsproj and one `GameDef`
+  entry in `Host.fs` (`Games.all`) to ship a new game.
+- Warm-start captures come from the real tape, not hand-built states:
+  `dotnet run --project tests/JetpacFR.Core.Tests -- --capture-tape
+  games/<id>/<game>.tzx games/<id>` boots ROM+TZX through
+  `Jetpac3.Core.Boot.bootToEntry`, settles into gameplay, and rewrites
+  `memory.bin` + `state.txt` (previous files kept as `.bak`). A capture with
+  `pc` inside loader code shows a frozen loading screen - always verify the
+  captured state actually animates (beeper events + changing screen) before
+  shipping it.
+- Touch controls: pointer events with `setPointerCapture` (fire and keypad
+  track separate pointer ids); key mapping lives in `Host.fs` `KeyMap`
+  (default: cursor-joystick CapsShift+5/6/7/8, fire 0).
+
 ## Notes
 
 - Desktop GUI layout (src/JetpacFR.Desktop): the launcher view lives in
