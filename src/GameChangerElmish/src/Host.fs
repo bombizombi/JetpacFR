@@ -123,6 +123,9 @@ module KeyMap =
 
     let fireCells: (int * int) list = [ (4, 0) ] // 0
 
+    /// Matrix cells for the number keys 1..5 (menu / level select row).
+    let numCells (n: int) : (int * int) list = [ (3, n - 1) ]
+
 /// All compiled games the shell can run. Adding a game: generate its
 /// WebImage.fs (--null-ce <dir> --capture-tape/--web-image), include it in
 /// the fsproj, and add one GameDef here.
@@ -176,6 +179,10 @@ module Emulator =
     let mutable private held: Set<int * int> = Set.empty
     let mutable private frames = 0
 
+    /// Per-tick input poller (the gamepad library exposes polled state, not
+    /// events; its poll runs at the top of every frame).
+    let mutable private inputPoller: (unit -> unit) option = None
+
     /// Diagnostics trail (browser console: window.__log).
     let private log (msg: string) : unit =
         emitJsExpr msg "((window.__log = window.__log || []).push($0))" |> ignore
@@ -196,6 +203,11 @@ module Emulator =
                         match game with
                         | Some g ->
                             frames <- frames + 1
+
+                            match inputPoller with
+                            | Some f -> f ()
+                            | None -> ()
+
                             let frameStart, _ = g.RunFrame()
 
                             if not (isNull ctx) then
@@ -211,7 +223,10 @@ module Emulator =
 
                                 ctx?putImageData (img, 0, 0)
 
-                            Audio.Play(g.DrainBeeperSamples frameStart)
+                            if Audio.Enabled then
+                                Audio.Play(g.DrainBeeperSamples frameStart)
+                            else
+                                g.DiscardBeeper()
                         | None -> ())
                     20
         elif not on && running then
@@ -220,12 +235,28 @@ module Emulator =
 
     let Running = running
 
-    /// Wanted key state from the controls; diff against what is held.
-    let applyKeys (dirs: Set<KeyMap.Dir>) (fire: bool) : unit =
+    // Input sources, merged into the Spectrum matrix on every change. The
+    // on-screen controls (the @rbuljan/gamepad dpad + fire, the number row)
+    // and the physical keyboard each hold their own state.
+    let mutable private padDirs: Set<KeyMap.Dir> = Set.empty
+    let mutable private padFire = false
+    let mutable private padNums: Set<int> = Set.empty
+    let mutable private keyDirs: Set<KeyMap.Dir> = Set.empty
+    let mutable private keyFire = false
+    let mutable private keyNums: Set<int> = Set.empty
+
+    let private sync () =
+        let dirs = Set.union padDirs keyDirs
+        let fire = padFire || keyFire
+        let nums = Set.union padNums keyNums
+
         let wanted =
             (Set.empty, dirs)
             ||> Set.fold (fun acc d -> Set.union acc (Set.ofList (KeyMap.dirCells d)))
             |> fun acc -> if fire then Set.union acc (Set.ofList KeyMap.fireCells) else acc
+            |> fun acc ->
+                (acc, nums)
+                ||> Set.fold (fun acc n -> Set.union acc (Set.ofList (KeyMap.numCells n)))
 
         match game with
         | None -> ()
@@ -238,21 +269,50 @@ module Emulator =
                 if not (held.Contains c) then
                     g.SetKey(fst c, snd c, true)
 
+            if wanted <> held then
+                log (sprintf "keys: %A" (Set.toList wanted))
+
             held <- wanted
 
-    /// Physical-keyboard fallback (desktop testing): arrows drive the same
-    /// direction set, space fires. Reuses applyKeys so keyboard + touch agree.
-    let mutable private dirsFromKeys: Set<KeyMap.Dir> = Set.empty
-    let mutable private fireFromKeys = false
+    /// Direction state from the on-screen movement control.
+    let SetPadDirs(d: Set<KeyMap.Dir>) : unit =
+        if padDirs <> d then
+            padDirs <- d
+            sync ()
 
-    let private syncKeys () = applyKeys dirsFromKeys fireFromKeys
+    /// Fire state from the on-screen fire button.
+    let SetPadFire(f: bool) : unit =
+        if padFire <> f then
+            padFire <- f
+            sync ()
 
+    /// Number-key state (1..5) from the on-screen row.
+    let SetPadNums(n: Set<int>) : unit =
+        if padNums <> n then
+            padNums <- n
+            sync ()
+
+    /// Register the per-frame input poller (called once at host boot).
+    let SetInputPoller(f: unit -> unit) : unit = inputPoller <- Some f
+
+    /// Physical-keyboard fallback (desktop testing): arrows drive directions,
+    /// space fires, 1-5 are the number keys. Merged with the on-screen
+    /// controls in `sync`.
     let private keyDir (key: string) : KeyMap.Dir option =
         match key with
         | "ArrowUp" -> Some KeyMap.N
         | "ArrowDown" -> Some KeyMap.S
         | "ArrowLeft" -> Some KeyMap.W
         | "ArrowRight" -> Some KeyMap.E
+        | _ -> None
+
+    let private keyNum (key: string) : int option =
+        match key with
+        | "1" -> Some 1
+        | "2" -> Some 2
+        | "3" -> Some 3
+        | "4" -> Some 4
+        | "5" -> Some 5
         | _ -> None
 
     let private isEditableTarget (e: obj) =
@@ -275,13 +335,19 @@ module Emulator =
 
                     match keyDir key with
                     | Some d ->
-                        dirsFromKeys <- Set.add d dirsFromKeys
-                        syncKeys ()
+                        keyDirs <- Set.add d keyDirs
+                        sync ()
                     | None ->
 
-                        if key = " " then
-                            fireFromKeys <- true
-                            syncKeys ()
+                        match keyNum key with
+                        | Some n ->
+                            keyNums <- Set.add n keyNums
+                            sync ()
+                        | None ->
+
+                            if key = " " then
+                                keyFire <- true
+                                sync ()
         )
 
         Dom.window?addEventListener (
@@ -294,13 +360,19 @@ module Emulator =
 
                     match keyDir key with
                     | Some d ->
-                        dirsFromKeys <- Set.remove d dirsFromKeys
-                        syncKeys ()
+                        keyDirs <- Set.remove d keyDirs
+                        sync ()
                     | None ->
 
-                        if key = " " then
-                            fireFromKeys <- false
-                            syncKeys ()
+                        match keyNum key with
+                        | Some n ->
+                            keyNums <- Set.remove n keyNums
+                            sync ()
+                        | None ->
+
+                            if key = " " then
+                                keyFire <- false
+                                sync ()
         )
 
     /// Boot the emulator host against a canvas already in the DOM. `?game=<id>`

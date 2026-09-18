@@ -1,51 +1,48 @@
 module GameChangerElmish.Pages.Page
 
 // The Game Changer play page, mobile-first: Spectrum screen on top, touch
-// controls below (fire on the left third, an 8-direction keypad on the right
-// two-thirds). All styling lives in index.html; this module is behavior:
-// pointer tracking that maps finger position to Spectrum key state and
-// forwards it to the imperative host (GameChangerElmish.Host).
+// controls below. Movement (4-direction DPad + FIRE) comes from the
+// @rbuljan/gamepad library, mounted into the empty #controls container by
+// GamepadCtl; the number row (1-5, for menus) is ours.
+//
+// Touch input deliberately BYPASSES the MVU loop - a dispatch per press or
+// drag would re-render the whole page on every event and starve the 20 ms
+// emulator loop. Handlers apply keys straight to the imperative host and
+// toggle "on" classes directly. The model only carries rarely-changing UI
+// state (run/pause, sound).
 
 open Feliz
 open Fable.Core.JsInterop
 open ElmishLand
+open GameChangerElmish
 open GameChangerElmish.Shared
 open GameChangerElmish.Host
 open GameChangerElmish.Pages
 
 type Model =
-    { Dirs: Set<KeyMap.Dir>
-      Fire: bool
-      Running: bool
+    { Running: bool
       Muted: bool }
 
 type Msg =
     | LayoutMsg of Layout.Msg
-    | DirsChange of Set<KeyMap.Dir>
-    | FireChange of bool
     | ToggleRun
     | ToggleMute
 
 let init () =
-    // The host needs the canvas in the DOM; init runs before React mounts,
-    // so boot it on a short delay (the App.fs warm-start pattern).
-    Dom.setTimeout (fun () -> ignore (Emulator.start "gameScreen")) 30 |> ignore
+    // The host and the gamepad need their DOM; init runs before React
+    // mounts, so boot on a short delay (the App.fs warm-start pattern).
+    Dom.setTimeout
+        (fun () ->
+            ignore (Emulator.start "gameScreen")
+            GamepadCtl.start "#controls")
+        30
+    |> ignore
 
-    { Dirs = Set.empty
-      Fire = false
-      Running = true
-      Muted = true },
-    Command.none
+    { Running = true; Muted = true }, Command.none
 
 let update (msg: Msg) (model: Model) =
     match msg with
     | LayoutMsg _ -> model, Command.none
-    | DirsChange dirs ->
-        Emulator.applyKeys dirs model.Fire
-        { model with Dirs = dirs }, Command.none
-    | FireChange fire ->
-        Emulator.applyKeys model.Dirs fire
-        { model with Fire = fire }, Command.none
     | ToggleRun ->
         Emulator.setRunning (not model.Running)
         { model with Running = not model.Running }, Command.none
@@ -53,20 +50,15 @@ let update (msg: Msg) (model: Model) =
         Audio.SetEnabled model.Muted // muted -> enabled
         { model with Muted = not model.Muted }, Command.none
 
-// ---- pointer plumbing -----------------------------------------------------
+// ---- number row (imperative, outside React) --------------------------------
 //
-// Each control (fire button, keypad) captures its pointer on pointerdown, so
-// fingers can slide around freely (and leave the element) while events keep
-// arriving at the capturing element. Fire and keypad track their own pointer
-// id, so both work simultaneously with two fingers. Event members are read
-// through the dynamic operator - currentTarget has no typed rect accessor.
+// Press-and-hold Spectrum keys 1..5 for the game's menus. Each key tracks
+// its own pointer id, so several can be held at once.
 
 type Ev = Browser.Types.PointerEvent
 
-let mutable private keypadPid: int option = None
-let mutable private firePid: int option = None
-
-let private pointerId (e: Ev) : int = unbox (e?pointerId)
+let mutable private numHeld: Set<int> = Set.empty
+let mutable private numPids: Map<int, int> = Map.empty // pointerId -> number key
 
 let private capture (e: Ev) : unit =
     try
@@ -74,126 +66,55 @@ let private capture (e: Ev) : unit =
     with _ ->
         ()
 
-let private samePointer (pid: int option) (e: Ev) : bool =
-    match pid with
-    | Some p -> p = pointerId e
-    | None -> false
+let private pointerId (e: Ev) : int = unbox (e?pointerId)
 
-/// Map a pointer position on the keypad element to its 3x3 cell, then to the
-/// direction it implies (center cell = no direction).
-let private dirAt (e: Ev) : KeyMap.Dir option =
-    let rect = e?currentTarget?getBoundingClientRect ()
-    let x: float = unbox (e?clientX) - unbox (rect?left)
-    let y: float = unbox (e?clientY) - unbox (rect?top)
-    let w: float = unbox (rect?width)
-    let h: float = unbox (rect?height)
+/// Mirror the held number keys onto their "on" classes.
+let private markNums () =
+    for n in 1 .. 5 do
+        let el: obj = emitJsExpr n "document.getElementById('num-' + $0)"
 
-    let clamp (v: int) = max 0 (min 2 v)
+        if not (isNull el) then
+            el?classList?toggle ("on", numHeld.Contains n) |> ignore
 
-    let col = clamp (int (x / w * 3.0))
-    let row = clamp (int (y / h * 3.0))
-
-    match row, col with
-    | 0, 0 -> Some KeyMap.NW
-    | 0, 1 -> Some KeyMap.N
-    | 0, 2 -> Some KeyMap.NE
-    | 1, 0 -> Some KeyMap.W
-    | 1, 1 -> None
-    | 1, 2 -> Some KeyMap.E
-    | 2, 0 -> Some KeyMap.SW
-    | 2, 1 -> Some KeyMap.S
-    | 2, 2 -> Some KeyMap.SE
-    | _ -> None
-
-/// Keypad press or drag: re-presses as the finger moves across cells.
-let private keypadDown (dispatch: Msg -> unit) (e: Ev) : unit =
+let private numDown (n: int) (e: Ev) : unit =
     e.preventDefault ()
     capture e
-    keypadPid <- Some(pointerId e)
-    dispatch (DirsChange(dirAt e |> function Some d -> Set.singleton d | None -> Set.empty))
+    numPids <- Map.add (pointerId e) n numPids
 
-let private keypadMove (dispatch: Msg -> unit) (e: Ev) : unit =
-    if samePointer keypadPid e then
-        e.preventDefault ()
-        dispatch (DirsChange(dirAt e |> function Some d -> Set.singleton d | None -> Set.empty))
+    if not (numHeld.Contains n) then
+        numHeld <- Set.add n numHeld
+        Emulator.SetPadNums numHeld
+        markNums ()
 
-let private keypadUp (dispatch: Msg -> unit) (e: Ev) : unit =
-    if samePointer keypadPid e then
-        keypadPid <- None
-        dispatch (DirsChange Set.empty)
+let private numUp (e: Ev) : unit =
+    match Map.tryFind (pointerId e) numPids with
+    | Some n ->
+        numPids <- Map.remove (pointerId e) numPids
 
-let private fireDown (dispatch: Msg -> unit) (e: Ev) : unit =
-    e.preventDefault ()
-    capture e
-    firePid <- Some(pointerId e)
-    dispatch (FireChange true)
-
-let private fireUp (dispatch: Msg -> unit) (e: Ev) : unit =
-    if samePointer firePid e then
-        firePid <- None
-        dispatch (FireChange false)
+        if numHeld.Contains n then
+            numHeld <- Set.remove n numHeld
+            Emulator.SetPadNums numHeld
+            markNums ()
+    | None -> ()
 
 // ---- view ------------------------------------------------------------------
 
-let private dirName (d: KeyMap.Dir) =
-    match d with
-    | KeyMap.N -> "↑"
-    | KeyMap.NE -> "↗"
-    | KeyMap.E -> "→"
-    | KeyMap.SE -> "↘"
-    | KeyMap.S -> "↓"
-    | KeyMap.SW -> "↙"
-    | KeyMap.W -> "←"
-    | KeyMap.NW -> "↖"
-
-/// One keypad cell; cells whose direction is held get the "on" highlight.
-let private cell (model: Model) (row: int) (col: int) (dir: KeyMap.Dir option) =
-    let active =
-        match dir with
-        | Some d -> model.Dirs.Contains d
-        | None -> false
-
+/// The Spectrum number keys 1..5 (menus, level select) - a slimmer row above
+/// the gamepad area.
+let private numRow =
     Html.div [
-        prop.className [
-            "cell"
-            if active then "on"
-            if dir.IsNone then "center"
+        prop.className "numrow"
+        prop.children [
+            for n in 1 .. 5 ->
+                Html.div [
+                    prop.id ("num-" + string n)
+                    prop.className "numkey"
+                    prop.text (string n)
+                    prop.onPointerDown (numDown n)
+                    prop.onPointerUp numUp
+                    prop.onPointerCancel numUp
+                ]
         ]
-        prop.key (sprintf "cell-%d-%d" row col)
-        if dir.IsSome then
-            prop.text (dirName dir.Value)
-    ]
-
-let private keypad (model: Model) (dispatch: Msg -> unit) =
-    let grid =
-        [ [ Some KeyMap.NW; Some KeyMap.N; Some KeyMap.NE ]
-          [ Some KeyMap.W; None; Some KeyMap.E ]
-          [ Some KeyMap.SW; Some KeyMap.S; Some KeyMap.SE ] ]
-
-    let cells =
-        grid
-        |> List.mapi (fun r row -> row |> List.mapi (fun c dir -> cell model r c dir))
-        |> List.collect id
-
-    Html.div [
-        prop.className "keypad"
-        prop.onPointerDown (keypadDown dispatch)
-        prop.onPointerMove (keypadMove dispatch)
-        prop.onPointerUp (keypadUp dispatch)
-        prop.onPointerCancel (keypadUp dispatch)
-        prop.children cells
-    ]
-
-let private fireButton (model: Model) (dispatch: Msg -> unit) =
-    Html.div [
-        prop.className [
-            "fire"
-            if model.Fire then "on"
-        ]
-        prop.text "FIRE"
-        prop.onPointerDown (fireDown dispatch)
-        prop.onPointerUp (fireUp dispatch)
-        prop.onPointerCancel (fireUp dispatch)
     ]
 
 let view (model: Model) (dispatch: Msg -> unit) : ReactElement =
@@ -230,10 +151,9 @@ let view (model: Model) (dispatch: Msg -> unit) : ReactElement =
                 prop.id "statusLine"
                 prop.text "booting emulator..."
             ]
-            Html.div [
-                prop.className "controls"
-                prop.children [ fireButton model dispatch; keypad model dispatch ]
-            ]
+            numRow
+            // Movement controls (dpad + fire) mount here via @rbuljan/gamepad.
+            Html.div [ prop.id "controls"; prop.className "controls" ]
         ]
     ]
 

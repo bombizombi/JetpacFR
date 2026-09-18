@@ -111,9 +111,14 @@ game image module `games/<id>/WebImage.fs`.
   `pc` inside loader code shows a frozen loading screen - always verify the
   captured state actually animates (beeper events + changing screen) before
   shipping it.
-- Touch controls: pointer events with `setPointerCapture` (fire and keypad
-  track separate pointer ids); key mapping lives in `Host.fs` `KeyMap`
-  (default: cursor-joystick CapsShift+5/6/7/8, fire 0).
+- Touch controls: movement (4-direction DPad + FIRE) is the **@rbuljan/gamepad**
+  npm package (`src/GamepadCtl.fs` mounts it into `#controls`); its state is
+  polled once per frame through `Emulator.SetInputPoller`, not event-driven.
+  The number row (1-5) uses plain pointer events with `setPointerCapture`.
+  All input paths write straight to the imperative host - never dispatch MVU
+  messages per touch event (renders starve the frame loop; measured as game
+  slowdown on phones). Key mapping lives in `Host.fs` `KeyMap` (default:
+  cursor-joystick CapsShift+5/6/7/8, fire 0).
 
 ## Notes
 

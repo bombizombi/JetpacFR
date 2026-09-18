@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-      "start": "dotnet elmish-land server",
-      "build": "dotnet elmish-land build"
+    "start": "dotnet elmish-land server",
+    "build": "dotnet elmish-land build"
   },
   "dependencies": {
+    "@rbuljan/gamepad": "^3.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

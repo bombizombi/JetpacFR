@@ -26,6 +26,7 @@
         <Compile Include="../JetpacFR.Core/GameRegistry.fs"/>
         <Compile Include="../../games/uridium/WebImage.fs"/>
         <Compile Include="src/Host.fs"/>
+        <Compile Include="src/GamepadCtl.fs"/>
     </ItemGroup>
 
     <ItemGroup>

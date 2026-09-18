@@ -40,6 +40,9 @@ type CEGame(program: Z80Op list, entryMem: byte[], entryState: string) =
         port.BeeperTrace.Clear()
         Jetpac2.Core.Beeper.ToSamples trace frameStart (port.CycleCount() - frameStart)
 
+    /// Drop the frame's beeper trace without converting (audio off).
+    member _.DiscardBeeper() : unit = port.BeeperTrace.Clear()
+
 
 /// CE parity: the assembled CE program vs the original image it was
 /// disassembled from — the visible "source of truth" claim.
