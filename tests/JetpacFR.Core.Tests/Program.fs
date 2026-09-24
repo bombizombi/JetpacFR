@@ -1052,41 +1052,83 @@ let runTimeline (romPath: string) (tzxPath: string) : int =
         match loadResult with
         | TimelineLoaded(timeline, events) ->
             timeline.Count = recorded.StateTimeline.Count
+            && timeline.FrameCount = recorded.StateTimeline.FrameCount
             && events = List.ofSeq recorded.KeyLog.Events
             && ([ for i in 0 .. timeline.Count - 1 do
                       let m1, t1, k1 = recorded.StateTimeline.FrameData i
                       let m2, t2, k2 = timeline.FrameData i
                       yield m1 = m2 && t1 = t2 && k1 = k2 ]
                 |> List.forall id)
+            && ([ for j in 0 .. timeline.SummaryCount - 1 do
+                      yield
+                          timeline.SummaryFrameAt j = recorded.StateTimeline.SummaryFrameAt j
+                          && timeline.SummaryData j = recorded.StateTimeline.SummaryData j ]
+                |> List.forall id)
         | _ -> false
 
     check
-        "timeline dual save writes both formats and verifies identical"
+        "timeline save writes the V3 sparse file and verifies identical"
         (saveResult = Ok()
-         && File.Exists path
-         && File.Exists(StateTimelineStore.toV2Path path))
+         && File.Exists(StateTimelineStore.toV3Path path)
+         && not (File.Exists path)) // legacy V1 is never written anymore
         (sprintf "%A" saveResult)
 
     check
-        "timeline file round-trips every state"
+        "timeline file round-trips every state and summary"
         loadedOk
         (sprintf "%A" loadResult)
 
-    // The lone-.jst clutch: delete the twin, load again, and require the load
-    // itself to rebuild it while returning the same states.
-    File.Delete(StateTimelineStore.toV2Path path)
+    // Legacy V1 file, hand-built: the loader must read the dense generations
+    // (read-only) and surface them as the degenerate sparse case - every
+    // frame stored, no summaries.
+    let legacyPath = Path.Combine(temp, "legacy.jst")
 
-    let clutchResult = StateTimelineStore.tryLoad path fp
+    do
+        use fs = File.Create legacyPath
+        use w = new BinaryWriter(fs)
+        w.Write([| byte 'J'; byte 'P'; byte 'S'; byte 'T' |])
+        w.Write 1us
+        w.Write 0us
 
-    let clutchOk =
-        match clutchResult with
-        | TimelineLoaded(timeline, events) ->
-            File.Exists(StateTimelineStore.toV2Path path)
-            && timeline.Count = recorded.StateTimeline.Count
-            && events = List.ofSeq recorded.KeyLog.Events
-        | _ -> false
+        let wstr (s: string) =
+            let b = System.Text.Encoding.UTF8.GetBytes s
+            w.Write(byte b.Length)
+            w.Write b
 
-    check "lone .jst load rebuilds the .js2 twin" clutchOk (sprintf "%A" clutchResult)
+        wstr fp.GameId
+        wstr fp.RomSha256
+        wstr fp.TzxSha256
+        wstr fp.ProgramSha256
+        w.Write 0uy // no program address
+        w.Write 0u // no key events
+        w.Write 0 // startFrame
+        w.Write 2u // two dense frames
+
+        for i in 0..1 do
+            let text, keys, mem = recorded.StateTimeline.FrameData i
+            let tb = System.Text.Encoding.UTF8.GetBytes text
+            w.Write(uint16 tb.Length)
+            w.Write tb
+            w.Write keys
+            w.Write mem
+
+        w.Flush()
+
+    match StateTimelineStore.tryLoad legacyPath fp with
+    | TimelineLoaded(legacy, legacyEvents) ->
+        check
+            "legacy V1 loads as the dense degenerate case"
+            (legacy.Count = 2
+             && legacy.FrameCount = 0
+             && legacy.HasState 0
+             && legacy.HasState 1
+             && not (legacy.HasState 2)
+             && legacyEvents.IsEmpty
+             && (let m1, t1, k1 = legacy.FrameData 0
+                 let m2, t2, k2 = recorded.StateTimeline.FrameData 0
+                 m1 = m2 && t1 = t2 && k1 = k2))
+            ""
+    | other -> check "legacy V1 load" false (sprintf "%A" other)
 
     check
         "timeline identity rejects another game"
@@ -1163,6 +1205,166 @@ let runTimeline (romPath: string) (tzxPath: string) : int =
     clearer.RunFrame() |> ignore
     check "captures continue sequentially after clear" (clearer.StateTimeline.Count = 3) ""
     check "cleared timeline covers the new frames" (clearer.StateTimeline.EndFrame = 32) ""
+
+    Directory.Delete(temp, true)
+    if failures.Count > 0 then 1 else 0
+
+let runSparse (romPath: string) (tzxPath: string) : int =
+    printfn "sparse: cadence, materializer parity, summary parity, mapping"
+    // Dense head of 1 s (50 frames), then a stored PAIR at every second.
+    let cadence: TimelineCadence.Cadence =
+        { DenseSeconds = 1; SparseEverySeconds = 1; Fps = 50 }
+
+    // 1. Cadence decision table (pure).
+    check "cadence: anchor always stored" (TimelineCadence.shouldCapture cadence 100 100) ""
+    check "cadence: dense head" (TimelineCadence.shouldCapture cadence 100 149) ""
+    check "cadence: pair at the second" (TimelineCadence.shouldCapture cadence 100 150) ""
+    check "cadence: pair short frame" (TimelineCadence.shouldCapture cadence 100 151) ""
+    check "cadence: long gap" (not (TimelineCadence.shouldCapture cadence 100 175)) ""
+    check "cadence: next pair" (TimelineCadence.shouldCapture cadence 100 200) ""
+
+    let framesN = 130
+
+    // 2. A live session captures the dense head + the per-second pairs.
+    let sparse = TraceSession(romPath, tzxPath, 500_000, cadence = cadence)
+
+    for _ in 0 .. framesN - 1 do
+        sparse.RunFrame() |> ignore
+
+    let tl = sparse.StateTimeline
+    check "sparse: stored count" (tl.Count = 54) (sprintf "count=%d" tl.Count) // 0..51 + 100,101
+    check "sparse: frame extent" (tl.FrameCount = framesN + 1) (sprintf "frames=%d" tl.FrameCount)
+    check "sparse: end frame" (tl.EndFrame = framesN) ""
+    check "sparse: dense head state" (tl.HasState 49) ""
+    check "sparse: pair frame stored" (tl.HasState 50 && tl.HasState 51) ""
+    check "sparse: long gap not stored" (not (tl.HasState 75) && not (tl.HasState 99)) ""
+    check "sparse: next pair stored" (tl.HasState 100 && tl.HasState 101) ""
+    check "sparse: post-pair gap" (not (tl.HasState 102)) ""
+    check "sparse: summaries cover every frame" (tl.SummaryCount = framesN + 1) ""
+
+    // 3. Materializer parity: a dense oracle session records the same
+    // execution (no keys pressed) with every frame stored; the sparse
+    // session's re-derived gap states must match it byte for byte.
+    let oracle = TraceSession(romPath, tzxPath, 500_000) // default cadence = dense
+
+    for _ in 0 .. framesN - 1 do
+        oracle.RunFrame() |> ignore
+
+    let mat = sparse.Materializer
+
+    let parityOk =
+        [ for f in [ 52; 60; 75; 99; 102; 130 ] ->
+              let text, mem, keys = mat.StateAfter f
+              let obuf = Array.zeroCreate 0x10000
+              let oText, oKeys = oracle.StateTimeline.RestoreInto(f, obuf)
+              text = oText && keys = oKeys && mem = obuf ]
+
+    check "sparse: gap materialization matches the dense oracle" (List.forall id parityOk) ""
+
+    // 4. Summary parity: the live CallTracker's per-frame summaries must
+    // equal a FlameWalker pass over the re-executed window (same classifier,
+    // same execution) - the whole sparse-flame design rests on this.
+    let built = FlameBuilder.buildFrames sparse.StateTimeline sparse.KeyLog 1 framesN ignore (fun () -> false)
+
+    match built with
+    | None -> check "sparse: buildFrames over the sparse recording" false "None"
+    | Some w ->
+        check "sparse: built window carries summaries" (w.FrameSummaries.IsSome) ""
+
+        (match w.FrameSummaries with
+         | Some builtSummaries ->
+             let mismatchCount =
+                 [ for f in 1 .. framesN do
+                       let live = tl.SummaryData f
+                       let walked = builtSummaries[f - 1]
+                       if live <> walked then yield f ]
+
+             check
+                 "sparse: live summaries equal walked summaries"
+                 mismatchCount.IsEmpty
+                 (sprintf "frames differ: %A" (List.truncate 5 mismatchCount))
+         | _ -> ())
+
+        // 5. Instruction mapping: InstrBase prefix sums address frames.
+        check
+            "sparse: frame 1 spans from instruction 0"
+            (FlameWindow.instrBaseAt w 0 = 0L
+             && FlameWindow.instrBaseAt w 1 = int64 (tl.SummaryData 1).InstrCount)
+            ""
+
+        let iMid = FlameWindow.instrBaseAt w 60 + int64 (tl.SummaryData 60).InstrCount / 2L
+
+        check
+            "sparse: frameIndexOfInstr maps mid-gap instructions"
+            (FlameWindow.frameIndexOfInstr w iMid = 60)
+            (sprintf "%d" (FlameWindow.frameIndexOfInstr w iMid))
+
+        let i0, i1 = FlameWindow.instrRangeOfFrames w 100 102
+
+        check
+            "sparse: instrRangeOfFrames spans both pair frames"
+            (i0 = FlameWindow.instrBaseAt w 100 && i1 = FlameWindow.instrBaseAt w 102)
+            ""
+
+        // 6. SummaryBlocks aggregation: one block over the whole window has a
+        // dominant root at depth 0.
+        let block = SummaryBlocks.blockDominant (w.FrameSummaries.Value) 0 (w.FrameTicks.Length)
+
+        let struct (rootEntry, _, _) = block[0]
+
+        check "sparse: summary block has a dominant root" (rootEntry >= 0) ""
+
+    // 7. V3 roundtrip of the sparse recording: stored frames, gaps and
+    // summaries all survive the codec.
+    let temp =
+        Path.Combine(Path.GetTempPath(), "jetpacfr-sparse-" + Guid.NewGuid().ToString("N"))
+
+    Directory.CreateDirectory temp |> ignore
+
+    let fp: TimelineFingerprint =
+        { GameId = "sparse-test"
+          RomSha256 = "rom-hash"
+          TzxSha256 = "tzx-hash"
+          ProgramSha256 = ""
+          ProgramAddress = None }
+
+    let path = Path.Combine(temp, "sparse.jst")
+
+    let saveResult =
+        StateTimelineStore.save path fp sparse.StateTimeline sparse.KeyLog.Events
+
+    match saveResult, StateTimelineStore.tryLoad path fp with
+    | Ok(), TimelineLoaded(loaded, events) ->
+        check
+            "sparse: V3 round-trips the sparse recording"
+            (loaded.StoredCount = tl.StoredCount
+             && ([ for i in 0 .. loaded.StoredCount - 1 -> loaded.StoredFrameAt i = tl.StoredFrameAt i ]
+                 |> List.forall id)
+             && loaded.FrameCount = tl.FrameCount
+             && ([ for j in 0 .. tl.SummaryCount - 1 -> loaded.SummaryData j = tl.SummaryData j ]
+                 |> List.forall id)
+             && events = List.ofSeq sparse.KeyLog.Events)
+            ""
+    | other -> check "sparse: V3 save/load" false (sprintf "%A" other)
+
+    // 8. A loaded sparse recording seeks into a gap straight away; the
+    // materialized state matches the dense oracle's.
+    let seeker = TraceSession(romPath, tzxPath, 500_000, cadence = cadence)
+
+    match StateTimelineStore.tryLoad path fp with
+    | TimelineLoaded(loaded, events) ->
+        seeker.LoadStateTimeline(loaded, events)
+        seeker.JumpTo(75)
+        check "sparse: seek into a gap lands on the materialized frame" (seeker.Frame = 75) ""
+
+        let obuf75 = Array.zeroCreate 0x10000
+        oracle.StateTimeline.RestoreInto(75, obuf75) |> ignore
+
+        check
+            "sparse: materialized gap state matches the recording"
+            (seeker.Memory = obuf75)
+            ""
+    | other -> check "sparse: load for gap seek" false (sprintf "%A" other)
 
     Directory.Delete(temp, true)
     if failures.Count > 0 then 1 else 0
@@ -3146,6 +3348,7 @@ let mainTests argv =
             | "handoff" -> runReplayHandoff rom.Value tzx.Value
             | "history" -> runHistory rom.Value tzx.Value
             | "timeline" -> runTimeline rom.Value tzx.Value
+            | "sparse" -> runSparse rom.Value tzx.Value
             | "z80ops" -> runZ80Ops ()
             | "labels" -> runLabels ()
             | "integration" -> runIntegration ()
@@ -3166,6 +3369,7 @@ let mainTests argv =
                 + runValidate rom.Value tzx.Value
                 + runHistory rom.Value tzx.Value
                 + runTimeline rom.Value tzx.Value
+                + runSparse rom.Value tzx.Value
                 + runBoot ()
                 + runFlow ()
                 + runManifest ()

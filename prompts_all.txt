@@ -72,3 +72,28 @@ Can you create a default CE version of uridium game, with raw bytes in the CE fi
 -any move and hold with a finger should count as if you press that direction key.  The game, perhaps, has 4 direction keys, and one fire key.  
 -The spectrum screen should be on top, and bellow is out key control area.  put the direction keys on the right side and on the left side should be fire, perhaps fire takes 1/3 of the horizontal width, and cursos take 2/3.  As the first version, create an keypad simulation, with 8 directions.  
 Our web project should be elmish land project, research the latest version of elmish land and create a new directory for the project, then create the project.  ask me for confirmation when you decide on the directory name.
+
+
+20260916
+
+
+Can you change the trace file format in recording and in displaying it, in the following way.  Right now, we take a state snapshot after every frame, and we do not record anything in between frames for save. Also, when displaying trace file, and the trace file is freshly loaded, we have to emulate all the frames to be able to display the trace in the flame graph.  So, now we need to change this to work this way:  
+- When recording the trace, the state is saved every frame for first 10 seconds (10 seconds to be configurable), and after that, each second.  (This will save some memory and disk).
+- When displaying the flame graph, not all frames should be emulated, only those whose pixels are actually needed to be displayed should be emulated.  We determine this requirement from the pixel size of the target flame graph size, and calculate a "probe" every pixel and calculate which frame whould this pixel actually hit. (Perhaps use the strategy to select the earlies frame this pixel would hit).  Also, when fully zoomed out, (so when we display the full graph) we do not need a per pixel resolution.  We can approximate the graph with 8 pixel resolution, so each emulated frame gets spread over 8 pixels. (this 8 pixels should also be configurable). And only when we are zoomed at the level where each frame is taking the space of more than one pixel should we switch to the full resolution, where we display (and calculate) as many frames as there are horizontal pixels in the target graph. This once per second strategy will reduce the file size greatly, but will cause the minimum emulation requrement to grow to one second per 1 pixel or 8 pixels, so we also need a hybrid strategy where longer frame gaps are intermingled with short 1 frame states, and when looking for a target frame from the pixel location, we should first search for those short frames and execute them.
+-Addional requirement, when in long file mode, we should alternate between short snapshot (one frame only) and long frame (one second), and when a drawing request comes, or the jump to code request comes, the request should always contain the range of instruction count (earliest instruction count that this pixel covers and latest instruction count that this pixel covers).   Also, short frame should store, along with the full snapshot, a frame summary, which should be really short (just one rectangle per stack level), so that drawing could be instant for that request.
+-In whichever zoom level we are positioned, and no matter if we already emulated this frame or not, when we click on the flame graph, the position in the timeline, the instruction under the cursor should be shown in the code window, in both execution mode and in the memory mode.
+-One of the goals of this redesign is to have almost instant display of the graph at any zoom level.  
+
+What do you think about this change, did I miss any obvious ideas or improvements?  Give me ideas even if they are not obvious or easy.
+
+
+20260919
+
+The pane bellow the registers, with the debug info, can you limit it to be the spectrum screen size, and does not grow any larger?  (right now it grows with the debug info and eats the whole screen)
+
+When pressing buttons "Preview A" and "Preview B" we limit the replay time to one second.  This is fine if the replay is longer than 1 second, so we spped it up.  But, it looks wrong if the actual replay selected is really short, so it should just replay its actual real time length.
+
+
+
+
+

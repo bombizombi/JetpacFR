@@ -29,6 +29,150 @@
       "addr": 65529,
       "endExcl": 65535,
       "text": "BBBBB\u003C"
+    },
+    {
+      "kind": "range",
+      "addr": 56,
+      "endExcl": 83,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 654,
+      "endExcl": 668,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 683,
+      "endExcl": 691,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 703,
+      "endExcl": 713,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 721,
+      "endExcl": 732,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 798,
+      "endExcl": 805,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 23728,
+      "endExcl": 23729,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 25423,
+      "endExcl": 25456,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 26905,
+      "endExcl": 26919,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 26979,
+      "endExcl": 27088,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 28111,
+      "endExcl": 28170,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 28183,
+      "endExcl": 28214,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 28238,
+      "endExcl": 28250,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 28306,
+      "endExcl": 28313,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29135,
+      "endExcl": 29277,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29290,
+      "endExcl": 29307,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29324,
+      "endExcl": 29337,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29377,
+      "endExcl": 29520,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29529,
+      "endExcl": 29540,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29553,
+      "endExcl": 29615,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 29895,
+      "endExcl": 29910,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 30065,
+      "endExcl": 30101,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 30214,
+      "endExcl": 30317,
+      "text": "press UP button"
+    },
+    {
+      "kind": "range",
+      "addr": 30522,
+      "endExcl": 30613,
+      "text": "press UP button"
     }
   ],
   "symbols": [

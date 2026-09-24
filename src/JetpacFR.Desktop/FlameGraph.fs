@@ -83,6 +83,17 @@ module FlameGraphInternal =
 
 open FlameGraphInternal
 
+/// One flame-graph click resolved against the installed window: the tick and
+/// frame under the cursor, plus the instruction-index range the clicked
+/// pixel covers (frame-granular, from the window's summary instruction
+/// addressing; 0,0 when the window has none). The host materializes the
+/// frame and lands the code window on the exact instruction.
+type FlameSeek =
+    { Tick: int64
+      Frame: int
+      InstrLo: int64
+      InstrHi: int64 }
+
 /// Transparent cursor layer hosted over a FlameGraph (same grid cell, added
 /// after it): draws only the frame playhead + execution cursor. Hit-test
 /// invisible, so all mouse interaction stays on the graph below; moving the
@@ -151,7 +162,7 @@ type FlameOverlay(getPlayheadTick: unit -> int64 option, getCursorTick: unit -> 
 type FlameGraph() as self =
     inherit FrameworkElement()
 
-    let seekRequested = Event<int64 * int>() // (tick, frame; frame -1 when unknown)
+    let seekRequested = Event<FlameSeek>()
     let viewportChanged = Event<unit>()
     let rectMenu = Event<FlameRect * int * int * int64>() // (rect, frame, entry index)
 
@@ -347,6 +358,26 @@ type FlameGraph() as self =
 
     member _.Window = window
     member _.Overlay : FlameOverlay = overlay
+
+    /// Current pixels-per-tick (the host's viewport regime decisions).
+    member _.PixelsPerTick = ppTick
+
+    /// Install a window keeping the current viewport (clamped to the new
+    /// window's span): viewport-driven detail builds replace the overview
+    /// without snapping the zoom the user is mid-way through.
+    member this.SetWindowKeepViewport(w: FlameWindow) =
+        window <- Some w
+        firstDepth <- 0
+        cursorTick <- -1L
+        lod <- None
+        this.ClampOrigin w
+        this.ClampDepth w
+        this.InvalidateVisual()
+        overlay.InvalidateVisual()
+        viewportChanged.Trigger()
+
+    /// Zoomed-out summary blocks paint ~this many pixels wide (GuiConfig).
+    member val OverviewBlockPx = 8.0 with get, set
 
     /// Window tick of the frame playhead (None = hidden): shared with the
     /// cursor overlay so both paint the same x without re-running OnRender.
@@ -556,7 +587,18 @@ type FlameGraph() as self =
                 | Some w ->
                     let tick = max 0L (min (this.TickAt p.X) w.EndTick)
                     let frame = FlameWindow.frameAtTick w tick
-                    seekRequested.Trigger(tick, frame)
+                    // The clicked pixel's instruction range: one pixel of
+                    // ticks around the click, frame-granular (which exact
+                    // instruction inside the frame gets refined by the host
+                    // once it materializes real entries).
+                    let px = max 1L (int64 (Math.Round(1.0 / ppTick)))
+                    let iLo, iHi = FlameWindow.instrRangeOfTicks w (tick - px / 2L) (tick + px / 2L)
+
+                    seekRequested.Trigger
+                        { Tick = tick
+                          Frame = frame
+                          InstrLo = iLo
+                          InstrHi = iHi }
                 | None -> ()
         elif e.ChangedButton = MouseButton.Right then
             match window, this.RectAt p with
@@ -720,7 +762,15 @@ type FlameGraph() as self =
                             if win.FrameTicks.Length = 1 then win.EndTick else win.FrameTicks[0]
                         float firstCellTicks * ppTick
 
-                if cheapFramePx >= 1.0 && cheapFramePx < 10.0 then
+                // The sparse regime needs a full summary stream (per-frame, in
+                // step with the boundary table) - the overview window and the
+                // builder's windows both carry one.
+                let hasSummaries =
+                    match win.FrameSummaries with
+                    | Some s -> s.Length > 0 && s.Length = win.FrameTicks.Length
+                    | _ -> false
+
+                if cheapFramePx >= 1.0 && cheapFramePx < 10.0 && win.Rects.Length > 0 then
                     let lodData =
                         match lod with
                         | Some l -> l
@@ -780,6 +830,83 @@ type FlameGraph() as self =
                                                     elide text (int (avail / 6.0))
                                                 else
                                                     text
+                                            let ftText = ft candidate 10.5 fg true
+
+                                            if ftText.Width <= avail then
+                                                dc.DrawText(
+                                                    ftText,
+                                                    Point(x0 + 3.0, y + (this.RowH - 1.0 - ftText.Height) / 2.0)
+                                                )
+                elif hasSummaries && (cheapFramePx < 1.0 || win.Rects.Length = 0) then
+                    // Zoomed-out sparse regime: blocks straight from the per-frame
+                    // summaries - zero emulation, no LOD build; one pass over the
+                    // visible blocks per repaint, bounded by viewport pixels. A
+                    // window without raw rects (the overview) renders here at any
+                    // zoom: blockWidth 1 gives per-frame dominant bars.
+                    let summaries = win.FrameSummaries.Value
+                    let bf = max 1 (SummaryBlocks.blockWidth cheapFramePx this.OverviewBlockPx)
+                    let depthCount = max 1 (min win.MaxDepth (firstDepth + visibleRows))
+                    let firstIdx = max 0 (FlameWindow.frameAtTick win leftTick - win.FirstFrame)
+                    let lastIdx = max 0 (FlameWindow.frameAtTick win rightTick - win.FirstFrame)
+                    let blockFrom = (min (summaries.Length - 1) firstIdx) / bf
+                    let blockTo = (min summaries.Length (lastIdx + 1)) / bf + 1
+
+                    let runs =
+                        SummaryBlocks.runsAllDepths summaries bf depthCount blockFrom blockTo
+
+                    for depth in firstDepth .. depthCount - 1 do
+                        let y = this.RowOf depth
+
+                        if y > -this.RowH && y < h then
+                            let rFuncs, rBuckets, rStarts, rLens = runs[depth]
+
+                            for r in 0 .. rFuncs.Length - 1 do
+                                let func = rFuncs[r]
+                                let bucket = rBuckets[r]
+
+                                if func >= 0 && bucket >= 0 then
+                                    let j0 = rStarts[r] * bf
+                                    let j1 = min summaries.Length ((rStarts[r] + rLens[r]) * bf)
+
+                                    let a =
+                                        if j0 <= 0 then 0L
+                                        else win.FrameTicks[min (win.FrameTicks.Length - 1) (j0 - 1)]
+
+                                    let b =
+                                        if j1 >= win.FrameTicks.Length then
+                                            win.EndTick
+                                        else
+                                            win.FrameTicks[max 0 (j1 - 1)]
+
+                                    let x0 = max -1.0 (this.XOf a)
+                                    let x1 = min (w + 1.0) (this.XOf b)
+                                    let rw = x1 - x0
+
+                                    if rw >= 1.0 && x1 > 0.0 then
+                                        dc.DrawRectangle(
+                                            coverageBrush func bucket,
+                                            null,
+                                            Rect(x0, y, rw, this.RowH - 1.0)
+                                        )
+
+                                        if this.RowH >= 12.0 && rw >= 40.0 then
+                                            let text =
+                                                if depth = 0 then "(window root)" else labelFor func
+
+                                            let fg =
+                                                if bucket >= 2 then
+                                                    blackBrush :> Brush
+                                                else
+                                                    labelFg :> Brush
+
+                                            let avail = rw - 5.0
+
+                                            let candidate =
+                                                if float text.Length * 5.0 > avail then
+                                                    elide text (int (avail / 6.0))
+                                                else
+                                                    text
+
                                             let ftText = ft candidate 10.5 fg true
 
                                             if ftText.Width <= avail then

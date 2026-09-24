@@ -121,12 +121,16 @@ module EntryCache =
 /// involved on a cold start (boot to the game entry, then cache the state);
 /// after that the port runs alone, so the screen, the sound and the trace all
 /// describe the same execution.
-type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byte[] * int -> unit, ?fastBoot: bool) =
+type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byte[] * int -> unit, ?fastBoot: bool, ?cadence: TimelineCadence.Cadence) =
 
     /// Flash-load the tape (FastBoot, with its own slow fallback) instead of
     /// emulating every pulse on a cold start; the fast and slow boots keep
     /// separate entry-cache slots.
     let fastBoot = defaultArg fastBoot false
+
+    /// Sparse-capture cadence: dense head + per-second state pairs (GuiConfig
+    /// surfaces the tunables; the Core default is 10 s + 1 s).
+    let cadence = defaultArg cadence TimelineCadence.deflt
 
     let port = Jetpac2.Core.Machine()
     let recorder = TraceRecorder(capacity, 512)
@@ -135,9 +139,14 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     let snapshotInterval = 64
     let history = FrameHistory(300, 1_500_000_000L)
     let keyLog = KeyLog()
-    /// Per-frame full states (the JPST timeline): appended live, or installed
-    /// wholesale from a saved recording via LoadStateTimeline.
+    /// Live per-frame flame summaries (dense) fed by the traced RunFrame path.
+    let tracker = CallTracker()
+    /// Per-frame full states (the sparse timeline): appended live per the
+    /// cadence, or installed wholesale from a saved recording.
     let mutable stateTimeline = StateTimeline 0
+    /// Gap-frame re-derivation for seeks into non-stored frames (served from
+    /// warm chains after the first touch; invalidated on timeline swaps).
+    let materializer = TimelineMaterializer((fun () -> stateTimeline), (fun () -> keyLog))
     let mutable timelineLoadedFromDisk = false
     let mutable liveCaptured = 0
     /// Timeline BytesUsed when this session started (loaded content); stats
@@ -152,18 +161,19 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     let mutable pendingReplayKeys: KeyEvent list = []
 
     /// Live play without any recording: RunFrame executes but captures
-    /// nothing (no history deltas, no timeline states, no key log), so the
-    /// session costs one frame-0 anchor and never grows.
+    /// nothing (no history deltas, no timeline states or summaries, no key
+    /// log), so the session costs one frame-0 anchor and never grows.
     let mutable liveMode = false
 
-    /// Capture the port state + keyboard matrix into the history store, and
-    /// into the timeline when the frame lies beyond it. Frames below the
-    /// timeline's horizon already have their stored state (a loaded recording,
-    /// or replay over known ground): execution re-derives nothing there.
-    /// A timeline jump into the recorded future leaves a gap against executed
-    /// history; the store rebases on a fresh anchor there (the timeline still
-    /// holds the skipped frames for seeking).
-    let captureState () =
+    /// Capture the port state + keyboard matrix into the history store, then
+    /// into the timeline beyond its horizon: the frame's flame summary always
+    /// (dense), the full 64K state when the cadence asks for it. Frames below
+    /// the timeline's horizon already have their stored content (a loaded
+    /// recording, or replay over known ground): execution re-derives nothing
+    /// there. A timeline jump into the recorded future leaves a gap against
+    /// executed history; the store rebases on a fresh anchor there (the
+    /// timeline still holds the skipped frames for seeking).
+    let captureState (summary: FrameSummary option) =
         let mem, text = port.SaveState()
         let keys = port.Keyboard.ToBytes()
 
@@ -173,7 +183,18 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
             history.Rebase(frame, mem, text, keys)
 
         if frame > stateTimeline.EndFrame then
-            stateTimeline.Capture(frame, mem, text, keys)
+            let summary =
+                summary
+                |> Option.defaultWith (fun () ->
+                    { InstrCount = 0us
+                      EndDepth = 1uy
+                      Levels = [||] })
+
+            stateTimeline.CaptureSummary(frame, summary)
+
+            if TimelineCadence.shouldCapture cadence stateTimeline.StartFrame frame then
+                stateTimeline.Capture(frame, mem, text, keys)
+
             liveCaptured <- liveCaptured + 1
             timelineDirty <- true
 
@@ -253,7 +274,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
                   Border = uint8 (v &&& 7) })
 
         loadEntryState ()
-        captureState () // frame 0 anchor: the slider's always-reachable minimum
+        captureState None // frame 0 anchor: the slider's always-reachable minimum
         recorder.RecordSnapshot(snapshotOf ())
 
 
@@ -297,6 +318,13 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     member this.ReplayEndFrame = replayEndFrame
     member this.History = history
     member this.KeyLog = keyLog
+
+    /// The capture cadence this session records with (GuiConfig overrides it).
+    member this.Cadence = cadence
+
+    /// Gap-frame re-derivation over the state timeline (chain-cached; UI
+    /// thread). The flame bundle builder shares it.
+    member this.Materializer = materializer
     member this.StateTimeline = stateTimeline
 
     /// Frames captured live by this session (loaded states don't count); the
@@ -320,6 +348,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         timelineLoadedFromDisk <- true
         timelineDirty <- false // identical to the file it came from
         keyLog.Replace events
+        materializer.Invalidate()
 
     /// True when the in-memory timeline differs from what is on disk.
     member this.TimelineDirty = timelineDirty
@@ -350,11 +379,12 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         port.Video.RenderAll()
 
     /// Seek to any recorded frame - past frames restore from executed history,
-    /// future frames straight from the loaded timeline's stored state - without
-    /// executing anything. Non-destructive: history and the key log stay
-    /// intact. A running replay IS aborted: the movie does not continue from
-    /// the seeked-to frame; live control (Run) or an explicit Replay takes
-    /// over from there.
+    /// timeline frames restore stored states or re-derive gap frames through
+    /// the materializer (nearest anchor + forward emulation, chain-cached) -
+    /// without executing on the live port. Non-destructive: history and the
+    /// key log stay intact. A running replay IS aborted: the movie does not
+    /// continue from the seeked-to frame; live control (Run) or an explicit
+    /// Replay takes over from there.
     member this.JumpTo(frameNumber: int) =
         if frameNumber < 0 || frameNumber > this.TimelineExtent then
             invalidOp (
@@ -368,21 +398,26 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         let buffer = Array.zeroCreate<byte> 0x10000
         // Below the timeline's start with no executed history to restore
         // (scrubbing left of a recording that starts mid-game): land on the
-        // timeline's first state instead of throwing.
+        // timeline's first state instead of throwing. GAP frames inside the
+        // recording (sparse cadence) fall through to the materializer.
         let frameNumber =
             if
                 (frameNumber <= history.LastFrame && history.IsRestorable frameNumber)
-                || stateTimeline.CoversFrame frameNumber
+                || stateTimeline.HasState frameNumber
             then
                 frameNumber
+            elif frameNumber < stateTimeline.StartFrame then
+                stateTimeline.StartFrame
             else
-                max frameNumber stateTimeline.StartFrame
+                frameNumber
 
         let text, keys =
             if frameNumber <= history.LastFrame && history.IsRestorable frameNumber then
                 history.Restore(frameNumber, buffer)
             else
-                stateTimeline.RestoreInto(frameNumber, buffer)
+                let t, mem, k = materializer.StateAfter(frameNumber)
+                Array.blit mem 0 buffer 0 0x10000
+                t, k
 
         port.LoadState(buffer, text)
         port.Keyboard.Load(keys)
@@ -447,6 +482,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         timelineBytesBaseline <- 0L
         timelineDirty <- false // the caller deletes the file; nothing left to save
         keyLog.Replace []
+        materializer.Invalidate()
 
     /// Live play without trace or recording. Captures stop (history keeps
     /// whatever it has, frozen); the key log stays untouched.
@@ -495,6 +531,7 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
 
         keyLog.Truncate(frameNumber)
         stateTimeline.Truncate(frameNumber)
+        materializer.Invalidate()
         timelineDirty <- true
         recorder.Reset()
         replayMode <- false
@@ -544,6 +581,12 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
     member this.RunFrame() : int64 * int64 =
         let frameStart = port.CycleCount()
         let frameEnd = port.FrameEnd
+        // Flame summaries track the traced path (recording armed, not live):
+        // the same entries the recorder takes, one CallTracker feed each.
+        let tracking = recorder.RecordEnabled && not liveMode
+
+        if tracking then
+            tracker.BeginFrame()
 
         if replayMode then
             for e in pendingReplayKeys do
@@ -585,6 +628,23 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
                           FlagsAfter = uint8 flagsBefore
                           Taken = 1uy }
 
+                    if tracking then
+                        tracker.Feed(
+                            { Pc = uint16 vector
+                              B0 = 0uy
+                              B1 = 0uy
+                              B2 = 0uy
+                              B3 = 0uy
+                              Target = uint16 vector
+                              Tick = uint32 cyclesBefore
+                              Length = 0uy
+                              Cycles = 7uy
+                              FlagsBefore = uint8 flagsBefore
+                              FlagsAfter = uint8 flagsBefore
+                              Taken = 1uy },
+                            7
+                        )
+
                     let vinsnLen = Disasm.disasmLength port.Memory vector
                     // Capture the executed bytes BEFORE the step: an instruction that
                     // writes over itself must be recorded with the bytes it fetched.
@@ -611,6 +671,23 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
                           FlagsBefore = uint8 flagsBefore
                           FlagsAfter = uint8 (port.Flags().ToU8())
                           Taken = (if after <> next then 1uy else 0uy) }
+
+                    if tracking then
+                        tracker.Feed(
+                            { Pc = uint16 vector
+                              B0 = vb0
+                              B1 = vb1
+                              B2 = vb2
+                              B3 = vb3
+                              Target = uint16 after
+                              Tick = uint32 cyclesBefore
+                              Length = uint8 vinsnLen
+                              Cycles = uint8 (min 255 cycles)
+                              FlagsBefore = uint8 flagsBefore
+                              FlagsAfter = uint8 (port.Flags().ToU8())
+                              Taken = (if after <> next then 1uy else 0uy) },
+                            cycles
+                        )
                 else
                     let pc = port.Regs.Pc()
                     let insnLen = Disasm.disasmLength port.Memory pc
@@ -638,6 +715,23 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
                           FlagsAfter = uint8 (port.Flags().ToU8())
                           Taken = (if after <> next then 1uy else 0uy) }
 
+                    if tracking then
+                        tracker.Feed(
+                            { Pc = uint16 pc
+                              B0 = b0
+                              B1 = b1
+                              B2 = b2
+                              B3 = b3
+                              Target = uint16 after
+                              Tick = uint32 cyclesBefore
+                              Length = uint8 insnLen
+                              Cycles = uint8 (min 255 cycles)
+                              FlagsBefore = uint8 flagsBefore
+                              FlagsAfter = uint8 (port.Flags().ToU8())
+                              Taken = (if after <> next then 1uy else 0uy) },
+                            cycles
+                        )
+
                 if step % snapshotInterval = 0 then
                     recorder.RecordSnapshot(snapshotOf ())
 
@@ -657,8 +751,10 @@ type TraceSession(romPath: string, tzxPath: string, capacity: int, ?onFrame: byt
         // recording's end.
         frame <- frame + 1
 
+        let frameSummary = if tracking then Some(tracker.EndFrame()) else None
+
         if not liveMode then
-            captureState ()
+            captureState frameSummary
 
         if replayMode then
             if frame >= replayEndFrame then

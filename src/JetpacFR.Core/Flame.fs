@@ -8,7 +8,6 @@ open System.Collections.Generic
 /// so mining behavior is unchanged; the flame walker additionally treats RST
 /// as a call - it pushes a return address exactly like CALL.
 module CallOps =
-
     let isCall (b0: byte) =
         match b0 with
         | 0xCDuy
@@ -45,6 +44,41 @@ type FlameKind =
     | FlameRst = 1
     | FlameInterrupt = 2
     | FlameRoot = 3
+
+/// One stack level of a per-frame flame summary: the function that occupied
+/// that depth for most of the frame and the T-states it covered there. A
+/// level whose function changed mid-frame contributes only its dominant
+/// occupant - enough to paint zoomed-out flame blocks without emulation.
+/// (Lives here so every consumer - the sparse timeline, the live tracker,
+/// the builder and the web subset, which compiles this file without Trace.fs -
+/// speaks the same shape.)
+[<Struct>]
+type FrameSummaryLevel =
+    { Entry: uint16
+      Coverage: uint32 }
+
+/// Per-frame flame summary, captured live for EVERY recorded frame (dense),
+/// while the full 64K states are captured sparsely (see TimelineCadence).
+/// ~10-50 bytes per frame compressed, it is what makes the zoomed-out flame
+/// graph paint with zero emulation: one dominant rectangle per stack level,
+/// per frame, plus the instruction count that lets clicks map pixels to
+/// instruction-index ranges.
+type FrameSummary =
+    {
+        /// Trace-entry count of the frame (interrupt markers included - the
+        /// same currency the flame window's instruction tier speaks).
+        InstrCount: uint16
+        /// Stack depth at frame end: calls still open here continue into the
+        /// next frame's summary (the walker's cross-frame open frames).
+        EndDepth: uint8
+        /// Levels[0] is the synthetic root (depth 0); length = max depth reached.
+        Levels: FrameSummaryLevel[] }
+
+module FrameSummary =
+
+    /// Rough on-disk size estimate (the exact V3 encoding is 5 + 6*levels
+    /// bytes, pre-compression): the number the recording stats display reports.
+    let byteSize (s: FrameSummary) = int64 (8 + 6 * s.Levels.Length)
 
 /// One flame-graph rectangle: a single function invocation (not an aggregate)
 /// spanning [StartTick, EndTick) of ticks relative to the window's first
@@ -91,6 +125,13 @@ type FlameWindow =
         /// The cache evicts these for large windows (FlameWindow.trim).
         Entries: TraceEntry[] option
         EntryTicks: int64[] option
+        /// Per-frame flame summaries parallel to FrameTicks (sparse recordings
+        /// capture them live; see FrameSummary). None when unknown.
+        FrameSummaries: FrameSummary[] option
+        /// Prefix instruction counts: InstrBase[j] = window entries executed
+        /// before frame (FirstFrame + j); length FrameTicks.Length + 1. The
+        /// pixel -> instruction-range mapping for click requests.
+        InstrBase: int64[] option
     }
 
 module FlameWindow =
@@ -104,7 +145,9 @@ module FlameWindow =
           EndTick = 0L
           MaxDepth = 1
           Entries = None
-          EntryTicks = None }
+          EntryTicks = None
+          FrameSummaries = None
+          InstrBase = None }
 
     /// Drop the detail tier (per-instruction entries) - the rect tier is tiny
     /// and always kept.
@@ -112,6 +155,29 @@ module FlameWindow =
         { w with
             Entries = None
             EntryTicks = None }
+
+    /// Entries executed before window-frame index j (InstrBase lookup; 0 when
+    /// the window carries no instruction addressing).
+    let instrBaseAt (w: FlameWindow) (j: int) : int64 =
+        match w.InstrBase with
+        | Some arr when j >= 0 && j < arr.Length -> arr[j]
+        | _ -> 0L
+
+    /// The window-frame index containing absolute entry index `i` (the last
+    /// j with InstrBase[j] <= i). 0 when no instruction addressing exists.
+    let frameIndexOfInstr (w: FlameWindow) (i: int64) : int =
+        match w.InstrBase with
+        | Some arr when arr.Length > 1 ->
+            let rec search lo hi =
+                if lo >= hi then
+                    lo
+                else
+                    let mid = (lo + hi + 1) >>> 1
+
+                    if arr[mid] <= i then search mid hi else search lo (mid - 1)
+
+            search 0 (arr.Length - 2)
+        | _ -> 0
 
     /// Index of the first rectangle that can overlap `tick`: PrefixMaxEnd is
     /// sorted, so the first entry exceeding the tick bounds every later one.
@@ -186,6 +252,25 @@ module FlameWindow =
 
             let idx = search 0 (w.FrameTicks.Length - 1)
             w.FirstFrame + (max 0 idx)
+
+    /// The instruction-index range covered by window frames [f0, f1Exclusive)
+    /// (clamped into the window).
+    let instrRangeOfFrames (w: FlameWindow) (f0: int) (f1Exclusive: int) : int64 * int64 =
+        let frameCount = max 0 w.FrameTicks.Length
+        let a = max 0 f0
+        let b = max a (min frameCount f1Exclusive)
+        instrBaseAt w a, instrBaseAt w b
+
+    /// The instruction-index range covered by the tick range [t0, t1]
+    /// (frame-granular: a pixel's tick span becomes its frames' entry span -
+    /// the address every seek/materialize request speaks).
+    let instrRangeOfTicks (w: FlameWindow) (t0: int64) (t1: int64) : int64 * int64 =
+        if w.FirstFrame < 0 || w.FrameTicks.Length = 0 then
+            0L, 0L
+        else
+            let f0 = frameAtTick w t0
+            let f1 = frameAtTick w (max t0 t1) + 1
+            instrRangeOfFrames w f0 f1
 
 /// Walks an instruction trace into a flame-graph window: a synthetic
 /// interrupt-aware call stack driven by taken CALL/RST/RET classification
@@ -399,6 +484,25 @@ module FlameWalker =
                 if r.Depth + 1 > depth then
                     depth <- r.Depth + 1
 
+            // Instruction addressing: entries executed before each window frame
+            // (merge-scan of entries against the boundary table).
+            let instrBase =
+                if frameTicks64.Length = 0 then
+                    None
+                else
+                    let arr = Array.zeroCreate<int64> (frameTicks64.Length + 1)
+                    let mutable e = 0
+
+                    for j in 0 .. frameTicks64.Length - 1 do
+                        let boundary = frameTicks64[j]
+
+                        while e < n && ticks[e] < boundary do
+                            e <- e + 1
+
+                        arr[j + 1] <- int64 e
+
+                    Some arr
+
             { Rects = rects
               PrefixMaxEnd = prefixMax
               FrameTicks = frameTicks64
@@ -407,7 +511,9 @@ module FlameWalker =
               EndTick = max windowEnd 1L
               MaxDepth = depth
               Entries = Some entries
-              EntryTicks = Some ticks }
+              EntryTicks = Some ticks
+              FrameSummaries = None
+              InstrBase = instrBase }
 
 /// Zoom-independent column model for the flame graph (the LOD pyramid). The
 /// window is bucketed into one cell per frame (level 0); each cell holds its
@@ -643,3 +749,259 @@ module FlameLod =
             lens.Add(cellTo - runStart)
 
         funcs.ToArray(), buckets.ToArray(), starts.ToArray(), lens.ToArray()
+
+/// Live per-frame flame summaries: the same synthetic call stack the
+/// FlameWalker walks, maintained incrementally by the recording session so
+/// every completed frame can append one FrameSummary to the timeline. Shares
+/// the CallOps classifier (and Miner's-policy quirks: an RST always pushes,
+/// a taken RET never pops the synthetic root) so tracked summaries agree
+/// with walked windows over the same frames - the summary parity test pins
+/// this. Cost per instruction is O(open stack depth), typically 2-4.
+type CallTracker() =
+
+    let maxDepth = FlameWalker.maxDepth
+
+    // Current function per stack level; level 0 is the synthetic root. Levels
+    // stay occupied across frame boundaries (a CALL open at the boundary
+    // resumes in the next frame's summary).
+    let levelEntry = Array.create maxDepth 0
+    let levelCov = Array.zeroCreate<int64> maxDepth
+    let mutable openLevels = 1
+    let mutable maxSeen = 1
+    let mutable instrCount = 0
+
+    // Flushed (depth, entry, coverage) spans of the current frame: a level
+    // whose function changed mid-frame contributes one span per occupant.
+    let spansDepth = ResizeArray<int>()
+    let spansEntry = ResizeArray<int>()
+    let spansCov = ResizeArray<int64>()
+
+    let flush (level: int) =
+        if levelCov[level] > 0L then
+            spansDepth.Add level
+            spansEntry.Add levelEntry[level]
+            spansCov.Add levelCov[level]
+            levelCov[level] <- 0L
+
+    let push (entry: int) =
+        if openLevels < maxDepth then
+            levelEntry[openLevels] <- entry
+            openLevels <- openLevels + 1
+
+            if openLevels > maxSeen then
+                maxSeen <- openLevels
+
+    /// Reset the per-frame spans (stack levels persist across frames).
+    member _.BeginFrame() =
+        spansDepth.Clear()
+        spansEntry.Clear()
+        spansCov.Clear()
+        instrCount <- 0
+        maxSeen <- openLevels
+
+    /// Feed one recorded instruction (interrupt markers included) with the
+    /// T-states it consumed - the same entries the FlameWalker would walk.
+    member _.Feed(e: TraceEntry, cycles: int) =
+        instrCount <- instrCount + 1
+        let c = int64 cycles
+
+        for lv in 0 .. openLevels - 1 do
+            levelCov[lv] <- levelCov[lv] + c
+
+        let b0 = e.B0
+
+        if e.Length = 0uy then
+            push (int e.Pc) // interrupt marker: the ISR frame opens here
+        elif CallOps.isCall b0 && e.Taken = 1uy then
+            push (int e.Target)
+        elif CallOps.isRst b0 then
+            push (int e.Target)
+        elif CallOps.isRet b0 e.B1 && e.Taken = 1uy && openLevels > 1 then
+            openLevels <- openLevels - 1
+            flush openLevels
+
+    /// Close the frame: flush every open level's span and aggregate one
+    /// dominant entry per depth. The tracker stays primed for the next frame.
+    member _.EndFrame() : FrameSummary =
+        for lv in 0 .. openLevels - 1 do
+            flush lv
+
+        let depthMax = max 1 maxSeen
+        let levels = Array.zeroCreate<FrameSummaryLevel> depthMax
+        // Per-depth dominant sweep: entries at one depth are few, so a linear
+        // rescan over a small span list beats a dictionary per depth.
+        let work = Array.zeroCreate<int64> 64
+        let workEntry = Array.zeroCreate<int> 64
+        let mutable workN = 0
+
+        for d in 0 .. depthMax - 1 do
+            workN <- 0
+
+            for s in 0 .. spansDepth.Count - 1 do
+                if spansDepth[s] = d then
+                    let entry = spansEntry[s]
+
+                    let mutable i = 0
+
+                    while i < workN && workEntry[i] <> entry do
+                        i <- i + 1
+
+                    if i = workN then
+                        if workN < work.Length then
+                            workEntry[workN] <- entry
+                            work[workN] <- spansCov[s]
+                            workN <- workN + 1
+                        else
+                            // >64 distinct functions at one depth in a frame is
+                            // pathological; fold into the first slot's coverage.
+                            work[0] <- work[0] + spansCov[s]
+                    else
+                        work[i] <- work[i] + spansCov[s]
+
+            if workN > 0 then
+                let mutable best = 1L
+                let mutable bi = 0
+
+                for i in 0 .. workN - 1 do
+                    if work[i] > best then
+                        best <- work[i]
+                        bi <- i
+
+                levels[d] <-
+                    { Entry = uint16 workEntry[bi]
+                      Coverage = uint32 (min best (int64 UInt32.MaxValue)) }
+
+        let instr =
+            if instrCount > 65535 then 65535us else uint16 instrCount
+
+        let endDepth =
+            if openLevels > 255 then 255uy else uint8 openLevels
+
+        { InstrCount = instr
+          EndDepth = endDepth
+          Levels = levels }
+
+/// Zoomed-out painting straight from FrameSummaries: frames aggregate into
+/// fixed-size blocks (8 px wide at full zoom-out is the default), and each
+/// block shows one dominant function per stack depth - no emulation, no
+/// caching: one pass over the visible frames per repaint, bounded by the
+/// viewport's block count x frames-per-block.
+module SummaryBlocks =
+
+    /// Frames per block so a block paints ~`targetPx` wide at `framePx`.
+    let blockWidth (framePx: float) (targetPx: float) =
+        if framePx <= 0.0 then 1 else max 1 (int (Math.Round(targetPx / framePx)))
+
+    /// Dominant (entry, its coverage, total coverage) per depth for the frame
+    /// slice [f0, f0+count). Returns one struct per depth (0..depthMax-1);
+    /// entry -1 marks an uncovered depth.
+    let blockDominant (summaries: FrameSummary[]) (f0: int) (count: int) : struct (int * int64 * int64)[] =
+        // Reusable accumulator: (depth, entry) -> coverage.
+        let acc = Dictionary<int * int, int64>()
+        let hi = min summaries.Length (f0 + count)
+
+        for f in f0 .. hi - 1 do
+            let levels = summaries[f].Levels
+
+            for d in 0 .. levels.Length - 1 do
+                if levels[d].Coverage > 0u then
+                    let key = (d, int levels[d].Entry)
+
+                    acc[key] <-
+                        match acc.TryGetValue key with
+                        | true, v -> v + int64 levels[d].Coverage
+                        | _ -> int64 levels[d].Coverage
+
+        let mutable depthMax = 1
+
+        for kv in acc do
+            if (fst kv.Key) + 1 > depthMax then
+                depthMax <- (fst kv.Key) + 1
+
+        let zero = struct (-1, 0L, 0L)
+        let result = Array.create depthMax zero
+        let totals = Array.zeroCreate<int64> depthMax
+        let bests = Array.create depthMax -1L
+        let bestEntries = Array.create depthMax -1
+
+        for kv in acc do
+            let d, entry = kv.Key
+            totals[d] <- totals[d] + kv.Value
+
+            if kv.Value > bests[d] then
+                bests[d] <- kv.Value
+                bestEntries[d] <- entry
+
+        for d in 0 .. depthMax - 1 do
+            result[d] <- struct (bestEntries[d], bests[d], totals[d])
+
+        result
+
+    /// Coverage bucket of a dominant cell (FlameLod.bucket thresholds).
+    let bucket (dominated: int64) (covered: int64) : int =
+        if covered <= 0L then -1
+        else
+            let share = float dominated / float covered
+
+            if share >= 0.75 then 3
+            elif share >= 0.5 then 2
+            elif share >= 0.25 then 1
+            else 0
+
+    /// One paint pass over the visible block range [blockFrom, blockTo):
+    /// per depth, RLE runs of (entry, bucket) over blocks - parallel arrays
+    /// shaped exactly like FlameLod.runs, so the painter treats both regimes
+    /// uniformly. Geometry is bounded by viewport pixels x depth rows; the
+    /// dominant sweep runs ONCE per block and is shared across depths, so a
+    /// paint costs O(sum of block frame counts) dictionary work total.
+    let runsAllDepths
+        (summaries: FrameSummary[])
+        (blockFrames: int)
+        (depthMax: int)
+        (blockFrom: int)
+        (blockTo: int)
+        : (int[] * int[] * int[] * int[])[]
+        =
+        let bf = max 1 blockFrames
+        let blocks = max 0 (blockTo - blockFrom)
+        let depths = max 1 depthMax
+
+        let outs =
+            Array.init depths (fun _ ->
+                (ResizeArray<int>(), ResizeArray<int>(), ResizeArray<int>(), ResizeArray<int>()))
+
+        let runFunc = Array.create depths -2
+        let runBucket = Array.create depths -2
+        let runStart = Array.create depths blockFrom
+
+        for b in blockFrom .. blockFrom + blocks - 1 do
+            let dominant = blockDominant summaries (b * bf) bf
+
+            for d in 0 .. depths - 1 do
+                let struct (entry, dominated, covered) =
+                    if d < dominant.Length then dominant[d] else struct (-1, 0L, 0L)
+
+                let bk = bucket dominated covered
+
+                if entry <> runFunc[d] || bk <> runBucket[d] then
+                    if runFunc[d] <> -2 then
+                        let fs, bs, ss, ls = outs[d]
+                        fs.Add runFunc[d]
+                        bs.Add runBucket[d]
+                        ss.Add runStart[d]
+                        ls.Add(b - runStart[d])
+
+                    runFunc[d] <- entry
+                    runBucket[d] <- bk
+                    runStart[d] <- b
+
+        Array.init depths (fun d ->
+            if runFunc[d] <> -2 && blockFrom + blocks > runStart[d] then
+                let fs, bs, ss, ls = outs[d]
+                fs.Add runFunc[d]
+                bs.Add runBucket[d]
+                ss.Add runStart[d]
+                ls.Add(blockFrom + blocks - runStart[d])
+
+            let fs, bs, ss, ls = outs[d]
+            fs.ToArray(), bs.ToArray(), ss.ToArray(), ls.ToArray())

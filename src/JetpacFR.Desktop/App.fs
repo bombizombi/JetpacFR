@@ -264,6 +264,13 @@ type MainWindow() as self =
         | [] -> RecordFresh(TimelineSlots.suggestName ())
         | first :: _ -> AutoplaySlot first.Name
 
+    /// The recording cadence from gui.cfg: a dense full-state head, then one
+    /// state pair per sparse period (at 50 fps). Handed to every new session.
+    let sessionCadence () : TimelineCadence.Cadence =
+        { DenseSeconds = GuiConfig.denseSeconds()
+          SparseEverySeconds = GuiConfig.sparseEverySeconds()
+          Fps = 50 }
+
     /// Persist states + key log. Writes ONLY when the timeline actually
     /// changed since the last save (captures, branch truncation, key events);
     /// `force` (the Save button) rewrites even an unchanged recording. Called
@@ -272,11 +279,18 @@ type MainWindow() as self =
     /// zoom). Lets early code (timeline load) kick off flame builds.
     let mutable flameBuildImpl: (int * int * bool -> unit) = fun _ -> ()
 
+    /// Assigned once the flame control exists: installs the summary overview
+    /// window (the load path runs before the control is constructed, so it
+    /// goes through this hook like flameBuildImpl does).
+    let mutable flameOverviewImpl: (FlameWindow -> unit) = fun _ -> ()
+
     /// second, so there is deliberately no autosave on pause or scrub. A
     /// trivial timeline (fresh boot or just cleared) is never written.
     let saveTimeline (force: bool) =
         match currentGame, session with
-        | Some game, Some s when (force || s.TimelineDirty) && s.StateTimeline.Count > 1 ->
+        | Some game, Some s when
+            (force || s.TimelineDirty)
+            && max s.StateTimeline.Count s.StateTimeline.FrameCount > 1 ->
             match
                 StateTimelineStore.save
                     (slotPath game currentSlot)
@@ -287,18 +301,18 @@ type MainWindow() as self =
             | Ok() ->
                 s.ClearTimelineDirty()
 
-                let v2Bytes =
+                let v3Bytes =
                     try
-                        (FileInfo(StateTimelineStore.toV2Path (slotPath game currentSlot))).Length
+                        (FileInfo(StateTimelineStore.toV3Path (slotPath game currentSlot))).Length
                     with _ ->
                         0L
 
                 statusText.Text <-
                     sprintf
-                        "timeline saved: %d frames, %.1f MB + twin %.1f MB (.js2)"
+                        "timeline saved: %d frames (%d stored states), %.1f MB (.js3)"
+                        (max s.StateTimeline.FrameCount s.StateTimeline.Count)
                         s.StateTimeline.Count
-                        (float s.StateTimeline.BytesUsed / (1024.0 * 1024.0))
-                        (float v2Bytes / (1024.0 * 1024.0))
+                        (float v3Bytes / (1024.0 * 1024.0))
             | Error error -> statusText.Text <- sprintf "timeline save failed for %s: %s" game.Name error
         | _ -> ()
 
@@ -308,14 +322,30 @@ type MainWindow() as self =
         match StateTimelineStore.tryLoad path (timelineFingerprint game) with
         | TimelineLoaded(timeline, events) ->
             s.LoadStateTimeline(timeline, events)
-            // Big picture immediately: build a flame window for the recording's
-            // head (capped - the rest follows on demand via brushes/auto).
-            flameBuildImpl (timeline.StartFrame + 1, min (timeline.EndFrame + 1) (timeline.StartFrame + 801), true)
+            flameTrace <- None
+
+            // Instant big picture: the WHOLE recording from its per-frame
+            // summaries - zero emulation. Legacy recordings (no summaries)
+            // keep the old probe-built head window.
+            match FlameBuilder.overviewWindow timeline with
+            | Some overview -> flameOverviewImpl overview
+            | None ->
+                flameBuildImpl (
+                    timeline.StartFrame + 1,
+                    min (timeline.EndFrame + 1) (timeline.StartFrame + 801),
+                    true
+                )
 
             if not (List.isEmpty events) then
-                statusText.Text <- sprintf "%s: loaded %d frames, %d key events" game.Name timeline.Count events.Length
+                statusText.Text <-
+                    sprintf
+                        "%s: loaded %d frames (%d stored states), %d key events"
+                        game.Name
+                        (max timeline.FrameCount timeline.Count)
+                        timeline.Count
+                        events.Length
 
-            timeline.Count > 1
+            max timeline.Count timeline.FrameCount > 1
         | TimelineMissing -> false
         | TimelineIgnored reason ->
             statusText.Text <- sprintf "%s: saved timeline ignored (%s)" game.Name reason
@@ -368,7 +398,13 @@ type MainWindow() as self =
             bootTask <-
                 Some(
                     System.Threading.Tasks.Task.Run(fun () ->
-                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame, fastBoot = not slowBoot))
+                        TraceSession(
+                            m.Rom,
+                            m.Tzx,
+                            4_000_000,
+                            onFrame = recordBootFrame,
+                            fastBoot = not slowBoot,
+                            cadence = sessionCadence ()))
                 )
 
             statusText.Text <- sprintf "booting %s (cached entry state)..." m.Name
@@ -376,7 +412,13 @@ type MainWindow() as self =
             bootTask <-
                 Some(
                     System.Threading.Tasks.Task.Run(fun () ->
-                        TraceSession(m.Rom, m.Tzx, 4_000_000, onFrame = recordBootFrame, fastBoot = not slowBoot))
+                        TraceSession(
+                            m.Rom,
+                            m.Tzx,
+                            4_000_000,
+                            onFrame = recordBootFrame,
+                            fastBoot = not slowBoot,
+                            cadence = sessionCadence ()))
                 )
 
             if slowBoot then
@@ -394,7 +436,7 @@ type MainWindow() as self =
                     bootTask <-
                         Some(
                             System.Threading.Tasks.Task.Run(fun () ->
-                                TraceSession(bin, bin, 4_000_000, onFrame = recordBootFrame))
+                                TraceSession(bin, bin, 4_000_000, onFrame = recordBootFrame, cadence = sessionCadence ()))
                         )
 
                     statusText.Text <- sprintf "booting %s (program image at 0x%04X)..." m.Name addr
@@ -545,6 +587,10 @@ type MainWindow() as self =
     let previewBBtn = Button(Content = "Preview B", Width = 72.0)
     // flame graph pane + controls (built from the saved recording's states)
     let flameCtrl = FlameGraph(MinHeight = 70.0)
+    // Zoomed-out summary-block width (gui.cfg; see TimelineCadence for the
+    // recording cadence tunables).
+    do flameCtrl.OverviewBlockPx <- GuiConfig.overviewBlockPx ()
+    do flameOverviewImpl <- fun w -> flameCtrl.SetWindow w
 
     let flameABtn =
         Button(Content = "Flame A", Width = 64.0, ToolTip = "build the flame graph for selector range A")
@@ -589,6 +635,10 @@ type MainWindow() as self =
     let mutable previewFrom = 0
     let mutable previewSpan = 0
     let mutable previewTicks = 0
+    /// Ticks the current preview runs for (20 ms each): one tick per frame
+    /// when the selection is shorter than a second (REAL time), capped at 50
+    /// ticks (1 s) for longer selections - those play sped-up to fit.
+    let mutable previewTicksLimit = 50
     let saveCtrlBtn = Button(Content = "Save ctrl", Width = 72.0)
     let importCtrlBtn = Button(Content = "Import ctrl...", Width = 96.0)
     let newCtrlBtn = Button(Content = "New ctrl", Width = 64.0)
@@ -3878,6 +3928,41 @@ type MainWindow() as self =
                 TextWrapping = TextWrapping.Wrap
             )
 
+        // Flame-jump investigation dump (the right-click "investigate this
+        // jump" menu item): multi-line diagnostic report, mirrored to
+        // System.Diagnostics.Debug (the Debug output window). Lives below the
+        // other status labels so it never displaces them. The report scrolls
+        // inside a pane capped at the Spectrum screen's height (the 320x256
+        // image above) - the panel never grows past the screen size, however
+        // long the dump is.
+        let flameDebugHeader =
+            TextBlock(
+                Text = "flame jump investigation",
+                Foreground = dim,
+                FontSize = 12.0,
+                Margin = Thickness(0.0, 10.0, 0.0, 2.0)
+            )
+
+        let flameDebugScroll =
+            ScrollViewer(
+                MaxHeight = 256.0,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            )
+
+        let flameDebugLabel =
+            TextBlock(
+                Text = "(right-click a flame box -> investigate this jump)",
+                Foreground = dim,
+                FontFamily = mono,
+                FontSize = 11.0,
+                TextWrapping = TextWrapping.Wrap,
+                Padding = Thickness(0.0, 2.0, 4.0, 2.0)
+            )
+
+        do
+            flameDebugScroll.Content <- flameDebugLabel
+
         // CE file watched for the current game: its path and stamp when the
         // game was loaded; "modified" = the on-disk stamp differs now.
         let mutable ceWatchGameId = ""
@@ -4034,6 +4119,8 @@ type MainWindow() as self =
         left.Children.Add replayEndLabel |> ignore
         left.Children.Add traceRegenHeader |> ignore
         left.Children.Add traceRegenLabel |> ignore
+        left.Children.Add flameDebugHeader |> ignore
+        left.Children.Add flameDebugScroll |> ignore
         updateFileStatusPanel ()
 
         // center: timeline selector, mode buttons, disassembly, comment toolbar
@@ -5669,6 +5756,7 @@ type MainWindow() as self =
                 | Some game ->
                     try
                         File.Delete(slotPath game currentSlot)
+                        File.Delete(StateTimelineStore.toV3Path (slotPath game currentSlot))
                     with _ ->
                         ()
 
@@ -6220,6 +6308,7 @@ type MainWindow() as self =
                 previewFrom <- 0
                 previewSpan <- 0
                 previewTicks <- 0
+                previewTicksLimit <- 50
                 // Mining, lift queue, and scan results describe the previous game.
                 minedRoutines <- []
                 minedEdges <- []
@@ -6439,7 +6528,11 @@ type MainWindow() as self =
         main.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
         main.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(1.0, GridUnitType.Star)))
         main.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
-        main.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength.Auto))
+        // Tab pane starts at the unzoomed graphics bitmap's width (256, the
+        // Graphics tab's 1x bitmap): a fixed pixel column keeps tab content
+        // (512px zoomed images, wide text tabs) from stretching the pane and
+        // squeezing the code view. The splitter still widens it on demand.
+        main.ColumnDefinitions.Add(ColumnDefinition(Width = GridLength(256.0)))
         Grid.SetColumn(left, 0)
         Grid.SetColumn(center, 1)
         // Draggable border between the code pane (center) and the tab pane
@@ -6455,7 +6548,7 @@ type MainWindow() as self =
             )
 
         Grid.SetColumn(tabsSplitter, 2)
-        right.MinWidth <- 260.0
+        right.MinWidth <- 256.0
         Grid.SetColumn(right, 3)
         main.Children.Add left |> ignore
         main.Children.Add center |> ignore
@@ -6510,12 +6603,27 @@ type MainWindow() as self =
                     previewTimer.Stop()
                     previewFrom <- max 0 fStart
                     previewSpan <- max 0 (fEnd - 1 - previewFrom)
+                    // Short selections play in real time (1 frame per 20 ms
+                    // tick); only selections longer than a second are sped up
+                    // into the 1-second cap.
+                    previewTicksLimit <- max 1 (min 50 previewSpan)
                     previewTicks <- 0
                     s.JumpTo previewFrom
                     presentGame ()
                     updateTimeLabel s.Frame
                     seekCodeView s previewFrom
-                    statusText.Text <- sprintf "preview %s: frames %d..%d over 1s" label fStart fEnd
+
+                    statusText.Text <-
+                        sprintf
+                            "preview %s: frames %d..%d over %s"
+                            label
+                            fStart
+                            fEnd
+                            (if previewTicksLimit = 50 then
+                                 "1s (sped up)"
+                             else
+                                 sprintf "%d frames, real time" previewSpan)
+
                     previewTimer.Start()
                 | _ ->
                     match currentTrace () with
@@ -6531,14 +6639,17 @@ type MainWindow() as self =
 
             match session with
             | Some s ->
-                let frac = min previewTicks 50
-                s.JumpTo(max 0 (min (previewFrom + previewSpan * frac / 50) s.TimelineExtent))
+                let frac = min previewTicks previewTicksLimit
+                s.JumpTo(
+                    max 0 (min (previewFrom + previewSpan * frac / previewTicksLimit) s.TimelineExtent)
+                )
+
                 presentGame ()
                 updateTimeLabel s.Frame
                 timeline.Playhead <- int64 s.Frame
                 flameCtrl.PlayheadFrame <- s.Frame
 
-                if previewTicks >= 50 then
+                if previewTicks >= previewTicksLimit then
                     previewTimer.Stop()
             | None -> previewTimer.Stop())
 
@@ -7022,28 +7133,36 @@ type MainWindow() as self =
 
         /// Build (or reuse) the flame window for frames [f0, f1Exclusive).
         /// Heavy build runs on a worker; the result lands via the dispatcher.
-        /// A cache hit whose detail tier was trimmed is treated as a miss and
-        /// rebuilt: without entries there is no browsable trace and no exact
-        /// flame-cursor mapping (clicking a code row could not move the cursor
-        /// line onto the timeline). The auto-build coverage check still counts
-        /// trimmed windows as covered, so background rebuilds never loop.
+        /// Cache handling differs by caller: an explicit `zoom` build
+        /// (brushes, load) insists on the instruction tier - the browsable
+        /// trace and the exact cursor mapping need it - while the
+        /// viewport-driven path (`zoom = false`) accepts a trimmed window as
+        /// covered, since rect tier + summaries survive the trim and keep
+        /// rendering. That keeps background viewport rebuilds from looping.
         let rec buildFlameRange (f0: int) (f1Exclusive: int) (zoom: bool) =
             match session with
             | Some s when f1Exclusive - 1 >= f0 ->
+                let hit = flameCache.TryGet(f0, f1Exclusive - 1)
+
                 let hit =
-                    flameCache.TryGet(f0, f1Exclusive - 1)
-                    |> Option.filter (fun w -> w.Entries.IsSome)
+                    if zoom then
+                        hit |> Option.filter (fun w -> w.Entries.IsSome)
+                    else
+                        hit
 
                 match hit with
                 | Some w ->
-                    // Keep the browsable trace in step with the shown window - also
-                    // keeps the flame cursor mapping exact.
-                    flameTrace <- traceOfWindow w
-                    clampCursor ()
-                    flameCtrl.SetWindow w
-
                     if zoom then
-                        flameCtrl.ZoomToFit()
+                        // Keep the browsable trace in step with the shown
+                        // window - also keeps the flame cursor mapping exact.
+                        flameTrace <- traceOfWindow w
+                        clampCursor ()
+                        flameCtrl.SetWindow w
+                    else
+                        // Viewport-driven install: keep the user's zoom.
+                        flameTrace <- None
+                        clampCursor ()
+                        flameCtrl.SetWindowKeepViewport w
                 | None when not flameBuilding ->
                     flameBuilding <- true
                     flameGeneration <- flameGeneration + 1
@@ -7067,10 +7186,11 @@ type MainWindow() as self =
                                         // becomes the browsable execution trace.
                                         flameTrace <- traceOfWindow w
                                         clampCursor ()
-                                        flameCtrl.SetWindow stored
 
                                         if zoom then
-                                            flameCtrl.ZoomToFit()
+                                            flameCtrl.SetWindow stored
+                                        else
+                                            flameCtrl.SetWindowKeepViewport stored
 
                                         syncFlameRanges ()
 
@@ -7083,9 +7203,45 @@ type MainWindow() as self =
                                     | None -> statusText.Text <- "flame graph build cancelled")
                         ))
                     |> ignore
+                // A build is already in flight (a guard upstream missed it):
+                // leave it alone instead of throwing on the unmatched case.
+                | None -> ()
             | _ -> ()
 
         flameBuildImpl <- fun (a, b, zoom) -> buildFlameRange a b zoom
+
+        /// Viewport-driven detail: when the user zooms deep enough that one
+        /// frame spans `flameDetailPx` pixels or more, and no built window
+        /// covers the visible range yet, build one (worker, generation-
+        /// cancelled; debounced by the auto timer). Below the threshold the
+        /// summary regime renders - no emulation, no build.
+        let flameDetailPx = 10.0
+
+        let updateFlameForViewport () =
+            match session, flameCtrl.Window with
+            | Some s, Some w when
+                not flameBuilding
+                && w.FirstFrame >= 0
+                && w.FrameTicks.Length > 0
+                && w.EndTick > 0L
+                && flameCtrl.PixelsPerTick > 0.0
+                ->
+                let framePx =
+                    float (w.EndTick / int64 w.FrameTicks.Length)
+                    * flameCtrl.PixelsPerTick
+
+                if framePx >= flameDetailPx then
+                    let o, e = flameCtrl.VisibleRange
+                    let f0 = max (s.StateTimeline.StartFrame + 1) (FlameWindow.frameAtTick w o)
+                    let f1 = min s.StateTimeline.EndFrame (FlameWindow.frameAtTick w (max o e))
+                    let f1 = max f0 f1
+
+                    let covered =
+                        flameCache.TryGet(f0, f1) |> Option.isSome
+
+                    if not covered then
+                        buildFlameRange f0 (f1 + 1) false
+            | _ -> ()
 
         timeline.RangeChanged.Add(fun _ -> syncFlameRanges ())
 
@@ -7177,12 +7333,45 @@ type MainWindow() as self =
                     statusText.Text <- sprintf "flame click: %s - frame seek to %d%s" reason target clampNote
                     scrubToFrame (int64 frame)
 
-        flameCtrl.SeekRequested.Add(fun (tick, frame) ->
+        // click-to-seek at any zoom. The request carries the tick, the frame
+        // and the pixel's instruction range. Two landing paths:
+        //  - the installed window's instruction tier covers the click
+        //    (contiguous detail regime): park EXACTLY on the clicked
+        //    instruction (ParkAtInstruction) with the code cursor on it;
+        //  - otherwise (overview/summary regime): materialize the frame from
+        //    the sparse timeline (chain-cached, so the first click in a gap
+        //    pays at most half a long gap of emulation), refine the exact
+        //    instruction via a one-frame bundle, and land the code window on
+        //    it in BOTH modes (execution cursor + memory cursor).
+        flameCtrl.SeekRequested.Add(fun seek ->
+            let tick = seek.Tick
+            let frame = seek.Frame
+
+            let stopForSeek (s: TraceSession) =
+                pauseGame ()
+
+                if replaying then
+                    s.StopReplay()
+                    replaying <- false
+
+            let afterSeek (s: TraceSession) =
+                presentGame ()
+                showLiveRegs s |> ignore
+                refreshAll ()
+                syncSlider ()
+                updateTimeLabel s.Frame
+                timeline.Playhead <- int64 s.Frame
+                flameCtrl.PlayheadFrame <- s.Frame
+
             match session, flameCtrl.Window, flameTrace with
-            | Some s, Some w, Some ft when frame >= 0 ->
+            | Some s, Some w, Some ft when
+                frame >= 0
+                && ft.Entries.Length > 0
+                && FlameWindow.entryAtTick w tick >= 0
+                ->
                 let idx = FlameWindow.entryAtTick w tick
 
-                if idx < 0 || idx >= ft.Entries.Length then
+                if idx >= ft.Entries.Length then
                     frameSeek "the clicked tick has no instruction in the flame trace" frame
                 else
                     let frameNo = frameOfEntry ft idx
@@ -7223,22 +7412,17 @@ type MainWindow() as self =
 
                         frameSeek reason frame
                     else
-                        pauseGame ()
-
-                        if replaying then
-                            s.StopReplay()
-                            replaying <- false
+                        stopForSeek s
 
                         try
                             s.ParkAtInstruction(frameNo, steps)
+                            // Both code-window modes land on the instruction.
                             cursor <- idx
-                            presentGame ()
-                            showLiveRegs s |> ignore
-                            refreshAll ()
-                            syncSlider ()
-                            updateTimeLabel s.Frame
-                            timeline.Playhead <- int64 s.Frame
-                            flameCtrl.PlayheadFrame <- s.Frame
+
+                            gotoMemCursor ((int ft.Entries[idx].Pc) &&& 0xFFFF) "flame seek"
+
+                            execViewHold <- false
+                            afterSeek s
 
                             statusText.Text <-
                                 sprintf
@@ -7251,123 +7435,399 @@ type MainWindow() as self =
                             // frame-level seek, which clamps into the timeline's extent.
                             scrubToFrame (int64 frame)
                             statusText.Text <- sprintf "flame seek fell back to frame %d (%s)" frame ex.Message
+            | Some s, Some w, _ when frame >= 0 ->
+                // Sparse regime: no instruction tier under the click. Park on
+                // the frame's click-indexed instruction via a one-frame bundle
+                // over the materialized state.
+                if frame <= s.StateTimeline.StartFrame || frame > s.StateTimeline.EndFrame then
+                    frameSeek "the clicked frame is outside the recording" frame
+                else
+                    stopForSeek s
+
+                    try
+                        // The exact instruction inside the frame: the click's
+                        // instruction range minus the instructions of the frames
+                        // before it (0 when the window has no instruction
+                        // addressing - legacy - lands on the frame's first).
+                        let j = frame - w.FirstFrame
+                        let baseInstr = FlameWindow.instrBaseAt w j
+                        let nextInstr = FlameWindow.instrBaseAt w (j + 1)
+                        let inFrame = int (max 0L (seek.InstrLo - baseInstr))
+
+                        let target =
+                            if nextInstr > baseInstr then
+                                min inFrame (int (nextInstr - baseInstr - 1L))
+                            else
+                                0
+
+                        match FlameBuilder.buildFrameBundle s.StateTimeline s.Materializer s.KeyLog frame with
+                        | Some bundle when
+                            (match bundle.Entries with Some e -> e.Length > 0 | None -> false)
+                            ->
+                            let entries = bundle.Entries |> Option.defaultValue [||]
+                            let idx = min target (entries.Length - 1)
+                            let mutable steps = 0
+
+                            for k in 0..idx do
+                                if entries[k].Length > 0uy then
+                                    steps <- steps + 1
+
+                            if steps <= 0 then
+                                frameSeek "the click precedes any instruction of its frame" frame
+                            else
+                                s.ParkAtInstruction(frame, steps)
+                                // The bundle becomes the browsable trace: the
+                                // execution view shows exactly this frame.
+                                flameTrace <- traceOfWindow bundle
+                                cursor <- idx
+                                clampCursor ()
+
+                                gotoMemCursor ((int entries[idx].Pc) &&& 0xFFFF) "flame seek"
+
+                                execViewHold <- false
+                                afterSeek s
+
+                                statusText.Text <-
+                                    sprintf
+                                        "flame seek: instr #%d ($%04X) of frame %d (materialized)"
+                                        idx
+                                        (int entries[idx].Pc)
+                                        frame
+                        | _ -> frameSeek "the frame could not be materialized" frame
+                    with ex ->
+                        scrubToFrame (int64 frame)
+                        statusText.Text <- sprintf "flame seek fell back to frame %d (%s)" frame ex.Message
             | _ when frame >= 0 ->
                 let reason =
-                    match session, flameTrace, flameCtrl.Window with
-                    | None, _, _ -> "no live session (CE engine active)"
-                    | _, None, _ -> "the game is running - instruction data is dropped while playing"
-                    | _, _, None -> "no flame window loaded"
+                    match session, flameCtrl.Window with
+                    | None, _ -> "no live session (CE engine active)"
+                    | _, None -> "no flame window loaded"
                     | _ -> "unmapped click"
 
                 frameSeek reason frame
             | _ -> statusText.Text <- "flame click: this window has no frame mapping - click ignored")
 
-        /// Land on one exact instruction of the flame window: park the live
-        /// machine on that entry's post-execution state (frame restore +
-        /// prefix re-execution through ParkAtInstruction - the step-back
-        /// machinery) and point every view at it. Interrupt markers share
-        /// their step with the vector instruction, so only real instructions
-        /// count toward the prefix.
-        let goToFlameEntry (ft: Trace) (idx: int) (reason: string) =
+        /// Jump-to-box landing, at any zoom, from any window - the command
+        /// always lands unless the landing frame literally has no pre-state
+        /// (the recording's first frame). Resolve the box's session frame,
+        /// materialize its pre-state when the sparse timeline has no stored
+        /// state there (chain-cached; worst case a forward re-run from the
+        /// first stored state), re-execute that ONE frame into a bundle whose
+        /// instruction stream is identical to the window's own tier (the
+        /// determinism parity tests pin this), and park the machine on the
+        /// box's instruction with BOTH code-view cursors (execution + memory)
+        /// pointing at it. Box indexes are read in the WINDOW's coordinate
+        /// space only - never from the possibly-stale flameTrace.
+        let jumpToFlameBox (w: FlameWindow) (r: FlameRect) (tickRefine: int64 option) (reason: string) =
             match session with
             | None -> statusText.Text <- sprintf "%s: no live session to park" reason
             | Some s ->
-                if idx < 0 || idx >= ft.Entries.Length then
-                    statusText.Text <-
-                        sprintf "%s: entry %d outside the window (%d entries)" reason idx ft.Entries.Length
-                else
-                    let frameNo = frameOfEntry ft idx
-                    // first window entry of that frame: padded boundary [f - 2]
-                    // ends session frame f - 1 (see frameOfEntry)
-                    let frameStartTick =
-                        if frameNo >= 2 && frameNo - 2 < ft.FrameTicks.Length then
-                            ft.FrameTicks[frameNo - 2]
-                        else
-                            0u
+                let midTick = (r.StartTick + r.EndTick) / 2L
+                let tl = s.StateTimeline
 
-                    let mutable first = idx
+                let frame =
+                    let f = FlameWindow.frameAtTick w midTick
+                    (max f (tl.StartFrame + 1)) |> min tl.EndFrame
 
-                    while first > 0 && ft.Entries[first - 1].Tick >= frameStartTick do
-                        first <- first - 1
+                // Frame-relative offset of the landing instruction, from the
+                // WINDOW's own tier. `tickRefine` narrows it to the last box
+                // entry at-or-before the click tick (the "exact at tick" item).
+                let tierOffset =
+                    match w.Entries, w.EntryTicks with
+                    | Some entries, Some et when
+                        r.StartIndex < entries.Length && r.EndIndex > r.StartIndex
+                        ->
+                        let frameStartTick =
+                            if frame >= 2 && frame - 2 < w.FrameTicks.Length then
+                                w.FrameTicks[frame - 2]
+                            else
+                                0L
 
-                    let mutable steps = 0
+                        let mutable first = int r.StartIndex
 
-                    for j in first..idx do
-                        if ft.Entries[j].Length > 0uy then steps <- steps + 1
+                        while first > 0 && et[first - 1] >= frameStartTick do
+                            first <- first - 1
 
-                    cursor <- idx
-                    memCursor <- (int ft.Entries[idx].Pc) &&& 0xFFFF
-                    execViewHold <- false
+                        let mutable off = int r.StartIndex - first
 
-                    try
-                        s.ParkAtInstruction(frameNo, steps)
+                        match tickRefine with
+                        | Some ct ->
+                            let mutable last = min (int (r.EndIndex - 1)) (et.Length - 1)
+
+                            while last > first && et[last] > ct do
+                                last <- last - 1
+
+                            off <- last - first
+                        | None -> ()
+
+                        Some(max 0 off)
+                    | _ -> None
+
+                pauseGame ()
+
+                if replaying then
+                    s.StopReplay()
+                    replaying <- false
+
+                try
+                    match FlameBuilder.buildFrameBundle tl s.Materializer s.KeyLog frame with
+                    | Some bundle when
+                        (match bundle.Entries with Some e -> e.Length > 0 | None -> false)
+                        ->
+                        let entries = bundle.Entries |> Option.defaultValue [||]
+
+                        // The bundle's in-frame stream equals the window tier's
+                        // (determinism), so the offset maps 1:1; without a tier
+                        // offset, land on the box's first own instruction.
+                        let idx =
+                            match tierOffset with
+                            | Some off -> max 0 (min off (entries.Length - 1))
+                            | None ->
+                                let mutable k = 0
+
+                                while k < entries.Length - 1 && (int entries[k].Pc) <> (int r.Entry) do
+                                    k <- k + 1
+
+                                k
+
+                        let mutable steps = 0
+
+                        for k in 0..idx do
+                            if entries[k].Length > 0uy then
+                                steps <- steps + 1
+
+                        s.ParkAtInstruction(frame, steps)
+                        // Both code-window modes land here: the execution
+                        // cursor (bundle trace installed) and the memory cursor.
+                        flameTrace <- traceOfWindow bundle
+                        cursor <- idx
+                        clampCursor ()
+                        gotoMemCursor ((int entries[idx].Pc) &&& 0xFFFF) reason
+                        execViewHold <- false
                         presentGame ()
                         showLiveRegs s |> ignore
+                        refreshAll ()
+                        syncSlider ()
+                        updateTimeLabel s.Frame
+                        timeline.Playhead <- int64 s.Frame
+                        flameCtrl.PlayheadFrame <- s.Frame
 
                         statusText.Text <-
                             sprintf
-                                "%s: parked at $%04X entry #%d (frame %d, %d steps into the frame)"
+                                "%s: parked at $%04X (frame %d, instr %d, %d steps into the frame)"
                                 reason
-                                memCursor
+                                ((int entries[idx].Pc) &&& 0xFFFF)
+                                frame
                                 idx
-                                frameNo
                                 steps
-                    with ex ->
-                        statusText.Text <-
-                            sprintf
-                                "%s: %s - cursor moved, machine stays parked at the frame boundary"
-                                reason
-                                ex.Message
-
-                    refreshAll ()
-                    syncSlider ()
-                    rebuildCommentPane true
+                    | _ ->
+                        // The one impossible case: frame 0 of the recording has
+                        // no pre-state anyone could park from - land on the
+                        // frame boundary and say so.
+                        frameSeek (sprintf "frame %d has no pre-state to park mid-frame from" frame) frame
+                with ex ->
+                    // The recording branched away under us: frame-level seek.
+                    scrubToFrame (int64 frame)
+                    statusText.Text <- sprintf "%s fell back to frame %d (%s)" reason frame ex.Message
 
         // right-click: land on the clicked invocation's start, name it, or
         // park on the exact instruction under the mouse (control.json symbols
-        // feed the labels here AND the regenerated CE).
+        // feed the labels here AND the regenerated CE). The jump commands go
+        // through jumpToFlameBox - they land unconditionally (bundle +
+        // materializer), whatever the zoom regime did to the traces.
         flameCtrl.RectMenu.Add(fun (r, _frame, _entryIdx, clickTick) ->
             match control with
             | None -> statusText.Text <- "no control file - click New ctrl first"
             | Some _ ->
-                // the window's instruction tier: usually installed, rebuilt
-                // from the window when replay detached it
-                let ft = flameTrace |> Option.orElse (flameCtrl.Window |> Option.bind traceOfWindow)
                 let menu = ContextMenu()
 
                 let jump =
                     MenuItem(Header = sprintf "go to $%04X in code view" (int r.Entry))
 
                 jump.Click.Add(fun _ ->
-                    match ft with
-                    | Some ft ->
-                        // the walker opens a box ON the CALL/RST instruction
-                        // itself - the caller's instruction, whose cycles the
-                        // box's span includes. The function's first own
-                        // instruction is the first entry in the box whose PC
-                        // is the entry address (skipping any interrupt
-                        // marker/ISR frames that fired before it ran).
-                        let s0 = int r.StartIndex
-                        let e0 = min (int r.EndIndex - 1) (ft.Entries.Length - 1)
-
-                        let idx =
-                            if r.Kind = FlameKind.FlameCall || r.Kind = FlameKind.FlameRst then
-                                let mutable k = s0
-
-                                while k < e0 && (int ft.Entries[k].Pc) <> (int r.Entry) do
-                                    k <- k + 1
-
-                                k
-                            else
-                                s0
-
-                        goToFlameEntry ft idx "flame jump"
+                    match flameCtrl.Window with
+                    | Some w -> jumpToFlameBox w r None "flame jump"
                     | None ->
-                        // no instruction tier kept (cache-trimmed window):
-                        // fall back to the address-level jump
+                        // no window at all: address-level focus is still a landing
                         focusCodeView "flame jump" (int r.Entry))
 
                 menu.Items.Add jump |> ignore
+
+                // Sister command: investigate, don't jump. Dumps the full
+                // state of the request - where it was clicked, the box's
+                // instruction coordinates in every coordinate space, the
+                // index-space health (window tier vs installed flameTrace),
+                // the sparse-timeline facts and the work the real jump would
+                // do - to the Debug output and the panel below the registers.
+                let investigate =
+                    MenuItem(Header = sprintf "investigate this jump to $%04X (debug)" (int r.Entry))
+
+                investigate.Click.Add(fun _ ->
+                    let lines = ResizeArray<string>()
+
+                    let add (line: string) =
+                        lines.Add line
+                        System.Diagnostics.Debug.WriteLine("[flamejump] " + line)
+
+                    match flameCtrl.Window with
+                    | None -> add "no flame window installed - nothing to investigate"
+                    | Some w ->
+                        let midTick = (r.StartTick + r.EndTick) / 2L
+                        let frame = FlameWindow.frameAtTick w midTick
+
+                        add "---- flame jump investigation ----"
+                        add (
+                            sprintf
+                                "clicked box: entry $%04X call-from $%04X kind %A depth %d"
+                                (int r.Entry)
+                                (int r.CallPc)
+                                r.Kind
+                                r.Depth
+                        )
+
+                        add (
+                            sprintf
+                                "  tick span [%d..%d] = %dT (%.2f ms), click tick %d"
+                                r.StartTick
+                                r.EndTick
+                                (r.EndTick - r.StartTick)
+                                (float (r.EndTick - r.StartTick) / 3500.0)
+                                clickTick
+                        )
+
+                        add (sprintf "  session frame (box midpoint): %d" frame)
+                        add (
+                            sprintf
+                                "installed window: FirstFrame %d, frames %d, EndTick %d"
+                                w.FirstFrame
+                                w.FrameTicks.Length
+                                w.EndTick
+                        )
+
+                        add (
+                            sprintf
+                                "  window tiers: entries %s, entryTicks %s, summaries %s"
+                                (match w.Entries with Some e -> string e.Length | None -> "NONE")
+                                (match w.EntryTicks with Some e -> string e.Length | None -> "NONE")
+                                (match w.FrameSummaries with Some s -> string s.Length | None -> "NONE")
+                        )
+
+                        let tierHasBox =
+                            match w.Entries with
+                            | Some e -> r.StartIndex < e.Length && r.EndIndex <= e.Length
+                            | None -> false
+
+                        add (
+                            sprintf
+                                "  box instruction range [%d..%d): %s"
+                                r.StartIndex
+                                r.EndIndex
+                                (if tierHasBox then "inside the window tier" else "OUTSIDE the window tier (trimmed/overview window)")
+                        )
+
+                        // Frame-relative coordinates from the window's own tier.
+                        (match w.Entries, w.EntryTicks with
+                         | Some entries, Some et when r.StartIndex < entries.Length && r.EndIndex > r.StartIndex ->
+                             let frameStartTick =
+                                 if frame >= 2 && frame - 2 < w.FrameTicks.Length then
+                                     w.FrameTicks[frame - 2]
+                                 else
+                                     0L
+
+                             let mutable first = int r.StartIndex
+
+                             while first > 0 && et[first - 1] >= frameStartTick do
+                                 first <- first - 1
+
+                             add (
+                                 sprintf
+                                     "  frame-relative offset of box start: %d (frame's first tier entry #%d)"
+                                     (int r.StartIndex - first)
+                                     first
+                             )
+
+                             add (
+                                 sprintf
+                                     "  absolute instruction index in window tier: %d of %d"
+                                     (int r.StartIndex)
+                                     entries.Length
+                             )
+                         | _ -> add "  no usable tier on this window: the jump resolves by entry address instead")
+
+                        // Index-space health: the old refusal came from here.
+                        match flameTrace with
+                        | Some ft ->
+                            let matchesWindow =
+                                match w.Entries with
+                                | Some e -> ft.Entries.Length = e.Length
+                                | None -> false
+
+                            add (
+                                sprintf
+                                    "installed flameTrace: %d entries - %s"
+                                    ft.Entries.Length
+                                    (if matchesWindow then
+                                         "matches the window tier"
+                                     else
+                                         "MISMATCH vs the window tier (a different trace - the old 'entry outside the window' refusal)")
+                            )
+                        | None -> add "installed flameTrace: none"
+
+                        // Session, sparse timeline, mode, work plan.
+                        match session with
+                        | None -> add "session: none (CE engine active) - the jump does an address-level focus only"
+                        | Some s ->
+                            add (
+                                sprintf
+                                    "code view mode: %s"
+                                    (if disasmModeMemory then
+                                         "memory"
+                                     elif disasmModeGraph then
+                                         "graph"
+                                     else
+                                         "execution")
+                            )
+
+                            let tl = s.StateTimeline
+                            add (
+                                sprintf
+                                    "sparse timeline: frames %d, stored states %d, extent [%d..%d]"
+                                    tl.FrameCount
+                                    tl.Count
+                                    tl.StartFrame
+                                    tl.EndFrame
+                            )
+
+                            add (sprintf "  HasState(%d) = %b (exact stored state at the target frame?)" frame (tl.HasState frame))
+
+                            match tl.NearestStateAtOrBefore(frame - 1) with
+                            | Some a ->
+                                add (
+                                    sprintf
+                                        "  nearest anchor <= %d: frame %d -> materializer emulates %d frame(s) (chain-cached)"
+                                        (frame - 1)
+                                        a
+                                        (frame - 1 - a)
+                                )
+                            | None -> add (sprintf "  no stored anchor <= %d (the recording's head)" (frame - 1))
+
+                            add "work plan: materialize pre-state -> re-execute ONE frame into a bundle -> ParkAtInstruction on the box's instruction -> cursor + memory cursor both land"
+
+                            add (
+                                if frame <= tl.StartFrame then
+                                    sprintf
+                                        "verdict: frame %d is the recording's first frame - no pre-state exists to park from; the jump lands on the frame boundary instead"
+                                        frame
+                                elif frame > tl.EndFrame then
+                                    "verdict: beyond the recording - the jump clamps to the recording's end"
+                                else
+                                    "verdict: CAN JUMP - no refusal path remains"
+                            )
+
+                    flameDebugLabel.Text <- String.concat "\n" lines
+                    flameDebugScroll.ScrollToTop())
+
+                menu.Items.Add investigate |> ignore
 
                 let name =
                     MenuItem(Header = sprintf "name function $%04X <- comment box" (int r.Entry))
@@ -7388,35 +7848,11 @@ type MainWindow() as self =
                     MenuItem(Header = sprintf "go to exact instruction at tick %d" clickTick)
 
                 exact.Click.Add(fun _ ->
-                    // resolve the landing through the window's unwrapped
-                    // per-entry ticks: rect ticks are window-relative, trace
-                    // entry ticks are the wrapped-back uint32 form
-                    match ft, flameCtrl.Window with
-                    | Some ft, Some w when w.EntryTicks.IsSome ->
-                        let et = w.EntryTicks.Value
-                        let s0 = int r.StartIndex
-
-                        let e0 =
-                            min (int r.EndIndex - 1) (min (ft.Entries.Length - 1) (et.Length - 1))
-
-                        if e0 < s0 then
-                            statusText.Text <-
-                                "flame jump: the box holds no instruction detail - rebuild the flame over its frames"
-                        else
-                            // last window entry executed at or before the click tick
-                            let rec search lo hi =
-                                if lo >= hi then lo
-                                else
-                                    let mid = (lo + hi) / 2
-
-                                    if et[mid] <= clickTick then search (mid + 1) hi else search lo mid
-
-                            let idx = max s0 (search s0 (e0 + 1) - 1)
-
-                            goToFlameEntry ft idx (sprintf "exact at tick %d" clickTick)
-                    | _ ->
+                    match flameCtrl.Window with
+                    | Some w -> jumpToFlameBox w r (Some clickTick) (sprintf "exact at tick %d" clickTick)
+                    | None ->
                         statusText.Text <-
-                            "flame jump: the window kept no instruction tier - rebuild it over frames containing this box")
+                            "flame jump: no flame window loaded - click the graph first")
 
                 menu.Items.Add exact |> ignore
                 menu.PlacementTarget <- flameCtrl
@@ -7459,7 +7895,13 @@ type MainWindow() as self =
 
                     if not covered then
                         buildFlameRange f0 f1 false
-                | None -> ())
+                | None -> ()
+            // Zoom-driven detail (independent of the auto-flame switch):
+            // fill the visible range with a built window when the user is
+            // deep enough to need per-instruction fidelity - a no-op below
+            // the regime threshold.
+            elif not running && not replaying then
+                updateFlameForViewport ())
 
         flameAutoTimer.Start()
 
