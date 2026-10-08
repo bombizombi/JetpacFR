@@ -152,7 +152,18 @@ module Games =
           Program = UridiumGame.WebImage.program
           EntryState = UridiumGame.WebImage.entryState }
 
-    let all: GameDef list = [ uridium ]
+    let manicminer: GameDef =
+        { Id = "manicminer"
+          Name = "Manic Miner"
+          BaseAddress = 0x4000
+          Memory = ManicminerGame.WebImage.memory
+          Image = ManicminerGame.WebImage.image
+          Program = ManicminerGame.WebImage.program
+          EntryState = ManicminerGame.WebImage.entryState }
+
+    let all: GameDef list =
+        [ manicminer
+          uridium ]
 
     let registerAll () : unit =
         for g in all do
@@ -163,6 +174,135 @@ module Games =
                   BaseAddress = g.BaseAddress
                   Program = g.Program
                   EntryState = g.EntryState }
+
+/// The daily-mission watch. Armed by the Play page with the active mission's
+/// detection rule; evaluated ONCE PER FRAME inside the frame loop (never
+/// across the MVU boundary - only the single completion event dispatches).
+/// The clock starts on the first held input and the HUD span is updated
+/// imperatively, exactly like the rest of the per-frame DOM writes.
+module Mission =
+
+    module Js =
+        let now () : float = emitJsExpr () "Date.now()"
+
+    let mutable private mission: Missions.Mission option = None
+    let mutable private startMillis: float option = None
+    let mutable private fired = false
+    let mutable private lastRatio = 0.0
+    let mutable private transitions = 0
+    let mutable private tickCount = 0
+
+    /// Invoked once when the detection rule fires; carries the elapsed ms.
+    let mutable OnCompleted: (int -> unit) option = None
+
+    /// Arm the watch for a game's mission (a no-op for games without one).
+    let Arm (gameId: string) : unit =
+        mission <- Missions.forGame gameId
+        startMillis <- None
+        fired <- false
+        lastRatio <- 0.0
+        transitions <- 0
+        tickCount <- 0
+
+    let ElapsedMillis () : int option =
+        startMillis |> Option.map (fun t -> int (Js.now () - t))
+
+    /// First held input starts the clock (called from the input sync).
+    let NotifyInput () =
+        if startMillis.IsNone then startMillis <- Some(Js.now ())
+
+    /// Bright-pixel ratio of the rendered frame: the fraction of RGBA pixels
+    /// whose lightest channel exceeds 170.
+    let private brightRatio (buf: byte[]) : float =
+        let mutable bright = 0
+        let total = 320 * 256
+
+        for i in 0 .. total - 1 do
+            let o = i * 4
+            let r, g, b = int buf[o], int buf[o + 1], int buf[o + 2]
+
+            if max r (max g b) > 170 then bright <- bright + 1
+
+        float bright / float total
+
+    /// Per-frame evaluation. Returns true exactly once when the mission's
+    /// rule fires (the emulator keeps running afterwards - the completion is
+    /// an overlay, not a stop). Nothing can fire before the player's first
+    /// input: the clock gate doubles as the "game is being played" gate.
+    let private evaluate (g: CEGame) : bool =
+        if fired then
+            false
+        else
+            match mission, ElapsedMillis () with
+            | Some m, Some _ ->
+                let hit =
+                    match m.Detect with
+                    | Missions.MemoryEquals (addr, value) -> int g.Memory[addr] = value
+                    | Missions.MemoryNotEqual (addr, value) -> int g.Memory[addr] <> value
+                    | Missions.ScreenFlash ->
+                        // The cavern-complete flash ALTERNATES the whole
+                        // display bright/dark, so the signature is large
+                        // frame-to-frame swings of the bright ratio, not a
+                        // high absolute ratio (the menu's grey panel sits
+                        // high but never swings). Count big swings in a
+                        // sliding window.
+                        tickCount <- tickCount + 1
+                        let ratio = brightRatio g.ScreenBuffer
+
+                        if abs (ratio - lastRatio) > 0.5 then
+                            transitions <- transitions + 1
+
+                        lastRatio <- ratio
+
+                        if tickCount % 120 = 0 then
+                            transitions <- max 0 (transitions - 2)
+
+                        transitions >= 3
+
+                if hit then fired <- true
+
+                hit
+            | _ -> false
+
+    /// Update the HUD timer span (imperative, called from the frame loop).
+    let private tickHud () =
+        match ElapsedMillis () with
+        | Some ms when not fired ->
+            let el: obj = Dom.byId "missionTime"
+
+            if not (isNull el) then
+                let total = ms / 1000
+                el?textContent <- sprintf "%d:%02d" (total / 60) (total % 60)
+        | _ -> ()
+
+    /// Called by the frame loop after each frame.
+    let FrameTick (g: CEGame) : unit =
+        tickHud ()
+
+        if evaluate g then
+            match ElapsedMillis (), OnCompleted with
+            | Some ms, Some callback -> callback ms
+            | _ ->
+                emitJsExpr () "((window.__log = window.__log || []).push('mission completed but no handler/clock'))"
+                |> ignore
+
+    // Demo/test hook: window.__puzzxleFireMission() fires the completion path
+    // (overlay + leaderboard record) without playing the mission.
+    do
+        let fire () =
+            if not fired then
+                fired <- true
+
+                let ms =
+                    match ElapsedMillis () with
+                    | Some m -> m
+                    | None -> 4242
+
+                match OnCompleted with
+                | Some callback -> callback ms
+                | None -> ()
+
+        emitJsExpr fire "window.__puzzxleFireMission = $0" |> ignore
 
 /// The running emulator: one CEGame, its frame loop, and the Spectrum key
 /// matrix state the touch controls set. `held` is re-diffed on every input
@@ -179,6 +319,8 @@ module Emulator =
     let mutable private held: Set<int * int> = Set.empty
     let mutable private frames = 0
 
+    /// GameId of the registered game the host booted with.
+    let mutable CurrentGameId: string option = None
     /// Per-tick input poller (the gamepad library exposes polled state, not
     /// events; its poll runs at the top of every frame).
     let mutable private inputPoller: (unit -> unit) option = None
@@ -209,6 +351,8 @@ module Emulator =
                             | None -> ()
 
                             let frameStart, _ = g.RunFrame()
+
+                            Mission.FrameTick g
 
                             if not (isNull ctx) then
                                 let src: byte[] = g.ScreenBuffer
@@ -242,12 +386,14 @@ module Emulator =
     let mutable private padFire = false
     let mutable private padNums: Set<int> = Set.empty
     let mutable private keyDirs: Set<KeyMap.Dir> = Set.empty
-    let mutable private keyFire = false
     let mutable private keyNums: Set<int> = Set.empty
+
+    /// Raw matrix cells held by physical keys (letters, ENTER, 6-0, ...).
+    let mutable private keyRaw: Set<int * int> = Set.empty
 
     let private sync () =
         let dirs = Set.union padDirs keyDirs
-        let fire = padFire || keyFire
+        let fire = padFire
         let nums = Set.union padNums keyNums
 
         let wanted =
@@ -257,6 +403,7 @@ module Emulator =
             |> fun acc ->
                 (acc, nums)
                 ||> Set.fold (fun acc n -> Set.union acc (Set.ofList (KeyMap.numCells n)))
+            |> fun acc -> Set.union acc keyRaw
 
         match game with
         | None -> ()
@@ -271,6 +418,8 @@ module Emulator =
 
             if wanted <> held then
                 log (sprintf "keys: %A" (Set.toList wanted))
+
+            if not wanted.IsEmpty then Mission.NotifyInput ()
 
             held <- wanted
 
@@ -295,15 +444,30 @@ module Emulator =
     /// Register the per-frame input poller (called once at host boot).
     let SetInputPoller(f: unit -> unit) : unit = inputPoller <- Some f
 
-    /// Physical-keyboard fallback (desktop testing): arrows drive directions,
-    /// space fires, 1-5 are the number keys. Merged with the on-screen
-    /// controls in `sync`.
+    /// Physical-keyboard input (desktop play): the whole ZX keyboard, not
+    /// just the touch controls' subset. Two layers, merged with the on-screen
+    /// controls in `sync`:
+    ///   - arrows AND WASD drive the cursor-joystick direction scheme
+    ///     (KeyMap), space fires;
+    ///   - every other key maps to its raw matrix cell, so games' own key
+    ///     choices work: ENTER starts (Manic Miner's title), letters reach
+    ///     the game's keyboard/redefine modes, 6-0 are the second number row.
+    /// Cell values follow the repo's mirrored-bit convention (the same table
+    /// the Desktop shell's keyMap uses).
     let private keyDir (key: string) : KeyMap.Dir option =
         match key with
-        | "ArrowUp" -> Some KeyMap.N
-        | "ArrowDown" -> Some KeyMap.S
-        | "ArrowLeft" -> Some KeyMap.W
-        | "ArrowRight" -> Some KeyMap.E
+        | "ArrowUp"
+        | "w"
+        | "W" -> Some KeyMap.N
+        | "ArrowDown"
+        | "s"
+        | "S" -> Some KeyMap.S
+        | "ArrowLeft"
+        | "a"
+        | "A" -> Some KeyMap.W
+        | "ArrowRight"
+        | "d"
+        | "D" -> Some KeyMap.E
         | _ -> None
 
     let private keyNum (key: string) : int option =
@@ -313,6 +477,66 @@ module Emulator =
         | "3" -> Some 3
         | "4" -> Some 4
         | "5" -> Some 5
+        | _ -> None
+
+    /// Raw matrix cell for a physical key, outside the direction/number-row
+    /// aliases above (WASD and arrows are taken by directions, 1-5 by the
+    /// number row).
+    let private keyRawCell (key: string) : (int * int) option =
+        match key with
+        | "q"
+        | "Q" -> Some(2, 0)
+        | "e"
+        | "E" -> Some(2, 2)
+        | "r"
+        | "R" -> Some(2, 3)
+        | "t"
+        | "T" -> Some(2, 4)
+        | "z"
+        | "Z" -> Some(0, 1)
+        | "x"
+        | "X" -> Some(0, 2)
+        | "c"
+        | "C" -> Some(0, 3)
+        | "v"
+        | "V" -> Some(0, 4)
+        | "f"
+        | "F" -> Some(1, 3)
+        | "g"
+        | "G" -> Some(1, 4)
+        | "6" -> Some(4, 4)
+        | "7" -> Some(4, 3)
+        | "8" -> Some(4, 2)
+        | "9" -> Some(4, 1)
+        | "0" -> Some(4, 0)
+        | "p"
+        | "P" -> Some(5, 0)
+        | "o"
+        | "O" -> Some(5, 1)
+        | "i"
+        | "I" -> Some(5, 2)
+        | "u"
+        | "U" -> Some(5, 3)
+        | "y"
+        | "Y" -> Some(5, 4)
+        | "Enter" -> Some(6, 0)
+        | "l"
+        | "L" -> Some(6, 1)
+        | "k"
+        | "K" -> Some(6, 2)
+        | "j"
+        | "J" -> Some(6, 3)
+        | "h"
+        | "H" -> Some(6, 4)
+        | " " -> Some(7, 0)
+        | "Control" -> Some(7, 1)
+        | "m"
+        | "M" -> Some(7, 2)
+        | "n"
+        | "N" -> Some(7, 3)
+        | "b"
+        | "B" -> Some(7, 4)
+        | "Shift" -> Some(0, 0)
         | _ -> None
 
     let private isEditableTarget (e: obj) =
@@ -345,9 +569,11 @@ module Emulator =
                             sync ()
                         | None ->
 
-                            if key = " " then
-                                keyFire <- true
+                            match keyRawCell key with
+                            | Some cell ->
+                                keyRaw <- Set.add cell keyRaw
                                 sync ()
+                            | None -> ()
         )
 
         Dom.window?addEventListener (
@@ -370,26 +596,44 @@ module Emulator =
                             sync ()
                         | None ->
 
-                            if key = " " then
-                                keyFire <- false
+                            match keyRawCell key with
+                            | Some cell ->
+                                keyRaw <- Set.remove cell keyRaw
                                 sync ()
+                            | None -> ()
         )
 
-    /// Boot the emulator host against a canvas already in the DOM. `?game=<id>`
-    /// selects a registered game; default: the first one. Returns a status
+    /// Boot the emulator host against a canvas already in the DOM.
+    /// `?game=<id>` selects a registered game; default: the first one. With
+    /// the hash router the query rides in location.hash (#play?game=x), so
+    /// both the search part and the hash are consulted. Returns a status
     /// line with the game name and its CE parity result.
     let start (canvasId: string) : string =
         Games.registerAll ()
         installKeyboardFallback ()
 
-        let search =
-            match Dom.window?location?search with
-            | null -> ""
-            | s -> string s
+        let rawQuery: string =
+            let search =
+                match Dom.window?location?search with
+                | null -> ""
+                | s -> string s
+
+            let hash =
+                match Dom.window?location?hash with
+                | null -> ""
+                | h -> string h
+
+            let fromPart (p: string) =
+                match p.Split('?') with
+                | [| _ |] -> ""
+                | parts -> parts[parts.Length - 1]
+
+            let s = fromPart search
+            if s <> "" then s else fromPart hash
 
         let wanted =
-            if search.StartsWith "?game=" then
-                search.Substring(6).ToLowerInvariant()
+            if rawQuery.StartsWith "game=" then
+                rawQuery.Substring(5).ToLowerInvariant()
             else
                 ""
 
@@ -398,6 +642,9 @@ module Emulator =
             | "" -> Games.all |> List.tryHead
             | w -> Games.all |> List.tryFind (fun g -> g.Id = w)
             |> Option.defaultWith (fun () -> Games.all |> List.head)
+
+        CurrentGameId <- Some selected.Id
+        Mission.Arm selected.Id
 
         let canvas = Dom.byId canvasId
         ctx <- canvas?getContext ("2d")

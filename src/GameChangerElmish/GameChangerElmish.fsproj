@@ -24,7 +24,10 @@
         <Compile Include="../JetpacFR.Core/Z80CE.fs"/>
         <Compile Include="../JetpacFR.Core/CEGame.fs"/>
         <Compile Include="../JetpacFR.Core/GameRegistry.fs"/>
+        <Compile Include="../../games/manicminer/WebImage.fs"/>
         <Compile Include="../../games/uridium/WebImage.fs"/>
+        <Compile Include="src/Missions.fs"/>
+        <Compile Include="src/Leaderboard.fs"/>
         <Compile Include="src/Host.fs"/>
         <Compile Include="src/GamepadCtl.fs"/>
     </ItemGroup>
@@ -34,6 +37,7 @@
         <Compile Include="src/Pages/NotFound.fs"/>
         <Compile Include="src/Pages/Layout.fs"/>
         <Compile Include="src/Pages/Page.fs"/>
+        <Compile Include="src/Pages/Play/Page.fs"/>
     </ItemGroup>
 
     <ItemGroup>

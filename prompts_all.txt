@@ -95,5 +95,20 @@ When pressing buttons "Preview A" and "Preview B" we limit the replay time to on
 
 
 
+20260924
+
+
+design a web site that can run our games with custom targets and leaderbord. For minimal working version, we will skip API part and fake the multiple user leaderboard with our single player only. (Scores only kept in browser storage)
+
+We are building the website called "Daily puzZXle" where you have a new zx spectrum game every day to play, but you only need to play a mission, couple of minutes. First two to define are to finish the first level of Manic Miner, and the second one is to play trough the first level of Uridium and land our ship.  We have the emulator and reverse engineering tool, but now we need to find the spots in the game to detect when the mission is finished.  When manic miner finished the level, we should raise the event from the emulator somehow, so that our website can detect it, but also, to be visually interesting, the emulator should continue to run after that. So, the event should trigger the visual feedback on our site that shows the time it took to finish the level, shows the times from other players with our time marked on the list.
+
+Tech: elmish land project. Create a simple design that can be changed later.  
+
+
+
+
+
+
+
 
 

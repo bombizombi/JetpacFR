@@ -10,5 +10,6 @@
     "type": "ReactElement",
     "textElement": "Html.text"
   },
-  "projectReferences": []
+  "projectReferences": [],
+  "serverCommand": "dotnet fable watch .elmish-land/App/ElmishLand.GameChangerElmish.App.fsproj --sourceMaps --run vite --config vite.config.js"
 }

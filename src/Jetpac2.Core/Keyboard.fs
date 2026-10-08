@@ -7,6 +7,8 @@ type Keyboard() =
     // Fable does not support 2D arrays; use a jagged array.
     let keys = Array.init 8 (fun _ -> Array.zeroCreate<bool> 5)
 
+    
+
     member this.SetKey(row: int, bit: int, pressed: bool) = keys[row][bit] <- pressed
     member this.GetKey(row: int, bit: int) : bool = keys[row][bit]
 

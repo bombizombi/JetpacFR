@@ -1,159 +1,116 @@
 module GameChangerElmish.Pages.Page
 
-// The Game Changer play page, mobile-first: Spectrum screen on top, touch
-// controls below. Movement (4-direction DPad + FIRE) comes from the
-// @rbuljan/gamepad library, mounted into the empty #controls container by
-// GamepadCtl; the number row (1-5, for menus) is ours.
-//
-// Touch input deliberately BYPASSES the MVU loop - a dispatch per press or
-// drag would re-render the whole page on every event and starve the 20 ms
-// emulator loop. Handlers apply keys straight to the imperative host and
-// toggle "on" classes directly. The model only carries rarely-changing UI
-// state (run/pause, sound).
+// The Daily puzZXle landing page: today's mission, every defined mission as
+// a card, personal bests and a teaser of today's (faked, browser-local)
+// leaderboard. Pure MVU - the emulator is not on this page.
 
 open Feliz
-open Fable.Core.JsInterop
 open ElmishLand
 open GameChangerElmish
 open GameChangerElmish.Shared
-open GameChangerElmish.Host
 open GameChangerElmish.Pages
 
-type Model =
-    { Running: bool
-      Muted: bool }
+type Model = unit
 
 type Msg =
     | LayoutMsg of Layout.Msg
-    | ToggleRun
-    | ToggleMute
 
 let init () =
-    // The host and the gamepad need their DOM; init runs before React
-    // mounts, so boot on a short delay (the App.fs warm-start pattern).
-    Dom.setTimeout
-        (fun () ->
-            ignore (Emulator.start "gameScreen")
-            GamepadCtl.start "#controls")
-        30
-    |> ignore
-
-    { Running = true; Muted = true }, Command.none
+    (),
+    Command.none
 
 let update (msg: Msg) (model: Model) =
     match msg with
     | LayoutMsg _ -> model, Command.none
-    | ToggleRun ->
-        Emulator.setRunning (not model.Running)
-        { model with Running = not model.Running }, Command.none
-    | ToggleMute ->
-        Audio.SetEnabled model.Muted // muted -> enabled
-        { model with Muted = not model.Muted }, Command.none
 
-// ---- number row (imperative, outside React) --------------------------------
-//
-// Press-and-hold Spectrum keys 1..5 for the game's menus. Each key tracks
-// its own pointer id, so several can be held at once.
+let private today = System.DateTime.Today
 
-type Ev = Browser.Types.PointerEvent
+let private missionCard (m: Missions.Mission) (isToday: bool) : ReactElement =
+    let board = Leaderboard.entries m today
+    let top = board |> List.truncate 3
+    let yourBest = Leaderboard.yourBest m.Id today
 
-let mutable private numHeld: Set<int> = Set.empty
-let mutable private numPids: Map<int, int> = Map.empty // pointerId -> number key
-
-let private capture (e: Ev) : unit =
-    try
-        e?currentTarget?setPointerCapture (e?pointerId)
-    with _ ->
-        ()
-
-let private pointerId (e: Ev) : int = unbox (e?pointerId)
-
-/// Mirror the held number keys onto their "on" classes.
-let private markNums () =
-    for n in 1 .. 5 do
-        let el: obj = emitJsExpr n "document.getElementById('num-' + $0)"
-
-        if not (isNull el) then
-            el?classList?toggle ("on", numHeld.Contains n) |> ignore
-
-let private numDown (n: int) (e: Ev) : unit =
-    e.preventDefault ()
-    capture e
-    numPids <- Map.add (pointerId e) n numPids
-
-    if not (numHeld.Contains n) then
-        numHeld <- Set.add n numHeld
-        Emulator.SetPadNums numHeld
-        markNums ()
-
-let private numUp (e: Ev) : unit =
-    match Map.tryFind (pointerId e) numPids with
-    | Some n ->
-        numPids <- Map.remove (pointerId e) numPids
-
-        if numHeld.Contains n then
-            numHeld <- Set.remove n numHeld
-            Emulator.SetPadNums numHeld
-            markNums ()
-    | None -> ()
-
-// ---- view ------------------------------------------------------------------
-
-/// The Spectrum number keys 1..5 (menus, level select) - a slimmer row above
-/// the gamepad area.
-let private numRow =
     Html.div [
-        prop.className "numrow"
+        prop.className (if isToday then "card today" else "card")
         prop.children [
-            for n in 1 .. 5 ->
-                Html.div [
-                    prop.id ("num-" + string n)
-                    prop.className "numkey"
-                    prop.text (string n)
-                    prop.onPointerDown (numDown n)
-                    prop.onPointerUp numUp
-                    prop.onPointerCancel numUp
+            Html.div [
+                prop.className "cardHead"
+                prop.children [
+                    Html.span [
+                        prop.className "cardGame"
+                        prop.text m.Title
+                    ]
+                    if isToday then
+                        Html.span [ prop.className "badge"; prop.text "TODAY" ]
                 ]
+            ]
+            Html.div [ prop.className "cardGoal"; prop.text m.Goal ]
+            Html.div [
+                prop.className "cardPb"
+                prop.text (
+                    match yourBest with
+                    | Some ms -> sprintf "Your best today: %s" (Leaderboard.format ms)
+                    | None -> "Not played today"
+                )
+            ]
+            Html.div [
+                prop.className "lb mini"
+                prop.children (
+                    top
+                    |> List.mapi (fun i e ->
+                        Html.div [
+                            prop.className (if e.You then "lbrow you" else "lbrow")
+                            prop.key (sprintf "%s-%s" m.Id e.Name)
+                            prop.children [
+                                Html.span [ prop.className "lbrank"; prop.text (string (i + 1)) ]
+                                Html.span [ prop.className "lbname"; prop.text e.Name ]
+                                Html.span [
+                                    prop.className "lbtime"
+                                    prop.text (Leaderboard.format e.Millis)
+                                ]
+                            ]
+                        ])
+                )
+            ]
+            Html.a [
+                prop.className "playbtn"
+                prop.href (sprintf "#play?game=%s" m.GameId)
+                prop.text "Play mission"
+            ]
         ]
     ]
 
-let view (model: Model) (dispatch: Msg -> unit) : ReactElement =
+let view (_model: Model) (_dispatch: Msg -> unit) : ReactElement =
+    let todayIdx = Missions.todaysIndex today
+
     Html.div [
-        prop.className "app"
+        prop.className "daily"
         prop.children [
-            Html.div [
-                prop.className "topbar"
+            Html.header [
+                prop.className "dailyHead"
                 prop.children [
-                    Html.span [
-                        prop.className "title"
-                        prop.text "GAME CHANGER"
+                    Html.h1 [ prop.text "DAILY PUZXLE" ]
+                    Html.p [
+                        prop.className "tagline"
+                        prop.text "One ZX Spectrum mission a day. A couple of minutes..."
                     ]
-                    Html.button [
-                        prop.className "tbtn"
-                        prop.text (if model.Running then "Pause" else "Run")
-                        prop.onClick (fun _ -> dispatch ToggleRun)
-                    ]
-                    Html.button [
-                        prop.className "tbtn"
-                        prop.text (if model.Muted then "Sound off" else "Sound on")
-                        prop.onClick (fun _ -> dispatch ToggleMute)
+                    Html.p [
+                        prop.className "date"
+                        prop.text (today.ToString "dddd, d MMMM yyyy")
                     ]
                 ]
             ]
-            Html.canvas [
-                prop.id "gameScreen"
-                prop.className "screen"
-                prop.width 320
-                prop.height 256
-            ]
             Html.div [
-                prop.className "statusbar"
-                prop.id "statusLine"
-                prop.text "booting emulator..."
+                prop.className "cards"
+                prop.children (
+                    Missions.all
+                    |> List.mapi (fun i m -> missionCard m (i = todayIdx))
+                )
             ]
-            numRow
-            // Movement controls (dpad + fire) mount here via @rbuljan/gamepad.
-            Html.div [ prop.id "controls"; prop.className "controls" ]
+            Html.footer [
+                prop.className "dailyFoot"
+                prop.text "Runs on an in-browser ZX Spectrum emulator. Scores live in your browser only."
+            ]
         ]
     ]
 

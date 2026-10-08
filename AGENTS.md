@@ -85,10 +85,29 @@ with `?game=<id>` and register themselves in `src/Host.fs` (`Games`). Its
 emulator core is the same Fable-clean subset JetpacFR.Web compiles, plus the
 game image module `games/<id>/WebImage.fs`.
 
+- "Daily puzZXle" lives here too: `src/Pages/Page.fs` is the daily landing
+  page, `src/Pages/Play/Page.fs` the play page with the mission HUD and
+  completion overlay. Mission definitions + emulator detection spots are
+  data in `src/Missions.fs`; the browser-local (faked multi-user)
+  leaderboard is `src/Leaderboard.fs`. The host's `Mission` module polls
+  the active spot once per frame inside the frame loop - only the single
+  completion event crosses the MVU boundary
+  (`window.__puzzxleFireMission()` fires it for demos/tests). For games
+  without a verified memory spot use the `ScreenFlash` rule; swap spots in
+  Missions.fs as RE work pins them down.
+- Headless mission-spot probing: `tools/MissionProbe` boots a tape or a
+  shipped WebImage warm start, replays `replay.json`/key scripts, pokes
+  RAM, diffs frames and renders ASCII screens (`run`/`writeimage`/`warm`
+  modes) - the console path to finding detection cells.
+
 - Run dev server: `cd src/GameChangerElmish && elmish-land server`
   (http://localhost:5173). Production build: `elmish-land build` -> `dist/`.
 - After editing its F#, recompile the JS the dev server serves:
-  `dotnet fable GameChangerElmish.fsproj --outDir .` then reload the page
+  `dotnet fable GameChangerElmish.fsproj --outDir . --sourceMaps` then reload the page
+  (without `--sourceMaps` Chrome falls back to the transpiled `.fs.js` view;
+  maps land as ignored `*.fs.js.map` siblings with `./X.fs` sources; Vite
+  inlines them base64 in dev responses, serves sibling files for /@fs
+  outside-root paths — open the `.fs` in Sources for F# breakpoints).
   (fable is pinned in the project-local `dotnet-tools.json`; `dotnet fable`
   resolves it there). Fable writes outside-project outputs **next to their
   sources** (`src/Jetpac2.Core/*.fs.js`, `games/uridium/WebImage.fs.js`) -
@@ -115,10 +134,13 @@ game image module `games/<id>/WebImage.fs`.
   npm package (`src/GamepadCtl.fs` mounts it into `#controls`); its state is
   polled once per frame through `Emulator.SetInputPoller`, not event-driven.
   The number row (1-5) uses plain pointer events with `setPointerCapture`.
-  All input paths write straight to the imperative host - never dispatch MVU
-  messages per touch event (renders starve the frame loop; measured as game
-  slowdown on phones). Key mapping lives in `Host.fs` `KeyMap` (default:
-  cursor-joystick CapsShift+5/6/7/8, fire 0).
+  Physical keyboards are a full ZX keyboard (Host.fs `keyRawCell`): letters/
+  ENTER/6-0 map to their matrix cells, arrows AND WASD drive the
+  cursor-joystick scheme, Space fires. All input paths write straight to the
+  imperative host - never dispatch MVU messages per touch event (renders
+  starve the frame loop; measured as game slowdown on phones). Key mapping
+  lives in `Host.fs` `KeyMap` (default: cursor-joystick CapsShift+5/6/7/8,
+  fire 0).
 
 ## Notes
 

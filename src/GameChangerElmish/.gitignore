@@ -21,3 +21,6 @@ JetpacFR.Core/
 games/
 src/*.js
 src/Pages/*.js
+src/**/*.js
+**/*.fs.js.map
+**/*.js.map
