@@ -374,3 +374,5 @@ FodyWeavers.xsd
 src/Jetpac2.Core/*.fs.js
 src/JetpacFR.Core/*.fs.js
 games/uridium/WebImage.fs.js
+*.fs.js.map
+*.bin
